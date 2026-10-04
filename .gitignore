@@ -1,0 +1,14 @@
+# build output
+engine/openface-mixer-engine
+*.o
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

@@ -1,0 +1,12 @@
+[Unit]
+Description=Openface Mixer engine (software matrix mixer for RME Digiface USB)
+After=pipewire.service wireplumber.service
+Requires=pipewire.service
+
+[Service]
+ExecStart=%h/.local/bin/openface-mixer-engine
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=pipewire.service

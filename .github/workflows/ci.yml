@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev pkg-config build-essential
+      - name: Build engine
+        run: make engine CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter -Werror"
+      - name: Unit tests
+        run: make test
+      - name: Byte-compile
+        run: make lint

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Openface Mixer
+GenericName=Audio Interface Mixer
+Comment=TotalMix-style mixer and settings for the RME Digiface USB
+Exec=openface-mixer
+Icon=audio-card
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=RME;Digiface;TotalMix;ADAT;mixer;
