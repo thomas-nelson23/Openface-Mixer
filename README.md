@@ -2,6 +2,8 @@
 
 A TotalMix-style mixer and control panel for the **RME Digiface USB** on Linux.
 
+![Openface Mixer: mixer view with input, playback and output rows, presets and hardware panel](docs/screenshots/mixer.png)
+
 RME's TotalMix FX only runs on Windows and macOS. Linux has supported the Digiface USB for
 streaming since kernel 6.12, but nothing controlled its routing. Openface Mixer adds the
 familiar TotalMix workflow on top of PipeWire.
@@ -20,6 +22,10 @@ familiar TotalMix workflow on top of PipeWire.
 > driver disables it. Openface Mixer mixes in software inside PipeWire instead. Input monitoring
 > therefore has your PipeWire round-trip latency (a few ms at small buffer sizes), not
 > TotalMix's near-zero hardware latency. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Matrix view
+
+![Matrix view: click a cell to route any input or playback channel to any output](docs/screenshots/matrix.png)
 
 ## Requirements
 
