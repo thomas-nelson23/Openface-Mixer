@@ -295,11 +295,53 @@ int dfu_nodes_used(const struct dfu *d)
 	return DFU_MAX_NODES - d->n_free;
 }
 
-int dfu_read_levels(struct dfu *d, uint8_t *buf, int len, unsigned int timeout_ms)
+#define METER_FRAME_BYTES 1024
+#define METER_FRAME_WORDS 128
+#define METER_DATA_WORDS  100
+#define METER_PEAK_WORD   64
+
+static uint64_t le64(const uint8_t *p)
 {
-	int done = 0;
+	uint64_t v = 0;
+	for (int i = 7; i >= 0; i--)
+		v = v << 8 | p[i];
+	return v;
+}
+
+int dfu_decode_meter_frame(const uint8_t *frame, struct dfu_meters *m)
+{
+	uint64_t marker = le64(frame + 8 * (METER_FRAME_WORDS - 1));
+	uint32_t type = marker & 0xf;
+	if (marker >> 32 != (marker & 0xffffffff) || (marker >> 4 & 0x0fffffff) != 0x0fffffff ||
+	    le64(frame + 8 * METER_DATA_WORDS) != marker || type > DFU_METER_OUTPUT)
+		return -1;
+	for (int c = 0; c < DFU_METER_CHANNELS; c++) {
+		uint64_t pw = le64(frame + 8 * (METER_PEAK_WORD + c / 2));
+		uint32_t pk = c % 2 ? pw >> 32 : pw & 0xffffffff;
+		m->peak[type][c] = (float)pk / (float)(1u << 27);
+		m->rms[type][c] = (float)sqrt((double)le64(frame + 8 * c) / 0x1p55);
+	}
+	return (int)type;
+}
+
+int dfu_read_meters(struct dfu *d, struct dfu_meters *m)
+{
+	uint8_t buf[METER_FRAME_BYTES];
+	unsigned int seen = 0;
+
 	if (d->h == NULL)
 		return LIBUSB_ERROR_NO_DEVICE;
-	int r = libusb_bulk_transfer(d->h, EP_LEVELS, buf, len, &done, timeout_ms);
-	return r < 0 && !(r == LIBUSB_ERROR_TIMEOUT && done > 0) ? r : done;
+	/* one frame per transfer; the types cycle, so a few reads cover all three */
+	for (int i = 0; i < 6 && seen != 7; i++) {
+		int done = 0;
+		int r = libusb_bulk_transfer(d->h, EP_LEVELS, buf, sizeof(buf), &done, 100);
+		if (r < 0)
+			return r;
+		if (done != sizeof(buf))
+			continue;
+		int t = dfu_decode_meter_frame(buf, m);
+		if (t >= 0)
+			seen |= 1u << t;
+	}
+	return seen == 7 ? 0 : LIBUSB_ERROR_IO;
 }

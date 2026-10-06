@@ -40,6 +40,8 @@ Openface Mixer is two programs that share one block of memory:
   just passes `play_N` to `out_N`, i.e. to the Digiface's playback channel N, which the DSP
   mixes like any input. Every 500 ms it reads the device status and restores the whole mix if
   the driver has reset the mixer (replug, resume). USB never runs in the audio thread.
+- A meter thread reads the Digiface's level endpoint every 10 ms and raises the shared-memory
+  peaks from it (`hw_levels = 1`); the audio callback then stops measuring peaks itself.
 - **Software mode**: `out[o] = out_gain[o] · Σ gain[o][k] · src[k]` as before.
 
 ## Shared memory (`engine/shm_layout.h`)

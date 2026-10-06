@@ -54,7 +54,23 @@ unity is `0x9000`, which is also what the kernel writes to the output faders. Th
 not report the matrix back, so the engine keeps its own copy and rewrites everything when status
 word 3 shows the mixer was switched off (the driver does that on every probe).
 
-Bulk IN endpoint 0x84 carries level meters; interrupt IN 0x83 is rate feedback.
+Interrupt IN endpoint 0x83 is rate feedback.
+
+### Level meters (bulk IN endpoint 0x84)
+
+The device always has a frame ready; each 1024-byte transfer returns one frame of 128
+little-endian 64-bit words, and successive frames cycle through three types:
+
+| Words | Content |
+| --- | --- |
+| 0–33 | RMS per channel: mean square × 2^55, smoothed by the device (falls about 25 dB/s) |
+| 64–80 | peak per channel, two per word (even channel in the low 32 bits), full scale = 2^27 |
+| 100–127 | end marker `0xFFFFFFFn_FFFFFFFn`, n = type: 0 inputs, 1 playback, 2 outputs |
+
+Measured on a Digiface (firmware in vendor mode, 48 kHz): a −20 dBFS sine on playback 1 reads
+peak `0xCCC000` (−20.00 dB) and RMS 10·log10(E) = 142.56, i.e. E = 0.005 × 2^55. Output meters
+are post-mixer and post-fader, and matched the expected mix gains within 0.05 dB. The engine
+polls all three frame types every 10 ms on a separate thread.
 
 Access needs the udev rule in `packaging/70-rme-digiface.rules`.
 

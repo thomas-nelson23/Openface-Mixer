@@ -12,7 +12,12 @@
  *                          (node << 16) | gain                       set node gain
  *                          0x40000000 | (node << 16) | (dst << 9) | src  route node src -> dst
  *                          0xC000FFFF | (node << 16)                 reset node
- *   bulk in EP 0x84      level meters
+ *   bulk in EP 0x84      level meters: 1024-byte frames of 128 LE 64-bit words, one frame
+ *                        per transfer, cycling through inputs (0), playback (1), outputs (2).
+ *                        Words 0-33: RMS, mean square * 2^55 (smoothed by the device).
+ *                        Words 64-80: peaks, two channels per word (even channel in the low
+ *                        32 bits), full scale 2^27. Words 100-127: the frame type repeated as
+ *                        0xFFFFFFFn_FFFFFFFn. The device always has a frame ready.
  *
  * The mixer has 2048 nodes; each routes one source (input n, or 0x100 + playback n) to one
  * output channel with a gain. Gains are 0x8000 = unity, max 0x10000 (+6 dB); values >= 0x4000
@@ -69,10 +74,23 @@ int dfu_nodes_used(const struct dfu *d);
 /* Exposed for tests. */
 uint16_t dfu_encode_gain(float lin);
 
+#define DFU_METER_CHANNELS 34
+
+struct dfu_meters {
+	float peak[3][DFU_METER_CHANNELS]; /* [DFU_METER_*][channel], linear, 1.0 = full scale */
+	float rms[3][DFU_METER_CHANNELS];
+};
+
+enum { DFU_METER_INPUT = 0, DFU_METER_PLAYBACK = 1, DFU_METER_OUTPUT = 2 };
+
 /*
- * Level meters. dfu_read_levels() blocks for up to timeout_ms on the levels endpoint and
- * copies the raw packet into buf; returns the byte count or a negative libusb error.
+ * Reads one frame of each type from the level endpoint (blocks briefly).
+ * Returns 0, or a negative libusb error. Safe to call from a thread other than the one doing
+ * dfu_sync(), as long as dfu_close() is not called concurrently.
  */
-int dfu_read_levels(struct dfu *d, uint8_t *buf, int len, unsigned int timeout_ms);
+int dfu_read_meters(struct dfu *d, struct dfu_meters *m);
+
+/* Decodes one 1024-byte frame into m. Returns the frame type, or -1 if it is not a frame. */
+int dfu_decode_meter_frame(const uint8_t *frame, struct dfu_meters *m);
 
 #endif

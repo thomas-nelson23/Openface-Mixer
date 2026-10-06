@@ -175,6 +175,8 @@ class SettingsPanel(QWidget):
         text = HW_STATE_TEXT.get(status["hw"], status["hw"])
         if status["hw"] in ("active", "no-nodes"):
             text += f"<br>{status['hw_nodes']} of 2048 routes in use"
+            if status["hw_levels"]:
+                text += " · meters from the interface"
         self.hw_label.setText(text)
 
     def update_profile(self, name, profile, has_in):

@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,7 @@
 #define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
 #define HW_STATUS_TICKS  25  /* read device status every 500 ms */
 #define HW_RETRY_TICKS   50  /* look for the device every second */
+#define HW_METER_US   10000  /* hardware meter poll interval */
 
 struct port {
 	int index;
@@ -105,6 +107,13 @@ struct data {
 	bool hw_need_full;    /* rewrite every node, e.g. after the device was reset */
 	bool hw_check_once;   /* in software mode, switch off a mixer left on by a previous run */
 
+	/* hardware meters are read on their own thread; usb_lock keeps dfu_open/close and the
+	 * meter reads apart */
+	pthread_mutex_t usb_lock;
+	pthread_t meter_thread;
+	bool meter_thread_started;
+	volatile bool meter_quit;
+
 	int no_autolink;
 	struct obj objs[MAX_OBJ];
 	int n_objs;
@@ -132,11 +141,14 @@ static void on_process(void *userdata, struct spa_io_position *position)
 	const float *src[N_SRC];
 	uint32_t in_c = 0, play_c = 0, out_c = 0;
 	bool hw = s->mixer_mode == OFM_MODE_HARDWARE;
+	bool meters = !(hw && s->hw_levels); /* else the meter thread fills them from the device */
 
 	for (int i = 0; i < N_IN; i++) {
 		src[i] = pw_filter_get_dsp_buffer(d->in[i], n);
 		if (src[i]) {
 			in_c++;
+			if (!meters)
+				continue;
 			float p = peak_of(src[i], n);
 			if (p > s->peak_src[i])
 				s->peak_src[i] = p;
@@ -147,6 +159,8 @@ static void on_process(void *userdata, struct spa_io_position *position)
 		src[N_IN + i] = b;
 		if (b) {
 			play_c++;
+			if (!meters)
+				continue;
 			float p = peak_of(b, n);
 			if (p > s->peak_src[N_IN + i])
 				s->peak_src[N_IN + i] = p;
@@ -185,6 +199,8 @@ static void on_process(void *userdata, struct spa_io_position *position)
 				d->cur[o][k] = t;
 			}
 		}
+		if (!meters)
+			continue;
 		float p = peak_of(dst, n);
 		if (p > s->peak_out[o])
 			s->peak_out[o] = p;
@@ -507,10 +523,52 @@ static void hw_switch_off(struct data *d)
 	fprintf(stderr, "openface-mixer: hardware mixer off\n");
 }
 
+static void hw_tick_locked(struct data *d);
+
 /* Runs on the main loop, never in the audio thread: USB transfers block. */
 static void hw_tick(void *userdata, uint64_t expirations)
 {
 	struct data *d = userdata;
+	pthread_mutex_lock(&d->usb_lock);
+	hw_tick_locked(d);
+	pthread_mutex_unlock(&d->usb_lock);
+}
+
+static void raise_peak(float *dst, float v)
+{
+	if (v > *dst)
+		*dst = v;
+}
+
+static void *meter_thread(void *userdata)
+{
+	struct data *d = userdata;
+	struct ofm_shm *s = d->shm;
+	struct dfu_meters m;
+
+	while (!d->meter_quit) {
+		int r = -1;
+		pthread_mutex_lock(&d->usb_lock);
+		if (d->hw_enabled && dfu_is_open(d->dfu))
+			r = dfu_read_meters(d->dfu, &m);
+		pthread_mutex_unlock(&d->usb_lock);
+
+		if (r == 0) {
+			for (int i = 0; i < N_IN; i++)
+				raise_peak(&s->peak_src[i], m.peak[DFU_METER_INPUT][i]);
+			for (int i = 0; i < N_PLAY; i++)
+				raise_peak(&s->peak_src[N_IN + i], m.peak[DFU_METER_PLAYBACK][i]);
+			for (int o = 0; o < N_OUT; o++)
+				raise_peak(&s->peak_out[o], m.peak[DFU_METER_OUTPUT][o]);
+		}
+		s->hw_levels = r == 0;
+		usleep(HW_METER_US);
+	}
+	return NULL;
+}
+
+static void hw_tick_locked(struct data *d)
+{
 	struct ofm_shm *s = d->shm;
 	bool want = s->mixer_mode == OFM_MODE_HARDWARE;
 	uint32_t status[4];
@@ -671,8 +729,10 @@ int main(int argc, char *argv[])
 	if (!no_hardware && (d.dfu = dfu_new()) != NULL) {
 		struct timespec interval = { 0, HW_TICK_MS * 1000000L };
 		d.hw_check_once = true;
+		pthread_mutex_init(&d.usb_lock, NULL);
 		d.hw_timer = pw_loop_add_timer(pw_main_loop_get_loop(d.loop), hw_tick, &d);
 		pw_loop_update_timer(pw_main_loop_get_loop(d.loop), d.hw_timer, &interval, &interval, false);
+		d.meter_thread_started = pthread_create(&d.meter_thread, NULL, meter_thread, &d) == 0;
 	} else if (!no_hardware) {
 		fprintf(stderr, "openface-mixer: libusb unavailable, hardware mixer disabled\n");
 	}
@@ -684,9 +744,14 @@ int main(int argc, char *argv[])
 	pw_main_loop_run(d.loop);
 
 	/* the hardware mixer keeps running with the last mix, like TotalMix's stored state */
+	if (d.meter_thread_started) {
+		d.meter_quit = true;
+		pthread_join(d.meter_thread, NULL);
+	}
 	if (d.hw_timer)
 		pw_loop_destroy_source(pw_main_loop_get_loop(d.loop), d.hw_timer);
 	dfu_free(d.dfu);
+	d.shm->hw_levels = 0;
 
 	struct link_req *r, *t;
 	spa_list_for_each_safe(r, t, &d.links, link)

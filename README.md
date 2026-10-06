@@ -109,8 +109,9 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Only the Digiface USB is supported, and only tested at 48 kHz (single speed). The UI is designed
   to adapt to 2x/4x channel counts, but that path is untested.
 - The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
-- Meters are still measured in PipeWire, so input meters need the Pro Audio profile, and in
-  hardware mode the output meters show what the computer plays, not the hardware mix.
+- In hardware mode the meters come from the interface itself (inputs, playback and the
+  hardware outputs). In software mode they are measured in PipeWire, so input meters need the
+  Pro Audio profile.
 - No solo, EQ, dynamics or reverb. This is the "lite" subset of TotalMix.
 
 ## License

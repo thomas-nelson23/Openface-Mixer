@@ -11,7 +11,7 @@ all: engine ## Build everything (just the engine; the GUI is plain Python)
 engine: $(ENGINE) ## Build the C mixer engine
 
 $(ENGINE): engine/openface-mixer-engine.c engine/digiface_usb.c engine/digiface_usb.h engine/shm_layout.h
-	$(CC) $(CFLAGS) -o $@ engine/openface-mixer-engine.c engine/digiface_usb.c $(PW_FLAGS) -lm
+	$(CC) $(CFLAGS) -pthread -o $@ engine/openface-mixer-engine.c engine/digiface_usb.c $(PW_FLAGS) -lm
 
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
