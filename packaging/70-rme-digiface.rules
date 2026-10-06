@@ -1,0 +1,3 @@
+# Let the logged-in user (and the audio group) open the RME Digiface USB, so Openface Mixer
+# can drive its hardware mixer over USB. Install to /etc/udev/rules.d/.
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a39", ATTR{idProduct}=="3f8c|3fa0", MODE="0660", GROUP="audio", TAG+="uaccess"

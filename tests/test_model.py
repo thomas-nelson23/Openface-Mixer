@@ -42,15 +42,22 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual((gain(g, 0, 0), gain(g, 1, 0)), (1.0, 0.0))
         self.assertEqual((gain(g, 0, 1), gain(g, 1, 1)), (0.0, 1.0))
 
-    def test_mute_and_master(self):
+    def test_source_mute(self):
         st = m.default_state()
-        st["out"][0]["gain"] = -6.0
-        g = m.compute_matrix(st)
-        self.assertAlmostEqual(gain(g, 0, m.N_IN), 10 ** (-6 / 20), places=6)
         st["mute"]["play"][0] = True
         self.assertEqual(gain(m.compute_matrix(st), 0, m.N_IN), 0.0)
+
+    def test_master_is_separate(self):
+        st = m.default_state()
+        st["out"][0]["gain"] = -6.0
         st["out"][1]["mute"] = True
-        self.assertEqual(gain(m.compute_matrix(st), 2, m.N_IN + 2), 0.0)
+        self.assertEqual(gain(m.compute_matrix(st), 0, m.N_IN), 1.0)   # sends unaffected
+        self.assertEqual(gain(m.compute_matrix(st), 2, m.N_IN + 2), 1.0)
+        og = m.compute_out_gains(st)
+        self.assertAlmostEqual(og[0], 10 ** (-6 / 20), places=6)
+        self.assertAlmostEqual(og[1], 10 ** (-6 / 20), places=6)
+        self.assertEqual((og[2], og[3]), (0.0, 0.0))
+        self.assertEqual(og[4], 1.0)
 
 
 class GroupTest(unittest.TestCase):
@@ -109,6 +116,13 @@ class MixTest(unittest.TestCase):
         self.assertEqual(st["groups"], {})
         self.assertEqual(st["version"], m.STATE_VERSION)
         self.assertEqual(m.upgrade_state(None)["version"], m.STATE_VERSION)
+
+    def test_upgrade_adds_mixer_mode(self):
+        old = m.default_state()
+        del old["mixer_mode"]
+        self.assertEqual(m.upgrade_state(old)["mixer_mode"], "hardware")
+        old["mixer_mode"] = "bogus"
+        self.assertEqual(m.upgrade_state(old)["mixer_mode"], "hardware")
 
 
 class LabelTest(unittest.TestCase):

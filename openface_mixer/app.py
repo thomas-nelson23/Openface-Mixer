@@ -14,8 +14,8 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_OUT, N_PAIRS, N_PLAY, N_SLOTS, NEG_INF, apply_mix, chan_label, compute_matrix,
-    default_state, extract_mix, get_strip_db, group_follow, pair_label, set_strip_db, speed_mode,
+    ENGINE_MODE, N_GROUPS, N_IN, N_OUT, N_PAIRS, N_PLAY, N_SLOTS, NEG_INF, apply_mix, chan_label,
+    compute_matrix, compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, pair_label, set_strip_db, speed_mode,
     strip_channels, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
@@ -65,6 +65,8 @@ class MainWindow(QMainWindow):
         body.addWidget(self.tabs, 1)
         self.settings = SettingsPanel(self.hw)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
+        self.settings.set_mode(self.st["mixer_mode"])
+        self.settings.mode_changed.connect(self.set_mixer_mode)
         self.settings_btn.toggled.connect(self.settings.setVisible)
         body.addWidget(self.settings)
         root.addLayout(body, 1)
@@ -427,8 +429,13 @@ class MainWindow(QMainWindow):
             self.push_matrix()
 
     # ------------------------------------------------------------------ engine sync and saving
+    def set_mixer_mode(self, mode):
+        self.st["mixer_mode"] = mode
+        self.push_matrix()
+
     def push_matrix(self):
-        self.engine.write_matrix(compute_matrix(self.st))
+        self.engine.write_matrix(compute_matrix(self.st), compute_out_gains(self.st),
+                                 ENGINE_MODE[self.st["mixer_mode"]])
         self.matrix.update()
         self.schedule_save()
 
@@ -439,6 +446,9 @@ class MainWindow(QMainWindow):
         save_state(self.st)
 
     def ensure_engine(self):
+        if self.engine.outdated():
+            self.restart_engine()   # an older engine from before an upgrade is still running
+            time.sleep(0.5)
         if self.engine.status() is None:
             self.save()   # so a freshly started engine loads our matrix
             ok, msg = self.engine.start()
@@ -460,6 +470,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
+        self.settings.update_hw_mixer(s)
         if s is None:
             txt = "<span style='color:#ff453a'>●</span>&nbsp; ENGINE STOPPED"
             self.settings.eng_label.setText("Engine is not running.")
@@ -468,7 +479,13 @@ class MainWindow(QMainWindow):
             col = "#34c759" if s["processing"] and s["out"] else "#ffd60a"
             lat = s["quantum"] / s["rate"] * 1000 if s["rate"] else 0
             sep = "<span style='color:#4a4a4e'>&nbsp;│&nbsp;</span>"
-            txt = (f"<span style='color:{col}'>●</span>&nbsp; {s['rate'] / 1000:g} kHz{sep}"
+            if s["mode"] == ENGINE_MODE["hardware"]:
+                hw_col = "#34c759" if s["hw"] == "active" else "#ffd60a" if s["hw"] == "no-nodes" \
+                    else "#ff453a"
+                mix = f"<span style='color:{hw_col}'>HW DSP</span>"
+            else:
+                mix = "SW MIX"
+            txt = (f"<span style='color:{col}'>●</span>&nbsp; {mix}{sep}{s['rate'] / 1000:g} kHz{sep}"
                    f"{s['quantum']} smp · {lat:.1f} ms{sep}IN {s['in']}{sep}PLAY {s['play']}{sep}"
                    f"OUT {s['out']}")
             self.settings.eng_label.setText(

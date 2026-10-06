@@ -32,7 +32,15 @@ Openface Mixer is two programs that share one block of memory:
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink, whose
   output is linked to `play_1/2`.
 - It runs as a systemd **user service**, so the mix survives closing the GUI. At startup it loads
-  `~/.config/openface-mixer/matrix.bin`, which the GUI keeps up to date.
+  `~/.config/openface-mixer/matrix.bin` (mixer mode, gain matrix, output gains), which the GUI
+  keeps up to date.
+- **Hardware mode** (the default): a 20 ms main-loop timer (`hw_tick`) opens the Digiface's
+  mixer interface with libusb and sends only the changed crosspoints and output faders
+  (`engine/digiface_usb.c`, protocol in [HARDWARE.md](HARDWARE.md)). The audio callback then
+  just passes `play_N` to `out_N`, i.e. to the Digiface's playback channel N, which the DSP
+  mixes like any input. Every 500 ms it reads the device status and restores the whole mix if
+  the driver has reset the mixer (replug, resume). USB never runs in the audio thread.
+- **Software mode**: `out[o] = out_gain[o] · Σ gain[o][k] · src[k]` as before.
 
 ## Shared memory (`engine/shm_layout.h`)
 
@@ -41,7 +49,10 @@ One `struct ofm_shm` per user at `/dev/shm/openface-mixer-<uid>`:
 | Field | Writer | Meaning |
 | --- | --- | --- |
 | header (64 bytes) | engine | magic `OFMX`, version, link counts, rate, quantum, heartbeat, pid |
-| `gain[34][66]` | GUI | final linear gains, with pan, mute and master already folded in |
+| `mixer_mode` | GUI | 0 = software, 1 = hardware |
+| `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use |
+| `gain[34][66]` | GUI | linear send gains, with pan and source mute folded in |
+| `out_gain[34]` | GUI | output master per channel, 0 when muted |
 | `peak_src[66]`, `peak_out[34]` | engine raises, GUI zeroes | max-hold peak meters |
 
 No locks are used: 32-bit float stores are atomic on the supported platforms, and a torn meter
@@ -67,8 +78,8 @@ app.MainWindow
   faders show the sends into the selected pair (`state["selected"]`).
 - Pan uses a balance law: at centre both sides get full level. A mono source is panned across the
   pair; in a linked stereo pair, left goes to left and right goes to right.
-- `compute_matrix()` folds sends, pan, source mutes, output master levels and output mutes into
-  the 34×66 gain matrix.
+- `compute_matrix()` folds sends, pan and source mutes into the 34×66 gain matrix;
+  `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
   fader floor (−80 dB), so a group can go all the way down and come back up together.
