@@ -54,7 +54,7 @@ reset costs at most one missed peak. The engine never blocks on the GUI.
 app.MainWindow
  ├─ model.py        state dict  ──compute_matrix()──▶ engine.write_matrix()
  ├─ presets.py      PresetBank (8 slots) + mix file import/export
- ├─ widgets.py      Strip = name tag + Knob + M/S/ST buttons + readouts + Fader + Meter
+ ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
  ├─ matrix_view.py  grid editor for the same sends
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
  └─ config.py       state.json / matrix.bin / presets.json
