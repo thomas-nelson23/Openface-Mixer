@@ -182,6 +182,16 @@ bool dfu_status_mixer_enabled(const uint32_t status[4])
 	return !(status[3] & STATUS_MIXER_OFF);
 }
 
+uint32_t dfu_status_rate(const uint32_t status[4])
+{
+	/* status halfword 1H bits 4-7, the kernel's "Current Rate" control */
+	static const uint32_t rates[] = {
+		32000, 44100, 48000, 0, 64000, 88200, 96000, 0, 128000, 176400, 192000, 0,
+	};
+	uint32_t idx = (status[1] >> 20) & 0xf;
+	return idx < sizeof(rates) / sizeof(rates[0]) ? rates[idx] : 0;
+}
+
 int dfu_set_mixer_enabled(struct dfu *d, bool enabled)
 {
 	int r = ctl_write(d, REQ_CTL_REG2, enabled ? 0 : REG2_MIXER_OFF, REG2_MIXER_OFF);

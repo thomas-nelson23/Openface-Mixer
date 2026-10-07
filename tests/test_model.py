@@ -60,6 +60,51 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual(og[4], 1.0)
 
 
+class SoloTest(unittest.TestCase):
+    """TotalMix solo: solo-in-place, post fader, current submix only."""
+
+    def setUp(self):
+        self.st = m.default_state()
+        self.st["selected"] = 16                       # phones
+        self.st["sends"]["in"][0][16] = [-6.0, 0.0]    # input 1 -> phones
+        self.st["sends"]["in"][2][16] = [0.0, 0.0]     # input 3 -> phones
+        self.st["sends"]["in"][2][0] = [0.0, 0.0]      # input 3 -> AD1 1/2 too
+
+    def test_no_solo_changes_nothing(self):
+        self.assertEqual(m.compute_matrix(self.st), m.compute_matrix(self.st, solo=False))
+
+    def test_unsoloed_sources_drop_out_of_current_submix(self):
+        self.st["solo"]["in"][0] = True
+        g = m.compute_matrix(self.st)
+        self.assertAlmostEqual(gain(g, 32, 0), 10 ** (-6 / 20), places=6)   # soloed, post fader
+        self.assertEqual(gain(g, 32, 2), 0.0)                               # silenced
+        self.assertEqual(gain(g, 32, m.N_IN + 32), 0.0)                     # playback too
+
+    def test_other_submixes_untouched(self):
+        self.st["solo"]["in"][0] = True
+        g = m.compute_matrix(self.st)
+        self.assertEqual(gain(g, 0, 2), 1.0)
+        self.assertEqual(gain(g, 0, m.N_IN), 1.0)
+
+    def test_several_solos_add_up(self):
+        self.st["solo"]["in"][0] = self.st["solo"]["in"][2] = True
+        g = m.compute_matrix(self.st)
+        self.assertGreater(gain(g, 32, 0), 0.0)
+        self.assertEqual(gain(g, 32, 2), 1.0)
+
+    def test_mute_beats_solo(self):
+        self.st["solo"]["in"][0] = True
+        self.st["mute"]["in"][0] = True
+        self.assertEqual(gain(m.compute_matrix(self.st), 32, 0), 0.0)
+
+    def test_follows_selected_submix(self):
+        self.st["solo"]["in"][0] = True
+        self.st["selected"] = 0
+        g = m.compute_matrix(self.st)
+        self.assertEqual(gain(g, 0, 2), 0.0)       # now AD1 1/2 is the soloed submix
+        self.assertEqual(gain(g, 32, 2), 1.0)      # phones back to normal
+
+
 class GroupTest(unittest.TestCase):
     def setUp(self):
         self.st = m.default_state()
@@ -117,12 +162,23 @@ class MixTest(unittest.TestCase):
         self.assertEqual(st["version"], m.STATE_VERSION)
         self.assertEqual(m.upgrade_state(None)["version"], m.STATE_VERSION)
 
-    def test_upgrade_adds_mixer_mode(self):
+    def test_upgrade_drops_mixer_mode(self):
         old = m.default_state()
-        del old["mixer_mode"]
-        self.assertEqual(m.upgrade_state(old)["mixer_mode"], "hardware")
-        old["mixer_mode"] = "bogus"
-        self.assertEqual(m.upgrade_state(old)["mixer_mode"], "hardware")
+        old["mixer_mode"] = "software"
+        self.assertNotIn("mixer_mode", m.upgrade_state(old))
+
+    def test_solo_resets_on_load(self):
+        old = m.default_state()
+        old["solo"]["in"][3] = True
+        self.assertFalse(m.any_solo(m.upgrade_state(old)))
+        old = m.default_state()
+        del old["solo"]
+        self.assertFalse(m.any_solo(m.upgrade_state(old)))
+
+    def test_solo_is_not_part_of_a_mix(self):
+        st = m.default_state()
+        st["solo"]["in"][0] = True
+        self.assertNotIn("solo", m.extract_mix(st))
 
 
 class LabelTest(unittest.TestCase):

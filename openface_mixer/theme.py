@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor, QFont, QPalette
 BG = QColor("#1e1e20")
 PANEL = QColor("#2c2c2f")
 ACCENT = QColor("#f0a43a")   # selection / submix target
+SOLO = QColor("#ffd60a")
 TEXT = QColor("#ececef")
 DIM = QColor("#8e8e93")
 KIND_COLOR = {"in": QColor("#3fae5a"), "play": QColor("#3a86d6"), "out": QColor("#c8873a")}
@@ -55,6 +56,9 @@ def apply_theme(app):
         QPushButton#slot[active="true"] {{ color:#111; background:{ACCENT.name()}; }}
         QPushButton#slot:hover {{ border-color:{ACCENT.name()}; }}
         QPushButton#store:checked {{ background:#c0262b; color:white; }}
+        QPushButton#solomaster {{ color:#5a5a60; font-weight:700; padding:4px 10px; }}
+        QPushButton#solomaster[armed="true"] {{ color:{SOLO.name()}; }}
+        QPushButton#solomaster[active="true"] {{ background:{SOLO.name()}; color:#111; }}
         QLabel#lcd {{ background:qlineargradient(y1:0,y2:1,stop:0 #101418,stop:1 #171c21);
                      color:#9fd0ff; border:1px solid #070708; border-radius:7px; padding:5px 14px;
                      font-family:{MONO}; font-size:10px; }}

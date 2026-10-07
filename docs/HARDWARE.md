@@ -35,7 +35,7 @@ Vendor control requests (`bmRequestType 0x40`, device recipient; 17 is device-to
 | bRequest | Use |
 | --- | --- |
 | 16 | control register 1 (wValue = bits, wIndex = mask): clock source bits 0–2, rate bits 3–6, speed mode bits 12–14, **bit 10 = mixer off** |
-| 17 | read 16 bytes of status; word 3 mirrors control register 1 (low half) and 2 (high half) |
+| 17 | read 16 bytes of status; word 1 bits 20–23 = current rate index (32k, 44.1k, 48k, –, 64k, …), word 3 mirrors control register 1 (low half) and 2 (high half) |
 | 18 | control register 2: output formats, bit 6 = TMS off, **bit 8 = mixer off** |
 | 21 | output fader: wValue = gain, wIndex = `0x100 + output channel` |
 | 22 | input loopback: wValue = 1/0, wIndex = `0x100 + channel` |
@@ -82,6 +82,7 @@ it feeds by default.
 
 ## PipeWire profiles
 
-- **Multichannel Output**: output only, so there are no input meters and no monitoring.
-- **Pro Audio**: exposes `pro-input-0` (32 ch) and `pro-output-0` (34 ch). Openface Mixer needs
-  this profile for input monitoring and offers a button to switch to it.
+- **Multichannel Output**: output only. Monitoring and meters still work, because both happen
+  in the interface, but apps can't record the inputs.
+- **Pro Audio**: exposes `pro-input-0` (32 ch) and `pro-output-0` (34 ch), so apps can record
+  every input and play to every playback channel. The settings panel offers a button for it.

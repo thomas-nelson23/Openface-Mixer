@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from .model import FADER_MAX_DB, FADER_MIN_DB, NEG_INF, db2pos, fmt_db, lin2db, pos2db
-from .theme import ACCENT, DIM, GROUP_COLOR, KIND_COLOR, MONO
+from .theme import ACCENT, DIM, GROUP_COLOR, KIND_COLOR, MONO, SOLO
 
 
 class Meter(QWidget):
@@ -269,11 +269,11 @@ class Knob(QWidget):
                    QPointF(c.x() + 9 * math.cos(a), c.y() - 9 * math.sin(a)))
 
 
-def small_button(text, color="#2f8fff", fg="white", tip=""):
+def small_button(text, color="#2f8fff", fg="white", tip="", width=26):
     b = QToolButton()
     b.setText(text)
     b.setCheckable(True)
-    b.setFixedSize(QSize(26, 18))
+    b.setFixedSize(QSize(width, 18))
     b.setToolTip(tip)
     b.setCursor(Qt.PointingHandCursor)
     b.setStyleSheet(
@@ -298,14 +298,16 @@ def lcd_label(text=""):
 
 
 class Strip(QFrame):
-    """One mixer channel strip (mono or stereo), laid out like a Logic channel strip.
+    """One mixer channel strip (mono or stereo), laid out like a TotalMix channel strip, with
+    its name tag on top.
 
     key identifies the strip in the model ("in:0", "play:2", "out:16"); see model.strip_key().
     """
     clicked = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
 
-    def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False, parent=None):
+    def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
+                 show_solo=False, parent=None):
         super().__init__(parent)
         self.key = key
         self.kind = kind
@@ -317,6 +319,12 @@ class Strip(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(5, 6, 5, 5)
         lay.setSpacing(4)
+
+        self.title = QPushButton(title)
+        self.title.setFixedHeight(22)
+        self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
+        self.title.clicked.connect(self.clicked.emit)
+        lay.addWidget(self.title)
 
         self.pan = Knob()
         knob_row = QHBoxLayout()
@@ -332,9 +340,15 @@ class Strip(QFrame):
         btns = QHBoxLayout()
         btns.setSpacing(3)
         btns.addStretch()
-        self.mute = small_button("M", "#2f8fff", tip="Mute")
+        w = 20 if show_solo else 26   # three buttons have to fit the strip width
+        self.mute = small_button("M", "#2f8fff", tip="Mute", width=w)
         btns.addWidget(self.mute)
-        self.stereo = small_button("ST", "#d8d8dc", "#1c1c1e", tip="Stereo-link this channel pair")
+        self.solo = small_button("S", SOLO.name(), "#1c1c1e", width=w,
+                                 tip="Solo in the current submix (solo-in-place)")
+        self.solo.setVisible(show_solo)
+        btns.addWidget(self.solo)
+        self.stereo = small_button("ST", "#d8d8dc", "#1c1c1e", tip="Stereo-link this channel pair",
+                                   width=w)
         self.stereo.setVisible(show_stereo)
         btns.addWidget(self.stereo)
         btns.addStretch()
@@ -359,12 +373,6 @@ class Strip(QFrame):
         mid.addWidget(self.meter)
         mid.addStretch()
         lay.addLayout(mid, 1)
-
-        self.title = QPushButton(title)
-        self.title.setFixedHeight(22)
-        self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
-        self.title.clicked.connect(self.clicked.emit)
-        lay.addWidget(self.title)
 
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.meter.peak_changed.connect(self._show_peak)

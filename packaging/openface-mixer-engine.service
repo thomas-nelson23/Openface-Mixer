@@ -1,5 +1,5 @@
 [Unit]
-Description=Openface Mixer engine (software matrix mixer for RME Digiface USB)
+Description=Openface Mixer engine (drives the RME Digiface USB hardware mixer)
 After=pipewire.service wireplumber.service
 Requires=pipewire.service
 

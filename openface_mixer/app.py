@@ -14,9 +14,9 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    ENGINE_MODE, N_GROUPS, N_IN, N_OUT, N_PAIRS, N_PLAY, N_SLOTS, NEG_INF, apply_mix, chan_label,
-    compute_matrix, compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, pair_label, set_strip_db, speed_mode,
-    strip_channels, strip_key,
+    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, chan_label, compute_matrix,
+    compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, pair_label,
+    set_strip_db, speed_mode, strip_channels, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(10)
         self.row_in = Row("Hardware Inputs", "")
-        self.row_play = Row("Software Playback", "")
+        self.row_play = Row("Playback", "")
         self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix")
         for r in (self.row_in, self.row_play, self.row_out):
             rows.addWidget(r, 1)
@@ -65,8 +65,6 @@ class MainWindow(QMainWindow):
         body.addWidget(self.tabs, 1)
         self.settings = SettingsPanel(self.hw)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
-        self.settings.set_mode(self.st["mixer_mode"])
-        self.settings.mode_changed.connect(self.set_mixer_mode)
         self.settings_btn.toggled.connect(self.settings.setVisible)
         body.addWidget(self.settings)
         root.addLayout(body, 1)
@@ -116,6 +114,15 @@ class MainWindow(QMainWindow):
         self.submix.setMinimumWidth(110)
         self.submix.activated.connect(self.select_out)
         top.addWidget(self.submix)
+        top.addSpacing(6)
+        self.solo_master = QPushButton("SOLO")
+        self.solo_master.setObjectName("solomaster")
+        self.solo_master.setCursor(Qt.PointingHandCursor)
+        self.solo_master.setToolTip("Lit while any channel is soloed. Click to switch all solos "
+                                    "off; click again to bring them back.")
+        self.solo_master.clicked.connect(self.toggle_solo_master)
+        self._solo_memory = None          # solos switched off by the master, for recall
+        top.addWidget(self.solo_master)
         top.addStretch(1)
 
         self.status = QLabel("")
@@ -190,8 +197,11 @@ class MainWindow(QMainWindow):
             title = (pair_label(c, n_adat, named_like_outputs) if stereo
                      else chan_label(c, n_adat, named_like_outputs))
             key = strip_key(kind, c)
-            s = Strip(key, title, chans, kind, show_pan=True, show_stereo=(c % 2 == 0 and c + 1 < n))
+            s = Strip(key, title, chans, kind, show_pan=True, show_stereo=(c % 2 == 0 and c + 1 < n),
+                      show_solo=True)
             s.stereo.setChecked(stereo)
+            s.solo.setChecked(self.st["solo"][kind][c])
+            s.solo.toggled.connect(lambda on, k=kind, ch=chans: self.set_solo(k, ch, on))
             s.stereo.toggled.connect(lambda on, k=kind, ch=c: self.toggle_stereo(k, ch, on))
             s.mute.setChecked(self.st["mute"][kind][c])
             s.mute.toggled.connect(lambda on, k=kind, ch=chans: self.set_mute(k, ch, on))
@@ -204,6 +214,7 @@ class MainWindow(QMainWindow):
             c += len(chans)
         (self.row_in if kind == "in" else self.row_play).set_strips(strips)
         self.refresh_sends(kind)
+        self.refresh_solo()
         self.matrix.rebuild()
 
     def rebuild_outputs(self):
@@ -257,8 +268,11 @@ class MainWindow(QMainWindow):
             self.row_play.set_subtitle(hint)
         self.refresh_sends("in")
         self.refresh_sends("play")
-        self.matrix.update()
-        self.schedule_save()
+        if any_solo(self.st):
+            self.push_matrix()   # solo follows the current submix
+        else:
+            self.matrix.update()
+            self.schedule_save()
 
     def on_fader(self, strip, db):
         """A fader moved: update the model, then let its fader group follow (Shift = solo move)."""
@@ -289,6 +303,40 @@ class MainWindow(QMainWindow):
             self.st["mute"][kind][c] = on
         self.push_matrix()
 
+    def set_solo(self, kind, chans, on):
+        for c in chans:
+            self.st["solo"][kind][c] = on
+        if on:
+            self._solo_memory = None
+        self.refresh_solo()
+        self.push_matrix()
+
+    def toggle_solo_master(self):
+        """TotalMix's Solo master: switch every solo off, and the same set back on next time."""
+        if any_solo(self.st):
+            self._solo_memory = {k: list(v) for k, v in self.st["solo"].items()}
+            for k in self.st["solo"]:
+                self.st["solo"][k] = [False] * len(self.st["solo"][k])
+        elif self._solo_memory:
+            self.st["solo"] = self._solo_memory
+            self._solo_memory = None
+        else:
+            self.refresh_solo()
+            return
+        for s in self.row_in.strips + self.row_play.strips:
+            s.solo.blockSignals(True)
+            s.solo.setChecked(self.st["solo"][s.kind][s.channels[0]])
+            s.solo.blockSignals(False)
+        self.refresh_solo()
+        self.push_matrix()
+
+    def refresh_solo(self):
+        on = any_solo(self.st)
+        self.solo_master.setProperty("active", on)
+        self.solo_master.setProperty("armed", not on and bool(self._solo_memory))
+        self.solo_master.style().unpolish(self.solo_master)
+        self.solo_master.style().polish(self.solo_master)
+
     def set_out_mute(self, pair, on):
         self.st["out"][pair]["mute"] = on
         self.push_matrix()
@@ -305,6 +353,7 @@ class MainWindow(QMainWindow):
             else:
                 left[1], right[1] = -1.0, 1.0
         st["mute"][kind][c + 1] = st["mute"][kind][c]
+        st["solo"][kind][c + 1] = st["solo"][kind][c]
         st["groups"].pop(strip_key(kind, c + 1), None)   # the right channel no longer has a strip
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
@@ -429,13 +478,8 @@ class MainWindow(QMainWindow):
             self.push_matrix()
 
     # ------------------------------------------------------------------ engine sync and saving
-    def set_mixer_mode(self, mode):
-        self.st["mixer_mode"] = mode
-        self.push_matrix()
-
     def push_matrix(self):
-        self.engine.write_matrix(compute_matrix(self.st), compute_out_gains(self.st),
-                                 ENGINE_MODE[self.st["mixer_mode"]])
+        self.engine.write_matrix(compute_matrix(self.st), compute_out_gains(self.st))
         self.matrix.update()
         self.schedule_save()
 
@@ -471,28 +515,21 @@ class MainWindow(QMainWindow):
     def poll_engine(self):
         s = self.engine.status()
         self.settings.update_hw_mixer(s)
+        sep = "<span style='color:#4a4a4e'>&nbsp;│&nbsp;</span>"
         if s is None:
             txt = "<span style='color:#ff453a'>●</span>&nbsp; ENGINE STOPPED"
             self.settings.eng_label.setText("Engine is not running.")
             self.settings.eng_btn.setText("Start engine")
         else:
-            col = "#34c759" if s["processing"] and s["out"] else "#ffd60a"
-            lat = s["quantum"] / s["rate"] * 1000 if s["rate"] else 0
-            sep = "<span style='color:#4a4a4e'>&nbsp;│&nbsp;</span>"
-            if s["mode"] == ENGINE_MODE["hardware"]:
-                hw_col = "#34c759" if s["hw"] == "active" else "#ffd60a" if s["hw"] == "no-nodes" \
-                    else "#ff453a"
-                mix = f"<span style='color:{hw_col}'>HW DSP</span>"
-            else:
-                mix = "SW MIX"
-            txt = (f"<span style='color:{col}'>●</span>&nbsp; {mix}{sep}{s['rate'] / 1000:g} kHz{sep}"
-                   f"{s['quantum']} smp · {lat:.1f} ms{sep}IN {s['in']}{sep}PLAY {s['play']}{sep}"
-                   f"OUT {s['out']}")
+            hw_col = ("#34c759" if s["hw"] == "active" else
+                      "#ffd60a" if s["hw"] in ("no-nodes", "starting") else "#ff453a")
+            rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
+            routes = f"{s['hw_nodes']}/2048 routes" if s["hw"] in ("active", "no-nodes") else "offline"
+            txt = f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP{sep}{rate}{sep}{routes}"
             self.settings.eng_label.setText(
-                "Running" + ("" if s["processing"] else " (idle — graph not running)") +
-                f"<br>Hardware inputs linked: {s['in']}/{N_IN}<br>"
-                f"Playback ports linked: {s['play']}/{N_PLAY}<br>"
-                f"Hardware outputs linked: {s['out']}/{N_OUT}")
+                ("Running" if s["processing"] else "Running (not responding)") +
+                "<br>Playback sink: " +
+                ("linked to playback 1/2" if s["sink_linked"] else "not linked to the Digiface"))
             self.settings.eng_btn.setText("Restart engine")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
                 self.rate, self.mode = s["rate"], speed_mode(s["rate"])
