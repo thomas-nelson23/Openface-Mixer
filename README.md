@@ -88,6 +88,30 @@ This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enabl
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
 | Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
 
+### Control room and ARC USB
+
+The **Control Room** box in the settings panel has TotalMix's monitoring switches. They act on
+the output pair set as **Main Out** and are not part of presets:
+
+| Switch | What it does |
+| --- | --- |
+| Dim | Lowers Main Out by 20 dB |
+| Mono | Sums Main Out to mono |
+| Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level |
+| Talkback | Sends the talkback mic input to Phones, with the rest of the phones mix 20 dB down |
+| Ext In | Replaces the Main Out mix with the External In input pair |
+
+Plug in an **RME ARC USB** (into the computer, not the Digiface) and it works with the default
+TotalMix layout printed on it:
+
+- Rows 1 and 2: recall presets 1 to 8.
+- Row 3: Mono, Phones (both phones keys), External Input.
+- Bottom: Talkback (tap to latch, hold to talk), Speaker B, Dim.
+- Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit.
+
+Key LEDs follow the state. The ARC needs no driver or setup; the window must be open for it to
+work.
+
 ## Files
 
 | Path | Contents |
@@ -119,6 +143,8 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
 - Solo has no PFL / live mode or exclusive mode yet.
 - No EQ, dynamics or reverb: the Digiface's DSP has no effects.
+- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
+  supported (it sent nothing in testing).
 
 ## Acknowledgements
 

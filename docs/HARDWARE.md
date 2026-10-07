@@ -74,6 +74,24 @@ polls all three frame types every 10 ms on a separate thread.
 
 Access needs the udev rule in `packaging/70-rme-digiface.rules`.
 
+## RME ARC USB
+
+The ARC USB (`2a39:0101`, "RME ARC") is a class-compliant USB MIDI device. `snd-usb-audio`
+makes it an ALSA card named `ARC` with one rawmidi port, `/dev/snd/midiC<card>D0`, which members
+of the `audio` group can open. Openface Mixer reads it directly (`openface_mixer/arc.py`).
+
+RME doesn't publish its MIDI messages. Captured from a unit in its default (note) mode:
+
+| Control | Message |
+| --- | --- |
+| Keys, row by row then Talkback, Speaker B, Dim | Note On ch 1, notes `0x36`–`0x44`, velocity `0x7F` press / `0x00` release |
+| Encoder | CC 16 ch 1, relative signed-bit: `0x01`–`0x3F` up, `0x41`–`0x7F` down |
+| Idle | nothing (no active sensing) |
+
+Newer firmware can also switch to a SysEx mode (`F0 00 20 0D …`), which TotalMix FX turns on
+itself; Openface Mixer never does, so the ARC stays in note mode. LEDs are lit by sending the
+same note back with velocity `0x7F` (off: `0x00`).
+
 ## Channel naming used in the UI
 
 At single speed, inputs 1–32 are `AD1 1`…`AD4 8` (optical port, channel). Outputs 1–32 are named

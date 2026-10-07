@@ -13,6 +13,9 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
   model.py              mixer state, fader taper, gain-matrix maths, fader groups (no Qt!)
   presets.py            8-slot preset bank + mix file export/import (no Qt)
+  control_room.py       Dim, Mono, Speaker B, Talkback, Ext In on top of the matrix (no Qt)
+  arc.py                ARC USB remote: find it, parse its MIDI, key layout and LEDs (no Qt)
+  control_panel.py      Control Room settings box and the ARC USB port watcher
   config.py             file locations, state load/save
   engine.py             shared-memory client + starting/stopping the engine
   hardware.py           Digiface ALSA controls via amixer, PipeWire card profile via pactl

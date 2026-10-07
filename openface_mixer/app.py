@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
+from . import arc, control_room
 from .config import load_state, save_state
+from .control_panel import ArcLink, ControlRoomPanel
 from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
@@ -66,6 +68,14 @@ class MainWindow(QMainWindow):
         self.settings = SettingsPanel(self.hw)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
         self.settings_btn.toggled.connect(self.settings.setVisible)
+        self.control = ControlRoomPanel(self.st)
+        self.control.changed.connect(self.push_matrix)
+        self.settings.layout().insertWidget(4, self.control)
+        self.arc = ArcLink(self)
+        self.arc.key.connect(self.arc_key)
+        self.arc.encoder.connect(self.arc_encoder)
+        self.arc.status_changed.connect(self.arc_status)
+        self._talkback_pressed = None     # (time, was it switched on by this press)
         body.addWidget(self.settings)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
@@ -184,6 +194,14 @@ class MainWindow(QMainWindow):
         self.rebuild_sources("in")
         self.rebuild_sources("play")
         self.rebuild_outputs()
+        self.refresh_control_channels()
+
+    def refresh_control_channels(self):
+        n_in, n_out, n_adat = self.counts()
+        pairs = [(pair_label(2 * p, n_adat, True), p) for p in range(n_out // 2)]
+        inputs = [(chan_label(c, n_adat, False), c) for c in range(n_in)]
+        input_pairs = [(pair_label(c, n_adat, False), c) for c in range(0, n_in, 2)]
+        self.control.set_channels(pairs, inputs, input_pairs)
 
     def rebuild_sources(self, kind):
         n_in, n_out, n_adat = self.counts()
@@ -391,6 +409,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ presets
     def refresh_slots(self):
+        self.update_arc_leds()
         active = self.st.get("active_slot")
         for i, b in enumerate(self.slot_btns):
             name = self.presets.name(i)
@@ -479,9 +498,61 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
-        self.engine.write_matrix(compute_matrix(self.st), compute_out_gains(self.st))
+        self.engine.write_matrix(*control_room.apply(self.st, compute_matrix(self.st),
+                                                     compute_out_gains(self.st)))
         self.matrix.update()
+        self.control.refresh()
+        self.update_arc_leds()
         self.schedule_save()
+
+    # ------------------------------------------------------------------ ARC USB
+    def arc_key(self, key, pressed):
+        """An ARC key went down or up. Keys act on press; Talkback also on release."""
+        action = arc.DEFAULT_KEYS[key]
+        cr = control_room.control_room(self.st)
+        if action == "talkback":
+            if pressed:
+                self._talkback_pressed = (time.monotonic(), not cr["talkback"])
+                cr["talkback"] = not cr["talkback"]
+            elif self._talkback_pressed:
+                t, switched_on = self._talkback_pressed
+                self._talkback_pressed = None
+                if switched_on and time.monotonic() - t > arc.TALKBACK_HOLD_S:
+                    cr["talkback"] = False     # held: momentary, like a talkback button
+                else:
+                    return
+            self.push_matrix()
+            return
+        if not pressed:
+            return
+        if action.startswith("snapshot:"):
+            slot = int(action.split(":")[1]) - 1
+            if self.presets.slots[slot]:
+                self.recall_slot(slot)
+            return
+        if action == "phones":
+            cr["encoder"] = "main" if cr["encoder"] == "phones" else "phones"
+            self.update_arc_leds()
+            self.schedule_save()
+            return
+        control_room.toggle(self.st, action)
+        self.push_matrix()
+
+    def arc_encoder(self, clicks):
+        pair, db = control_room.step_volume(self.st, clicks)
+        strip = self.strips.get(strip_key("out", pair))
+        if strip is not None:
+            strip.set_fader(db)
+        self.push_matrix()
+
+    def arc_status(self, status):
+        self.control.set_arc_status(status)
+        if status == "connected":
+            self.update_arc_leds()
+
+    def update_arc_leds(self):
+        slot = self.st.get("active_slot")
+        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
 
     def schedule_save(self):
         self._save_timer.start()
