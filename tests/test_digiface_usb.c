@@ -57,9 +57,28 @@ static void check_meter_frame(void)
 	}
 }
 
+static void check_rate(uint32_t idx, uint32_t want)
+{
+	uint32_t status[4] = { 0, idx << 20 | 0x000f0000u, 0, 0 };
+	uint32_t got;
+
+	/* other bits of halfword 1H must not leak in */
+	status[1] = (status[1] & ~0x000f0000u) | 0x000a0000u;
+	got = dfu_status_rate(status);
+	if (got != want) {
+		fprintf(stderr, "dfu_status_rate(index %u) = %u, want %u\n", idx, got, want);
+		failed = 1;
+	}
+}
+
 int main(void)
 {
 	check_meter_frame();
+	check_rate(2, 48000);
+	check_rate(6, 96000);
+	check_rate(10, 192000);
+	check_rate(3, 0);
+	check_rate(15, 0);
 	check(0.0f, 0x0000);
 	check(-1.0f, 0x0000);
 	check(NAN, 0x0000);

@@ -1,48 +1,37 @@
 # Architecture
 
-Openface Mixer is two programs that share one block of memory:
+Openface Mixer is two programs that share one block of memory. All mixing happens in the
+Digiface's own DSP; the computer only tells it what to do.
 
 ```
-                ┌──────────────────────────── PipeWire graph ─────────────────────────────┐
-                │                                                                          │
- Digiface ──capture_AUX0..31──▶ in_1..in_32  ┐                                             │
- (Pro Audio input node)         │            │   openface_mixer        out_1..out_34 ──playback_AUX0..33──▶ Digiface
-                │               │            ├─▶  (pw_filter, C)  ──▶                      │   (output node)
- apps ──▶ "Openface Mixer       │            │   gain matrix 34×66                         │
-          Playback" sink ──────▶ play_1/2   ┘                                             │
- DAW / qpwgraph ──────────────▶ play_3..34                                                 │
-                └──────────────────────────────────────────────────────────────────────────┘
-                                         ▲  gains           │ peak meters, status
-                                         │                  ▼
-                              /dev/shm/openface-mixer-<uid>   (struct ofm_shm, engine/shm_layout.h)
-                                         ▲                  │
-                                         │                  ▼
-                                   Python GUI (openface_mixer/)  ──amixer──▶ ALSA controls (clock, formats)
+ Python GUI (openface_mixer/) ──amixer──▶ ALSA controls (clock, formats)
+        │ gains, output faders      ▲ peak meters, status
+        ▼                           │
+ /dev/shm/openface-mixer-<uid>   (struct ofm_shm, engine/shm_layout.h)
+        │                           ▲
+        ▼                           │
+ openface-mixer-engine (C) ──libusb, interface 1──▶ Digiface DSP mixer (2048 nodes, output faders)
+        │                  ◀──level meters (EP 0x84)──
+        └─ "Openface Mixer Playback" sink ──PipeWire link──▶ Digiface playback 1/2
 ```
 
 ## Engine (`engine/openface-mixer-engine.c`)
 
-- A PipeWire **filter node** named `openface_mixer` with 66 mono input ports (32 hardware inputs
-  plus 34 playback channels) and 34 mono output ports.
-- In each audio cycle (`on_process`), it computes `out[o] = Σ gain[o][k] · src[k]`, skipping zero
-  gains. When a gain changes, it ramps linearly over one cycle to avoid zipper noise. Peak meters
-  are max-held into shared memory.
-- It watches the PipeWire registry and **links itself** to the Digiface nodes (matched by name
-  prefix `alsa_output/alsa_input.usb-RME_Digiface_USB`), re-linking on hotplug or profile changes.
-- It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink, whose
-  output is linked to `play_1/2`.
-- It runs as a systemd **user service**, so the mix survives closing the GUI. At startup it loads
-  `~/.config/openface-mixer/matrix.bin` (mixer mode, gain matrix, output gains), which the GUI
-  keeps up to date.
-- **Hardware mode** (the default): a 20 ms main-loop timer (`hw_tick`) opens the Digiface's
-  mixer interface with libusb and sends only the changed crosspoints and output faders
-  (`engine/digiface_usb.c`, protocol in [HARDWARE.md](HARDWARE.md)). The audio callback then
-  just passes `play_N` to `out_N`, i.e. to the Digiface's playback channel N, which the DSP
-  mixes like any input. Every 500 ms it reads the device status and restores the whole mix if
-  the driver has reset the mixer (replug, resume). USB never runs in the audio thread.
-- A meter thread reads the Digiface's level endpoint every 10 ms and raises the shared-memory
-  peaks from it (`hw_levels = 1`); the audio callback then stops measuring peaks itself.
-- **Software mode**: `out[o] = out_gain[o] · Σ gain[o][k] · src[k]` as before.
+- A 20 ms main-loop timer (`hw_tick`) opens the Digiface's mixer interface with libusb and sends
+  only the changed crosspoints and output faders (`engine/digiface_usb.c`, protocol in
+  [HARDWARE.md](HARDWARE.md)). It retries every second while the device is missing or not
+  accessible, and reports why in `hw_state`.
+- Every 500 ms it reads the device status: the sample rate goes to the GUI (which adapts the
+  channel count to 1x/2x/4x speed), and if the driver has reset the mixer (replug, resume) the
+  whole mix is restored.
+- A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
+- It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
+  it to the Digiface's `playback_AUX0/1` (matched by node name prefix
+  `alsa_output.usb-RME_Digiface_USB`), re-linking on hotplug or profile changes. No audio passes
+  through the engine itself.
+- It runs as a systemd **user service**. At startup it loads `~/.config/openface-mixer/matrix.bin`
+  (gain matrix and output gains), which the GUI keeps up to date. When it exits, the interface
+  keeps mixing with the last mix.
 
 ## Shared memory (`engine/shm_layout.h`)
 
@@ -50,10 +39,9 @@ One `struct ofm_shm` per user at `/dev/shm/openface-mixer-<uid>`:
 
 | Field | Writer | Meaning |
 | --- | --- | --- |
-| header (64 bytes) | engine | magic `OFMX`, version, link counts, rate, quantum, heartbeat, pid |
-| `mixer_mode` | GUI | 0 = software, 1 = hardware |
-| `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use |
-| `gain[34][66]` | GUI | linear send gains, with pan and source mute folded in |
+| header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, playback sink linked |
+| `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use, meters live |
+| `gain[34][66]` | GUI | linear send gains, with pan, source mute and solo folded in |
 | `out_gain[34]` | GUI | output master per channel, 0 when muted |
 | `peak_src[66]`, `peak_out[34]` | engine raises, GUI zeroes | max-hold peak meters |
 
@@ -66,7 +54,7 @@ reset costs at most one missed peak. The engine never blocks on the GUI.
 app.MainWindow
  ├─ model.py        state dict  ──compute_matrix()──▶ engine.write_matrix()
  ├─ presets.py      PresetBank (8 slots) + mix file import/export
- ├─ widgets.py      Strip = Knob + M/ST buttons + readouts + Fader + Meter + name tag
+ ├─ widgets.py      Strip = name tag + Knob + M/S/ST buttons + readouts + Fader + Meter
  ├─ matrix_view.py  grid editor for the same sends
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
  └─ config.py       state.json / matrix.bin / presets.json
@@ -80,7 +68,12 @@ app.MainWindow
   faders show the sends into the selected pair (`state["selected"]`).
 - Pan uses a balance law: at centre both sides get full level. A mono source is panned across the
   pair; in a linked stereo pair, left goes to left and right goes to right.
-- `compute_matrix()` folds sends, pan and source mutes into the 34×66 gain matrix;
+- **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
+  unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
+  are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
+  `upgrade_state` clears it) and is not part of a mix. The top bar's SOLO button clears all
+  solos and brings the same set back on the next click.
+- `compute_matrix()` folds sends, pan, source mutes and solo into the 34×66 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
@@ -96,3 +89,4 @@ app.MainWindow
    save of `state.json` and `matrix.bin`.
 4. Timers poll the meters (30 Hz), engine status (2 Hz), ALSA controls (1 Hz) and the
    PipeWire profile (every 3 s).
+5. Selecting another output pair re-pushes the matrix while anything is soloed.

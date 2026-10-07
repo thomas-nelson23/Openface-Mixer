@@ -17,11 +17,10 @@ SHM_NAME = "openface-mixer"  # /dev/shm/openface-mixer-<uid>
 
 # Must match struct ofm_shm in engine/shm_layout.h
 SHM_MAGIC = 0x584D464F
-SHM_VERSION = 2
+SHM_VERSION = 3
 HDR_SIZE = 64
-HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT = 0, 1, 2, 3, 4
-HDR_IN_CONN, HDR_PLAY_CONN, HDR_OUT_CONN, HDR_RATE, HDR_QUANTUM, HDR_PID = 5, 6, 7, 8, 9, 10
-HDR_MIXER_MODE, HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS = 11, 12, 13, 14
+HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
+HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED = 7, 8, 9, 10
 OFF_GAIN = HDR_SIZE
 OFF_OUT_GAIN = OFF_GAIN + N_OUT * N_SRC * 4
 OFF_PEAK_SRC = OFF_OUT_GAIN + N_OUT * 4
@@ -29,7 +28,7 @@ OFF_PEAK_OUT = OFF_PEAK_SRC + N_SRC * 4
 SHM_SIZE = OFF_PEAK_OUT + N_OUT * 4
 
 # hw_state values (DFU_STATE_* in engine/digiface_usb.h)
-HW_STATES = ("off", "no-device", "no-access", "busy", "active", "no-nodes", "error")
+HW_STATES = ("starting", "no-device", "no-access", "busy", "active", "no-nodes", "error")
 HW_MAX_NODES = 2048
 
 
@@ -79,7 +78,8 @@ class Engine:
             return False
 
     def status(self):
-        """dict with link counts / rate / quantum, or None if the engine isn't running."""
+        """dict with the hardware mixer state and sample rate, or None if the engine isn't
+        running."""
         if not self.pid_alive():
             return None
         h = self.header()
@@ -88,20 +88,18 @@ class Engine:
             self._last_hb, self._last_hb_time = h[HDR_HEARTBEAT], now
         return {
             "processing": now - self._last_hb_time < 1.0,
-            "in": h[HDR_IN_CONN], "play": h[HDR_PLAY_CONN], "out": h[HDR_OUT_CONN],
-            "rate": h[HDR_RATE], "quantum": h[HDR_QUANTUM],
-            "mode": h[HDR_MIXER_MODE],
+            "rate": h[HDR_RATE],
+            "sink_linked": bool(h[HDR_SINK_LINKED]),
             "hw": HW_STATES[h[HDR_HW_STATE]] if h[HDR_HW_STATE] < len(HW_STATES) else "error",
             "hw_nodes": h[HDR_HW_NODES], "hw_levels": bool(h[HDR_HW_LEVELS]),
         }
 
-    def write_matrix(self, gains, out_gains, mode):
+    def write_matrix(self, gains, out_gains):
         """gains: array('f') of N_OUT * N_SRC, out-major (model.compute_matrix);
-        out_gains: array('f') of N_OUT (model.compute_out_gains); mode: OFM_MODE_* value."""
+        out_gains: array('f') of N_OUT (model.compute_out_gains)."""
         if self.attach():
             self.m[OFF_GAIN:OFF_GAIN + len(gains) * 4] = gains.tobytes()
             self.m[OFF_OUT_GAIN:OFF_OUT_GAIN + len(out_gains) * 4] = out_gains.tobytes()
-            struct.pack_into("<I", self.m, HDR_MIXER_MODE * 4, mode)
 
     def read_peaks(self):
         """Returns (source peaks, output peaks) as linear floats and resets the max-hold."""

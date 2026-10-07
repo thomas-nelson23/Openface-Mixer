@@ -5,8 +5,9 @@ Thanks for helping! This document covers how the project is laid out and how to 
 ## Repository layout
 
 ```
-engine/                 C real-time mixer (PipeWire filter). Builds to engine/openface-mixer-engine
+engine/                 C engine that drives the Digiface's DSP mixer. Builds to engine/openface-mixer-engine
   openface-mixer-engine.c
+  digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
@@ -41,8 +42,8 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 
 - **Keep `model.py` and `presets.py` free of Qt imports.** They hold the logic and are what the
   tests cover. Widgets should stay presentational: they emit signals, and `app.py` updates the model.
-- **Real-time safety in the engine:** nothing in `on_process()` may allocate, lock, log or make
-  syscalls. Communication with the GUI goes only through the shared-memory struct.
+- **The engine never blocks on the GUI.** Communication goes only through the shared-memory
+  struct, and USB transfers stay on the engine's main loop and meter thread.
 - **Shared-memory changes** must update `engine/shm_layout.h` *and* the constants in
   `openface_mixer/engine.py`, and bump `OFM_SHM_VERSION`.
 - **State format changes:** bump `STATE_VERSION` in `model.py` and teach `upgrade_state()` how to
@@ -53,14 +54,8 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 
 ## Testing without hardware
 
-The unit tests need no audio device. To exercise the engine without a Digiface (or without
-making sound), use `--no-autolink` and wire it to a null sink:
-
-```sh
-pactl load-module module-null-sink sink_name=ofm_test
-./engine/openface-mixer-engine --no-autolink &
-pw-link openface_mixer:out_1 ofm_test:playback_FL
-```
+The unit tests need no audio device. Without a Digiface the engine still runs and reports
+`no-device`; `--no-autolink` keeps it from linking the playback sink.
 
 The GUI also runs offscreen (`QT_QPA_PLATFORM=offscreen`), which is useful for screenshots
 and smoke tests.

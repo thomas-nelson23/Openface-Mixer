@@ -35,7 +35,7 @@
 
 /* values for ofm_shm.hw_state */
 enum {
-	DFU_STATE_OFF = 0,        /* software mode: hardware mixer not in use */
+	DFU_STATE_STARTING = 0,   /* engine has not looked for the device yet */
 	DFU_STATE_NO_DEVICE,      /* no Digiface on the bus */
 	DFU_STATE_NO_ACCESS,      /* device present but /dev/bus/usb not writable (udev rule) */
 	DFU_STATE_BUSY,           /* interface 1 claimed by someone else */
@@ -57,6 +57,8 @@ bool dfu_is_open(const struct dfu *d);
 /* Reads the 4 status words. Returns 0 or a negative libusb error. */
 int dfu_read_status(struct dfu *d, uint32_t status[4]);
 bool dfu_status_mixer_enabled(const uint32_t status[4]);
+/* Current sample rate in Hz from the status words, or 0 if not locked/unknown. */
+uint32_t dfu_status_rate(const uint32_t status[4]);
 
 int dfu_set_mixer_enabled(struct dfu *d, bool enabled);
 

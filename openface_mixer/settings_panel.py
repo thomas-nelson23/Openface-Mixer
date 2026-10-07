@@ -1,5 +1,4 @@
-"""Right-hand panel: Digiface clock/port settings, card profile and engine status."""
-from PySide6.QtCore import Signal
+"""Right-hand panel: Digiface clock/port settings, card profile and hardware mixer status."""
 from PySide6.QtWidgets import (
     QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
@@ -12,7 +11,7 @@ UDEV_RULE_HINT = (
     "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
 
 HW_STATE_TEXT = {
-    "off": "Hardware mixer not in use.",
+    "starting": "Connecting to the Digiface…",
     "no-device": "<span style='color:#ff6b5b'>Digiface not found on USB.</span>",
     "no-access": "<span style='color:#ff6b5b'>No permission to open the Digiface.</span><br>"
                  + UDEV_RULE_HINT,
@@ -34,8 +33,6 @@ class Led(QLabel):
 
 
 class SettingsPanel(QWidget):
-    mode_changed = Signal(str)   # "hardware" or "software"
-
     def __init__(self, hw, parent=None):
         super().__init__(parent)
         self.hw = hw
@@ -78,18 +75,13 @@ class SettingsPanel(QWidget):
         self.profile = QLabel("—")
         self.profile.setWordWrap(True)
         vl.addWidget(self.profile)
-        self.pro_btn = QPushButton("Enable hardware inputs (Pro Audio profile)")
+        self.pro_btn = QPushButton("Record all inputs (Pro Audio profile)")
         self.pro_btn.clicked.connect(self._enable_pro)
         vl.addWidget(self.pro_btn)
         lay.addWidget(prof)
 
-        eng = QGroupBox("MIXER ENGINE")
+        eng = QGroupBox("HARDWARE MIXER")
         el = QVBoxLayout(eng)
-        self.mode = QComboBox()
-        self.mode.addItem("Hardware DSP (zero latency)", "hardware")
-        self.mode.addItem("Software (PipeWire)", "software")
-        self.mode.activated.connect(lambda i: self.mode_changed.emit(self.mode.itemData(i)))
-        el.addWidget(self.mode)
         self.hw_label = QLabel("—")
         self.hw_label.setWordWrap(True)
         el.addWidget(self.hw_label)
@@ -101,12 +93,11 @@ class SettingsPanel(QWidget):
         lay.addWidget(eng)
 
         note = QLabel(
-            "<span style='color:#6e6e73;font-size:9px'>Hardware mode mixes in the Digiface's "
+            "<span style='color:#6e6e73;font-size:9px'>All mixing happens in the Digiface's "
             "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
-            "running with the computer idle. Software mode mixes in PipeWire instead (latency "
-            "equals your PipeWire round trip).<br><br>Playback 1/2 = the <i>Openface Mixer "
-            "Playback</i> sink. Other playback channels: connect apps to "
-            "<i>openface_mixer:play_N</i> with qpwgraph/Helvum.</span>")
+            "running with the computer idle or the engine stopped.<br><br>Playback 1/2 = the "
+            "<i>Openface Mixer Playback</i> sink. Other playback channels: send apps to the "
+            "Digiface's own output channels (Pro Audio profile) with qpwgraph/Helvum.</span>")
         note.setWordWrap(True)
         lay.addWidget(note)
         lay.addStretch()
@@ -123,7 +114,7 @@ class SettingsPanel(QWidget):
         r = QMessageBox.question(
             self, "Switch profile",
             "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-            "This exposes all 32 hardware inputs. The output device will be renamed to "
+            "This lets apps record all 32 hardware inputs. The output device will be renamed to "
             "'…pro-output-0' (your existing combine-stream config already matches it). "
             "Audio may briefly drop out.")
         if r == QMessageBox.Yes:
@@ -164,9 +155,6 @@ class SettingsPanel(QWidget):
         finally:
             self._updating = False
 
-    def set_mode(self, mode):
-        self.mode.setCurrentIndex(self.mode.findData(mode))
-
     def update_hw_mixer(self, status):
         """status: Engine.status() dict, or None if the engine is not running."""
         if status is None:
@@ -185,7 +173,8 @@ class SettingsPanel(QWidget):
             self.profile.setText("Digiface not present in PipeWire")
             self.pro_btn.setVisible(False)
             return
-        ok = "<span style='color:#4cd964'>inputs available</span>" if has_in else \
-            "<span style='color:#ffcc00'>no input device — input meters/monitoring disabled</span>"
+        ok = "<span style='color:#4cd964'>inputs available for recording</span>" if has_in else \
+            "<span style='color:#ffcc00'>no input device — apps can't record the inputs " \
+            "(monitoring still works)</span>"
         self.profile.setText(f"Active: <b>{profile}</b><br>{ok}")
         self.pro_btn.setVisible(not has_in)
