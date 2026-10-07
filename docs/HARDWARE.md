@@ -89,8 +89,11 @@ RME doesn't publish its MIDI messages. Captured from a unit in its default (note
 | Idle | nothing (no active sensing) |
 
 Newer firmware can also switch to a SysEx mode (`F0 00 20 0D …`), which TotalMix FX turns on
-itself; Openface Mixer never does, so the ARC stays in note mode. LEDs are lit by sending the
-same note back with velocity `0x7F` (off: `0x00`).
+itself; Openface Mixer never does, so the ARC stays in note mode. Key LEDs are lit by sending the
+same note back with velocity `0x7F` and switched off with `0x00` (tested on the unit). They are
+on/off only: lower velocities don't give a dimmer level. While nothing drives them, Talkback and
+Speaker B glow faintly as the ARC's power and USB indicators, and Dim glows faintly once
+TotalMix has connected.
 
 ## Channel naming used in the UI
 
