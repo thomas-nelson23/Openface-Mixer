@@ -24,21 +24,55 @@ Since Linux 6.12, `snd-usb-audio` supports the Digiface USB (USB ID `2a39:3f8c`,
 
 Try them with `amixer -c <card> contents`.
 
-### Known vendor requests (from the kernel quirk)
+## USB protocol (hardware mixer)
 
-All are `bmRequestType 0x40` (vendor, host-to-device, device recipient):
+The kernel binds only interface 0. Interface 1 carries the DSP mixer, and Openface Mixer's
+engine claims it with libusb (`engine/digiface_usb.c`). The protocol below comes from the kernel
+quirk and from Asahi Lina's [rmectl](https://github.com/hoshinolina/rmectl).
 
-| bRequest | Use in the kernel |
+Vendor control requests (`bmRequestType 0x40`, device recipient; 17 is device-to-host):
+
+| bRequest | Use |
 | --- | --- |
-| 16 | control register 1: mixer enable, clock, sample rate, output formats (wValue = bits, wIndex = mask) |
-| 17 | read status registers (device-to-host) |
-| 18 | control register 2 |
-| 21 | output gain: wValue `0x9000` = unity, wIndex `0x100 + channel` |
-| 22 | input loopback: wValue `0x400` = off, wIndex = channel |
+| 16 | control register 1 (wValue = bits, wIndex = mask): clock source bits 0–2, rate bits 3–6, speed mode bits 12–14, **bit 10 = mixer off** |
+| 17 | read 16 bytes of status; word 3 mirrors control register 1 (low half) and 2 (high half) |
+| 18 | control register 2: output formats, bit 6 = TMS off, **bit 8 = mixer off** |
+| 21 | output fader: wValue = gain, wIndex = `0x100 + output channel` |
+| 22 | input loopback: wValue = 1/0, wIndex = `0x100 + channel` |
 
-The **matrix mixer gain encoding is undocumented**. That's why Openface Mixer mixes in
-PipeWire. If you capture TotalMix's USB traffic on Windows or macOS and work out the protocol,
-please open an issue: a hardware-mixer backend would give zero-latency monitoring.
+Mixer commands go to **bulk OUT endpoint 0x0B** as little-endian 32-bit words:
+
+| Word | Meaning |
+| --- | --- |
+| `(node << 16) \| gain` | set a node's gain |
+| `0x40000000 \| (node << 16) \| (dst << 9) \| src` | route a node: `src` = input n or `0x100 + playback n`, `dst` = output channel |
+| `0xC000FFFF \| (node << 16)` | reset a node |
+
+There are **2048 nodes** (crosspoints in use at once). Gains: `0x8000` = unity, linear, max
+`0x10000` (+6 dB). Values of `0x4000` and up are stored shifted right by 3 with bit 15 set, so
+unity is `0x9000`, which is also what the kernel writes to the output faders. The device does
+not report the matrix back, so the engine keeps its own copy and rewrites everything when status
+word 3 shows the mixer was switched off (the driver does that on every probe).
+
+Interrupt IN endpoint 0x83 is rate feedback.
+
+### Level meters (bulk IN endpoint 0x84)
+
+The device always has a frame ready; each 1024-byte transfer returns one frame of 128
+little-endian 64-bit words, and successive frames cycle through three types:
+
+| Words | Content |
+| --- | --- |
+| 0–33 | RMS per channel: mean square × 2^55, smoothed by the device (falls about 25 dB/s) |
+| 64–80 | peak per channel, two per word (even channel in the low 32 bits), full scale = 2^27 |
+| 100–127 | end marker `0xFFFFFFFn_FFFFFFFn`, n = type: 0 inputs, 1 playback, 2 outputs |
+
+Measured on a Digiface (firmware in vendor mode, 48 kHz): a −20 dBFS sine on playback 1 reads
+peak `0xCCC000` (−20.00 dB) and RMS 10·log10(E) = 142.56, i.e. E = 0.005 × 2^55. Output meters
+are post-mixer and post-fader, and matched the expected mix gains within 0.05 dB. The engine
+polls all three frame types every 10 ms on a separate thread.
+
+Access needs the udev rule in `packaging/70-rme-digiface.rules`.
 
 ## Channel naming used in the UI
 

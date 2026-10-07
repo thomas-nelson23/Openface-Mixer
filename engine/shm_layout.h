@@ -17,7 +17,11 @@
 #define OFM_N_OUT   34                      /* Digiface hardware outputs (32 ADAT + phones) */
 
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
-#define OFM_SHM_VERSION 1
+#define OFM_SHM_VERSION 2
+
+/* values for mixer_mode */
+#define OFM_MODE_SOFTWARE 0 /* mix in this engine (PipeWire latency) */
+#define OFM_MODE_HARDWARE 1 /* mix in the Digiface DSP (zero latency) */
 
 /* Header is exactly 64 bytes; all fields are written by the engine unless noted. */
 struct ofm_shm {
@@ -32,11 +36,18 @@ struct ofm_shm {
 	uint32_t rate;           /* graph sample rate */
 	uint32_t quantum;        /* samples per cycle */
 	uint32_t engine_pid;     /* 0 after a clean shutdown */
-	uint32_t reserved[5];
+	uint32_t mixer_mode;     /* OFM_MODE_*, written by the GUI */
+	uint32_t hw_state;       /* DFU_STATE_* (digiface_usb.h) */
+	uint32_t hw_nodes;       /* hardware mixer nodes in use */
+	uint32_t hw_levels;      /* 1 while the meters come from the hardware */
+	uint32_t reserved[1];
 
-	/* Written by the GUI: final linear gain from source k to output o.
-	 * Pan, mute and output master level are already folded in. */
+	/* Written by the GUI: linear gain from source k to output channel o.
+	 * Pan and source mute are folded in; the output master is separate. */
 	float gain[OFM_N_OUT][OFM_N_SRC];
+
+	/* Written by the GUI: output master level per channel (linear, 0 = muted). */
+	float out_gain[OFM_N_OUT];
 
 	/* Max-hold peak meters (linear). The engine raises them, the GUI reads and zeroes them. */
 	float peak_src[OFM_N_SRC];

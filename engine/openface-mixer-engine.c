@@ -8,6 +8,11 @@
  * and mixes every source into every output with a gain matrix that lives in
  * shared memory (see shm_layout.h), written by the GUI. Peak meters go back the same way.
  *
+ * In hardware mode (mixer_mode = OFM_MODE_HARDWARE) the matrix is instead loaded into the
+ * Digiface's own DSP mixer over USB (digiface_usb.c), so input monitoring has no PipeWire
+ * round trip. The filter then only passes play_N through to out_N, i.e. to the Digiface's
+ * playback channel N, which the hardware mixer treats as a source like any input.
+ *
  * Links to the Digiface are created automatically and re-created on hotplug or
  * profile changes. The engine runs headless (systemd user service) so the mix keeps
  * working when the GUI is closed.
@@ -15,10 +20,12 @@
  * Options:
  *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
  *   --no-autolink   don't link to the Digiface (useful for testing with pw-link)
+ *   --no-hardware   never touch the Digiface over USB (software mixing only)
  */
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +39,7 @@
 #include <pipewire/impl.h>
 #include <spa/utils/dict.h>
 
+#include "digiface_usb.h"
 #include "shm_layout.h"
 
 #define N_IN    OFM_N_IN
@@ -44,6 +52,13 @@
 #define SINK_OUT_NAME   "openface_mixer_playback.out"
 #define DIGI_OUT_PREFIX "alsa_output.usb-RME_Digiface_USB"
 #define DIGI_IN_PREFIX  "alsa_input.usb-RME_Digiface_USB"
+
+#define MATRIX_FILE_MAGIC 0x324d464fu /* "OFM2": mode, gain[][], out_gain[] */
+
+#define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
+#define HW_STATUS_TICKS  25  /* read device status every 500 ms */
+#define HW_RETRY_TICKS   50  /* look for the device every second */
+#define HW_METER_US   10000  /* hardware meter poll interval */
 
 struct port {
 	int index;
@@ -85,6 +100,20 @@ struct data {
 	struct ofm_shm *shm;
 	float cur[N_OUT][N_SRC];
 
+	struct dfu *dfu;
+	struct spa_source *hw_timer;
+	unsigned int hw_ticks;
+	bool hw_enabled;      /* we switched the DSP mixer on */
+	bool hw_need_full;    /* rewrite every node, e.g. after the device was reset */
+	bool hw_check_once;   /* in software mode, switch off a mixer left on by a previous run */
+
+	/* hardware meters are read on their own thread; usb_lock keeps dfu_open/close and the
+	 * meter reads apart */
+	pthread_mutex_t usb_lock;
+	pthread_t meter_thread;
+	bool meter_thread_started;
+	volatile bool meter_quit;
+
 	int no_autolink;
 	struct obj objs[MAX_OBJ];
 	int n_objs;
@@ -111,11 +140,15 @@ static void on_process(void *userdata, struct spa_io_position *position)
 	uint32_t n = position->clock.duration;
 	const float *src[N_SRC];
 	uint32_t in_c = 0, play_c = 0, out_c = 0;
+	bool hw = s->mixer_mode == OFM_MODE_HARDWARE;
+	bool meters = !(hw && s->hw_levels); /* else the meter thread fills them from the device */
 
 	for (int i = 0; i < N_IN; i++) {
 		src[i] = pw_filter_get_dsp_buffer(d->in[i], n);
 		if (src[i]) {
 			in_c++;
+			if (!meters)
+				continue;
 			float p = peak_of(src[i], n);
 			if (p > s->peak_src[i])
 				s->peak_src[i] = p;
@@ -126,6 +159,8 @@ static void on_process(void *userdata, struct spa_io_position *position)
 		src[N_IN + i] = b;
 		if (b) {
 			play_c++;
+			if (!meters)
+				continue;
 			float p = peak_of(b, n);
 			if (p > s->peak_src[N_IN + i])
 				s->peak_src[N_IN + i] = p;
@@ -139,7 +174,8 @@ static void on_process(void *userdata, struct spa_io_position *position)
 		out_c++;
 		memset(dst, 0, n * sizeof(float));
 		for (int k = 0; k < N_SRC; k++) {
-			float t = s->gain[o][k];
+			/* hardware mode: the Digiface mixes; just pass play_N to its playback N */
+			float t = hw ? (k == N_IN + o ? 1.0f : 0.0f) : s->gain[o][k] * s->out_gain[o];
 			float c = d->cur[o][k];
 			if (!isfinite(t) || t < 0.0f)
 				t = 0.0f;
@@ -163,6 +199,8 @@ static void on_process(void *userdata, struct spa_io_position *position)
 				d->cur[o][k] = t;
 			}
 		}
+		if (!meters)
+			continue;
 		float p = peak_of(dst, n);
 		if (p > s->peak_out[o])
 			s->peak_out[o] = p;
@@ -192,6 +230,36 @@ static void matrix_path(char *buf, size_t len)
 		snprintf(buf, len, "%s/.config/openface-mixer/matrix.bin", getenv("HOME") ? getenv("HOME") : "/tmp");
 }
 
+/*
+ * matrix.bin is "OFM2", the mixer mode, gain[][] and out_gain[]. Version 1 files hold only a
+ * gain matrix with the output masters folded in; they load as software mode at unity masters.
+ */
+static int load_matrix(struct ofm_shm *s, const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if (f == NULL)
+		return -1;
+	uint32_t hdr[2];
+	int ret = -1;
+	if (fread(hdr, sizeof(hdr), 1, f) == 1 && hdr[0] == MATRIX_FILE_MAGIC) {
+		if (fread(s->gain, sizeof(s->gain), 1, f) == 1 &&
+		    fread(s->out_gain, sizeof(s->out_gain), 1, f) == 1) {
+			s->mixer_mode = hdr[1];
+			ret = 0;
+		}
+	} else {
+		rewind(f);
+		if (fread(s->gain, sizeof(s->gain), 1, f) == 1) {
+			for (int o = 0; o < N_OUT; o++)
+				s->out_gain[o] = 1.0f;
+			s->mixer_mode = OFM_MODE_SOFTWARE;
+			ret = 0;
+		}
+	}
+	fclose(f);
+	return ret;
+}
+
 static int shm_setup(struct data *d)
 {
 	char name[64];
@@ -218,17 +286,14 @@ static int shm_setup(struct data *d)
 		memset(s, 0, sizeof(*s));
 		char path[512];
 		matrix_path(path, sizeof(path));
-		FILE *f = fopen(path, "rb");
-		size_t got = 0;
-		if (f) {
-			got = fread(s->gain, 1, sizeof(s->gain), f);
-			fclose(f);
-		}
-		if (got != sizeof(s->gain)) {
-			/* default: transparent, playback n -> output n */
+		if (load_matrix(s, path) < 0) {
+			/* default: transparent, playback n -> output n, on the hardware mixer */
 			memset(s->gain, 0, sizeof(s->gain));
-			for (int o = 0; o < N_OUT; o++)
+			for (int o = 0; o < N_OUT; o++) {
 				s->gain[o][N_IN + o] = 1.0f;
+				s->out_gain[o] = 1.0f;
+			}
+			s->mixer_mode = OFM_MODE_HARDWARE;
 			fprintf(stderr, "openface-mixer: using default passthrough matrix\n");
 		} else {
 			fprintf(stderr, "openface-mixer: loaded matrix from %s\n", path);
@@ -434,6 +499,140 @@ static const struct pw_registry_events registry_events = {
 	.global_remove = registry_global_remove,
 };
 
+/* ---------- hardware mixer ---------- */
+
+static void hw_lost(struct data *d, int err)
+{
+	fprintf(stderr, "openface-mixer: lost the Digiface mixer: %d\n", err);
+	dfu_close(d->dfu);
+	d->hw_enabled = false;
+	d->shm->hw_state = DFU_STATE_ERROR;
+	d->shm->hw_nodes = 0;
+}
+
+static void hw_switch_off(struct data *d)
+{
+	/* back to the driver's default: mixer off (1:1 passthrough), outputs at unity */
+	static const float silent[N_OUT][N_SRC];
+	float unity[N_OUT];
+	for (int o = 0; o < N_OUT; o++)
+		unity[o] = 1.0f;
+	dfu_sync(d->dfu, silent, unity, true);
+	dfu_set_mixer_enabled(d->dfu, false);
+	d->hw_enabled = false;
+	fprintf(stderr, "openface-mixer: hardware mixer off\n");
+}
+
+static void hw_tick_locked(struct data *d);
+
+/* Runs on the main loop, never in the audio thread: USB transfers block. */
+static void hw_tick(void *userdata, uint64_t expirations)
+{
+	struct data *d = userdata;
+	pthread_mutex_lock(&d->usb_lock);
+	hw_tick_locked(d);
+	pthread_mutex_unlock(&d->usb_lock);
+}
+
+static void raise_peak(float *dst, float v)
+{
+	if (v > *dst)
+		*dst = v;
+}
+
+static void *meter_thread(void *userdata)
+{
+	struct data *d = userdata;
+	struct ofm_shm *s = d->shm;
+	struct dfu_meters m;
+
+	while (!d->meter_quit) {
+		int r = -1;
+		pthread_mutex_lock(&d->usb_lock);
+		if (d->hw_enabled && dfu_is_open(d->dfu))
+			r = dfu_read_meters(d->dfu, &m);
+		pthread_mutex_unlock(&d->usb_lock);
+
+		if (r == 0) {
+			for (int i = 0; i < N_IN; i++)
+				raise_peak(&s->peak_src[i], m.peak[DFU_METER_INPUT][i]);
+			for (int i = 0; i < N_PLAY; i++)
+				raise_peak(&s->peak_src[N_IN + i], m.peak[DFU_METER_PLAYBACK][i]);
+			for (int o = 0; o < N_OUT; o++)
+				raise_peak(&s->peak_out[o], m.peak[DFU_METER_OUTPUT][o]);
+		}
+		s->hw_levels = r == 0;
+		usleep(HW_METER_US);
+	}
+	return NULL;
+}
+
+static void hw_tick_locked(struct data *d)
+{
+	struct ofm_shm *s = d->shm;
+	bool want = s->mixer_mode == OFM_MODE_HARDWARE;
+	uint32_t status[4];
+	int r;
+
+	d->hw_ticks++;
+
+	if (!want) {
+		if (dfu_is_open(d->dfu) || d->hw_check_once) {
+			if (dfu_open(d->dfu) == DFU_STATE_ACTIVE &&
+			    dfu_read_status(d->dfu, status) == 0 &&
+			    (d->hw_enabled || dfu_status_mixer_enabled(status)))
+				hw_switch_off(d);
+			dfu_close(d->dfu);
+			d->hw_check_once = false;
+		}
+		s->hw_state = DFU_STATE_OFF;
+		s->hw_nodes = 0;
+		s->hw_levels = 0;
+		return;
+	}
+
+	if (!dfu_is_open(d->dfu)) {
+		if (d->hw_ticks % HW_RETRY_TICKS != 1 && s->hw_state != DFU_STATE_OFF)
+			return;
+		s->hw_state = dfu_open(d->dfu);
+		if (!dfu_is_open(d->dfu))
+			return;
+		d->hw_need_full = true;
+		fprintf(stderr, "openface-mixer: opened the Digiface mixer interface\n");
+	}
+
+	if (d->hw_enabled && d->hw_ticks % HW_STATUS_TICKS == 0) {
+		r = dfu_read_status(d->dfu, status);
+		if (r < 0) {
+			hw_lost(d, r);
+			return;
+		}
+		if (!dfu_status_mixer_enabled(status)) {
+			/* the driver re-initialised the device (replug, resume) */
+			fprintf(stderr, "openface-mixer: hardware mixer was reset, restoring\n");
+			d->hw_need_full = true;
+		}
+	}
+
+	r = dfu_sync(d->dfu, s->gain, s->out_gain, d->hw_need_full);
+	if (r < 0 && r != -ENOSPC) {
+		hw_lost(d, r);
+		return;
+	}
+	if (d->hw_need_full) {
+		int e = dfu_set_mixer_enabled(d->dfu, true);
+		if (e < 0) {
+			hw_lost(d, e);
+			return;
+		}
+		d->hw_enabled = true;
+		d->hw_need_full = false;
+		fprintf(stderr, "openface-mixer: hardware mixer on, %d nodes\n", dfu_nodes_used(d->dfu));
+	}
+	s->hw_state = r == -ENOSPC ? DFU_STATE_NO_NODES : DFU_STATE_ACTIVE;
+	s->hw_nodes = (uint32_t)dfu_nodes_used(d->dfu);
+}
+
 /* ---------- setup ---------- */
 
 static struct port *add_port(struct data *d, enum pw_direction dir, const char *fmt, int idx)
@@ -459,15 +658,17 @@ static void do_quit(void *userdata, int signal_number)
 int main(int argc, char *argv[])
 {
 	struct data d = { 0 };
-	int no_sink = 0;
+	int no_sink = 0, no_hardware = 0;
 
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--no-sink") == 0)
 			no_sink = 1;
 		else if (strcmp(argv[i], "--no-autolink") == 0)
 			d.no_autolink = 1;
+		else if (strcmp(argv[i], "--no-hardware") == 0)
+			no_hardware = 1;
 		else {
-			fprintf(stderr, "usage: %s [--no-sink] [--no-autolink]\n", argv[0]);
+			fprintf(stderr, "usage: %s [--no-sink] [--no-autolink] [--no-hardware]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -525,11 +726,32 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "openface-mixer: could not create playback sink: %m\n");
 	}
 
+	if (!no_hardware && (d.dfu = dfu_new()) != NULL) {
+		struct timespec interval = { 0, HW_TICK_MS * 1000000L };
+		d.hw_check_once = true;
+		pthread_mutex_init(&d.usb_lock, NULL);
+		d.hw_timer = pw_loop_add_timer(pw_main_loop_get_loop(d.loop), hw_tick, &d);
+		pw_loop_update_timer(pw_main_loop_get_loop(d.loop), d.hw_timer, &interval, &interval, false);
+		d.meter_thread_started = pthread_create(&d.meter_thread, NULL, meter_thread, &d) == 0;
+	} else if (!no_hardware) {
+		fprintf(stderr, "openface-mixer: libusb unavailable, hardware mixer disabled\n");
+	}
+
 	d.registry = pw_core_get_registry(d.core, PW_VERSION_REGISTRY, 0);
 	pw_registry_add_listener(d.registry, &d.registry_listener, &registry_events, &d);
 
 	fprintf(stderr, "openface-mixer: engine running\n");
 	pw_main_loop_run(d.loop);
+
+	/* the hardware mixer keeps running with the last mix, like TotalMix's stored state */
+	if (d.meter_thread_started) {
+		d.meter_quit = true;
+		pthread_join(d.meter_thread, NULL);
+	}
+	if (d.hw_timer)
+		pw_loop_destroy_source(pw_main_loop_get_loop(d.loop), d.hw_timer);
+	dfu_free(d.dfu);
+	d.shm->hw_levels = 0;
 
 	struct link_req *r, *t;
 	spa_list_for_each_safe(r, t, &d.links, link)

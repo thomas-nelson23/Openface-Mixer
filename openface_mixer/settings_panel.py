@@ -1,9 +1,28 @@
 """Right-hand panel: Digiface clock/port settings, card profile and engine status."""
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .hardware import set_card_profile
+
+UDEV_RULE_HINT = (
+    "Openface Mixer needs write access to the Digiface's USB device. Install the udev rule "
+    "once:<br><tt>sudo install -m644 packaging/70-rme-digiface.rules /etc/udev/rules.d/</tt><br>"
+    "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
+
+HW_STATE_TEXT = {
+    "off": "Hardware mixer not in use.",
+    "no-device": "<span style='color:#ff6b5b'>Digiface not found on USB.</span>",
+    "no-access": "<span style='color:#ff6b5b'>No permission to open the Digiface.</span><br>"
+                 + UDEV_RULE_HINT,
+    "busy": "<span style='color:#ff6b5b'>The Digiface mixer interface is in use by another "
+            "program.</span>",
+    "active": "<span style='color:#34c759'>Hardware mixer active</span>",
+    "no-nodes": "<span style='color:#ffd60a'>Hardware mixer active, but this mix needs more "
+                "than 2048 routes; some sends are missing.</span>",
+    "error": "<span style='color:#ff6b5b'>USB error talking to the Digiface; retrying.</span>",
+}
 
 
 class Led(QLabel):
@@ -15,6 +34,8 @@ class Led(QLabel):
 
 
 class SettingsPanel(QWidget):
+    mode_changed = Signal(str)   # "hardware" or "software"
+
     def __init__(self, hw, parent=None):
         super().__init__(parent)
         self.hw = hw
@@ -64,6 +85,14 @@ class SettingsPanel(QWidget):
 
         eng = QGroupBox("MIXER ENGINE")
         el = QVBoxLayout(eng)
+        self.mode = QComboBox()
+        self.mode.addItem("Hardware DSP (zero latency)", "hardware")
+        self.mode.addItem("Software (PipeWire)", "software")
+        self.mode.activated.connect(lambda i: self.mode_changed.emit(self.mode.itemData(i)))
+        el.addWidget(self.mode)
+        self.hw_label = QLabel("—")
+        self.hw_label.setWordWrap(True)
+        el.addWidget(self.hw_label)
         self.eng_label = QLabel("—")
         self.eng_label.setWordWrap(True)
         el.addWidget(self.eng_label)
@@ -72,9 +101,10 @@ class SettingsPanel(QWidget):
         lay.addWidget(eng)
 
         note = QLabel(
-            "<span style='color:#6e6e73;font-size:9px'>Mixing is done in software (PipeWire) — "
-            "the Digiface's internal DSP mixer protocol is not public. Monitoring latency equals "
-            "your PipeWire round-trip latency.<br><br>Playback 1/2 = the <i>Openface Mixer "
+            "<span style='color:#6e6e73;font-size:9px'>Hardware mode mixes in the Digiface's "
+            "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
+            "running with the computer idle. Software mode mixes in PipeWire instead (latency "
+            "equals your PipeWire round trip).<br><br>Playback 1/2 = the <i>Openface Mixer "
             "Playback</i> sink. Other playback channels: connect apps to "
             "<i>openface_mixer:play_N</i> with qpwgraph/Helvum.</span>")
         note.setWordWrap(True)
@@ -133,6 +163,21 @@ class SettingsPanel(QWidget):
                     out.setCurrentIndex(of["value"])
         finally:
             self._updating = False
+
+    def set_mode(self, mode):
+        self.mode.setCurrentIndex(self.mode.findData(mode))
+
+    def update_hw_mixer(self, status):
+        """status: Engine.status() dict, or None if the engine is not running."""
+        if status is None:
+            self.hw_label.setText("—")
+            return
+        text = HW_STATE_TEXT.get(status["hw"], status["hw"])
+        if status["hw"] in ("active", "no-nodes"):
+            text += f"<br>{status['hw_nodes']} of 2048 routes in use"
+            if status["hw_levels"]:
+                text += " · meters from the interface"
+        self.hw_label.setText(text)
 
     def update_profile(self, name, profile, has_in):
         self._card_name = name

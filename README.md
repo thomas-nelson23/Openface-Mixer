@@ -18,10 +18,10 @@ familiar TotalMix workflow on top of PipeWire.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
   it at login.
 
-> **How mixing works:** the Digiface's internal DSP mixer protocol is not public, and the Linux
-> driver disables it. Openface Mixer mixes in software inside PipeWire instead. Input monitoring
-> therefore has your PipeWire round-trip latency (a few ms at small buffer sizes), not
-> TotalMix's near-zero hardware latency. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> **How mixing works:** by default Openface Mixer drives the Digiface's own DSP mixer over USB,
+> like TotalMix, so input monitoring has no added latency and the mix keeps running in the
+> interface. A software mode that mixes inside PipeWire is available as a fallback. See
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ### Matrix view
 
@@ -32,19 +32,20 @@ familiar TotalMix workflow on top of PipeWire.
 - Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
+- libusb 1.0 and a udev rule for the Digiface (installed by `make install`)
 - Build tools: a C compiler, `pkg-config`, and the libpipewire development headers
 - `amixer` (alsa-utils) and `pactl` (libpulse)
 
 On Arch / CachyOS:
 
 ```sh
-sudo pacman -S --needed pyside6 libpipewire alsa-utils libpulse gcc pkgconf make
+sudo pacman -S --needed pyside6 libpipewire libusb alsa-utils libpulse gcc pkgconf make
 ```
 
 On Debian / Ubuntu:
 
 ```sh
-sudo apt install python3-pyside6.qtwidgets libpipewire-0.3-dev alsa-utils pulseaudio-utils build-essential pkg-config
+sudo apt install python3-pyside6.qtwidgets libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
 ```
 
 ## Install
@@ -107,8 +108,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
 - Only the Digiface USB is supported, and only tested at 48 kHz (single speed). The UI is designed
   to adapt to 2x/4x channel counts, but that path is untested.
-- Mixing is in software (see above). If someone documents the hardware mixer's USB protocol,
-  the engine could drive it directly.
+- The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
+- In hardware mode the meters come from the interface itself (inputs, playback and the
+  hardware outputs). In software mode they are measured in PipeWire, so input meters need the
+  Pro Audio profile.
 - No solo, EQ, dynamics or reverb. This is the "lite" subset of TotalMix.
 
 ## License

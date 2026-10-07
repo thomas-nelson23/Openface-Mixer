@@ -8,7 +8,9 @@ Concepts
   output pair. The GUI's faders show the sends into the currently selected output pair, which
   is TotalMix's "submix" workflow.
 * Adjacent source channels can be stereo-linked; a linked pair shares one strip.
-* compute_matrix() flattens all of this into the linear gain matrix the engine uses.
+* compute_matrix() flattens the sends into the linear gain matrix the engine uses, and
+  compute_out_gains() gives the output master levels. They are kept apart because the
+  Digiface's DSP has its own output faders.
 """
 import copy
 import math
@@ -24,8 +26,10 @@ NEG_INF = float("-inf")
 FADER_MAX_DB = 6.0
 FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
-STATE_VERSION = 2
+STATE_VERSION = 3
 KINDS = ("in", "play")
+MIXER_MODES = ("hardware", "software")   # Digiface DSP (zero latency) or PipeWire engine
+ENGINE_MODE = {"software": 0, "hardware": 1}   # OFM_MODE_* in engine/shm_layout.h
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
 MIX_KEYS = ("stereo", "mute", "sends", "out", "groups")
 
@@ -98,6 +102,7 @@ def default_state():
         "version": STATE_VERSION,
         "selected": N_PAIRS - 1,          # output pair whose submix the faders edit
         "tab": 0,                         # 0 = Mixer, 1 = Matrix
+        "mixer_mode": "hardware",         # one of MIXER_MODES
         "active_slot": None,              # last recalled preset slot
         "stereo": {"in": [False] * (N_IN // 2), "play": [True] * (N_PLAY // 2)},
         "mute": {"in": [False] * N_IN, "play": [False] * N_PLAY},
@@ -122,12 +127,17 @@ def upgrade_state(st):
     base = default_state()
     for k, v in base.items():
         st.setdefault(k, v)
+    if st["mixer_mode"] not in MIXER_MODES:
+        st["mixer_mode"] = base["mixer_mode"]
     st["version"] = STATE_VERSION
     return st
 
 
 def compute_matrix(st):
-    """Flatten the state into gains[out * N_SRC + src] (array of float32, out-major)."""
+    """Flatten the sends into gains[out * N_SRC + src] (array of float32, out-major).
+
+    Pan and source mutes are folded in; output masters are not (see compute_out_gains).
+    """
     g = array("f", bytes(N_OUT * N_SRC * 4))
     for kind, base in (("in", 0), ("play", N_IN)):
         n = N_IN if kind == "in" else N_PLAY
@@ -138,8 +148,7 @@ def compute_matrix(st):
             left = c % 2 == 0
             for p in range(N_PAIRS):
                 gdb, pan = st["sends"][kind][c][p]
-                out = st["out"][p]
-                lin = db2lin(gdb) * (0.0 if out["mute"] else db2lin(out["gain"]))
+                lin = db2lin(gdb)
                 if lin == 0.0:
                     continue
                 gl = lin * min(1.0, 1.0 - pan)   # balance law: centre = full level both sides
@@ -153,6 +162,14 @@ def compute_matrix(st):
                 else:                             # mono: panned into both sides
                     g[(2 * p) * N_SRC + s] += gl
                     g[(2 * p + 1) * N_SRC + s] += gr
+    return g
+
+
+def compute_out_gains(st):
+    """Output master level per output channel (array of float32), 0 when muted."""
+    g = array("f", bytes(N_OUT * 4))
+    for p, out in enumerate(st["out"]):
+        g[2 * p] = g[2 * p + 1] = 0.0 if out["mute"] else db2lin(out["gain"])
     return g
 
 

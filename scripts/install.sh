@@ -11,7 +11,7 @@ CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 if command -v pacman >/dev/null; then
     missing=()
-    for pkg in pyside6 libpipewire alsa-utils libpulse gcc pkgconf make; do
+    for pkg in pyside6 libpipewire libusb alsa-utils libpulse gcc pkgconf make; do
         pacman -Qq "$pkg" &>/dev/null || missing+=("$pkg")
     done
     if ((${#missing[@]})); then
@@ -51,6 +51,18 @@ cat > "$PREFIX/bin/openface-mixer" <<SH
 PYTHONPATH="$SHARE\${PYTHONPATH:+:\$PYTHONPATH}" exec python3 -m openface_mixer "\$@"
 SH
 chmod 755 "$PREFIX/bin/openface-mixer"
+
+# --- USB access for the hardware mixer (needs root once)
+RULE=/etc/udev/rules.d/70-rme-digiface.rules
+if ! cmp -s packaging/70-rme-digiface.rules "$RULE"; then
+    echo "Installing $RULE so the mixer can talk to the Digiface over USB (needs sudo)…"
+    if sudo install -Dm644 packaging/70-rme-digiface.rules "$RULE"; then
+        sudo udevadm control --reload
+        sudo udevadm trigger --subsystem-match=usb --attr-match=idVendor=2a39
+    else
+        echo "  skipped: hardware mixing stays unavailable until the rule is installed"
+    fi
+fi
 
 # --- engine service (restart so an upgrade takes effect)
 pkill -x openface-mixer-engine 2>/dev/null || true
