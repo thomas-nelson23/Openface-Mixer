@@ -2,9 +2,10 @@
 
 Concepts
 --------
-* Sources are mono channels: 32 hardware inputs ("in") and 34 playback channels from the
-  computer ("play").
-* Outputs are handled in stereo pairs (17 pairs at 1x speed; the last pair is the headphones).
+* Sources are mono channels: up to 32 hardware inputs ("in") and 34 playback channels from the
+  computer ("play"). These are the Digiface's counts; other devices (devices.py) use a subset.
+* Outputs are handled in stereo pairs (17 pairs at 1x speed; on the Digiface the last pair is
+  the headphones).
 * A *send* is the level (dB, or None for -inf) and pan (-1..1) of one source channel into one
   output pair. The GUI's faders show the sends into the currently selected output pair, which
   is TotalMix's "submix" workflow.
@@ -99,10 +100,11 @@ def pair_label(i, n_adat_ch, is_output):
 
 # ------------------------------------------------------------------ state
 
-def default_state():
+def default_state(selected=N_PAIRS - 1):
+    """A fresh state. selected is the output pair shown first (the device's phones)."""
     st = {
         "version": STATE_VERSION,
-        "selected": N_PAIRS - 1,          # output pair whose submix the faders edit
+        "selected": selected,             # output pair whose submix the faders edit
         "tab": 0,                         # 0 = Mixer, 1 = Matrix
         "active_slot": None,              # last recalled preset slot
         "stereo": {"in": [False] * (N_IN // 2), "play": [True] * (N_PLAY // 2)},
@@ -122,11 +124,11 @@ def default_state():
     return st
 
 
-def upgrade_state(st):
+def upgrade_state(st, selected=N_PAIRS - 1):
     """Accept older/partial state dicts (e.g. from TotalMix Lite) and fill in missing keys."""
     if not isinstance(st, dict) or "sends" not in st:
-        return default_state()
-    base = default_state()
+        return default_state(selected)
+    base = default_state(selected)
     for k, v in base.items():
         st.setdefault(k, v)
     st.pop("mixer_mode", None)          # software (PipeWire) mixing was removed in version 4

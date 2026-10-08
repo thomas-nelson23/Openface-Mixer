@@ -10,20 +10,26 @@ all: engine ## Build everything (just the engine; the GUI is plain Python)
 
 engine: $(ENGINE) ## Build the C mixer engine
 
-$(ENGINE): engine/openface-mixer-engine.c engine/digiface_usb.c engine/digiface_usb.h engine/shm_layout.h
-	$(CC) $(CFLAGS) -pthread -o $@ engine/openface-mixer-engine.c engine/digiface_usb.c $(PW_FLAGS) -lm
+ENGINE_SRC = engine/openface-mixer-engine.c engine/backend_digiface.c engine/digiface_usb.c \
+	     engine/fireface_fw.c
+ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/shm_layout.h
+
+$(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
+	$(CC) $(CFLAGS) -pthread -o $@ $(ENGINE_SRC) $(PW_FLAGS) -lm
 
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
 
-run-engine: engine ## Run the engine in the foreground (stop the systemd service first)
-	./$(ENGINE)
+run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802)
+	./$(ENGINE) --device $(or $(DEVICE),digiface)
 
 test: ## Run the unit tests (no audio hardware or display needed)
 	python3 -m unittest discover -s tests -t . -v
 	$(CC) $(CFLAGS) -o tests/test_digiface_usb tests/test_digiface_usb.c engine/digiface_usb.c \
 		$(shell pkg-config --cflags --libs libusb-1.0) -lm
 	./tests/test_digiface_usb
+	$(CC) $(CFLAGS) -o tests/test_fireface_fw tests/test_fireface_fw.c engine/fireface_fw.c -lm
+	./tests/test_fireface_fw
 
 lint: ## Byte-compile everything to catch syntax errors
 	python3 -m compileall -q openface_mixer tests
@@ -35,7 +41,7 @@ uninstall: ## Remove the user install (keeps saved mixes)
 	./scripts/uninstall.sh
 
 clean: ## Remove build output
-	rm -f $(ENGINE) tests/test_digiface_usb
+	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
 help: ## Show this help

@@ -10,18 +10,18 @@ ENCODER_STEP_DB = 0.5     # per encoder click, like TotalMix's ARC volume steps
 ENCODER_TARGETS = ("main", "phones")
 
 
-def default_control_room():
+def default_control_room(phones=N_PAIRS - 1):
     return {
-        "main": 0,                # output pair that is Main Out (AD1 1/2)
-        "main_b": 1,              # Speaker B pair (AD1 3/4)
-        "phones": N_PAIRS - 1,    # the Digiface's headphone pair
+        "main": 0,                # output pair that is Main Out (AD1 1/2, AN 1/2)
+        "main_b": 1,              # Speaker B pair (AD1 3/4, AN 3/4)
+        "phones": phones,         # the device's (first) headphone pair
         "dim": False,
         "dim_db": -20.0,
         "mono": False,
         "speaker_b": False,
         "talkback": False,
         "talkback_src": 0,        # hardware input channel used as the talkback mic
-        "talkback_dests": [N_PAIRS - 1],
+        "talkback_dests": [phones],
         "talkback_dim_db": -20.0,  # other signals on the talkback outputs while talking
         "ext_in": False,
         "ext_src": 0,             # left channel of the hardware input pair for External Input
@@ -29,10 +29,11 @@ def default_control_room():
     }
 
 
-def control_room(st):
-    """st["control_room"], created or completed with defaults."""
+def control_room(st, phones=None):
+    """st["control_room"], created or completed with defaults. phones is the device's phones
+    pair, used only when the control room is created (config.load_state passes it)."""
     cr = st.setdefault("control_room", {})
-    for k, v in default_control_room().items():
+    for k, v in default_control_room(N_PAIRS - 1 if phones is None else phones).items():
         cr.setdefault(k, v)
     return cr
 

@@ -313,9 +313,10 @@ class Strip(QFrame):
     WIDTH = 62
     clicked = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
+    settings_requested = Signal(object)  # global QPoint below the settings button
 
     def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
-                 show_solo=False, parent=None):
+                 show_solo=False, show_settings=False, parent=None):
         super().__init__(parent)
         self.key = key
         self.kind = kind
@@ -330,9 +331,24 @@ class Strip(QFrame):
 
         self.title = QPushButton(title)
         self.title.setFixedHeight(20)
+        self.title.setMinimumWidth(0)
         self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
         self.title.clicked.connect(self.clicked.emit)
-        lay.addWidget(self.title)
+        # channel settings (TotalMix's wrench): phase, level, 48V, ... where the device has them
+        self.settings_btn = QToolButton()
+        self.settings_btn.setText("⚙")
+        self.settings_btn.setFixedSize(QSize(14, 20))
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setToolTip("Channel settings")
+        self.settings_btn.clicked.connect(lambda: self.settings_requested.emit(
+            self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())))
+        self.set_settings_active(False)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(1)
+        title_row.addWidget(self.title, 1)
+        title_row.addWidget(self.settings_btn)
+        self.settings_btn.setVisible(show_settings)
+        lay.addLayout(title_row)
 
         # pan knob with its value beside it, as Pro Tools shows "<64" / "64>"
         self.pan = Knob()
@@ -397,6 +413,13 @@ class Strip(QFrame):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")
         hot = db != NEG_INF and db >= -0.05
         self.peak.setStyleSheet(lcd_style("#c0262b", "white") if hot else lcd_style())
+
+    def set_settings_active(self, on):
+        """Light the settings button while a channel setting (phase, 48V, ...) is on."""
+        self.settings_btn.setStyleSheet(
+            "QToolButton{background:#2a2a2d;border:1px solid #151516;border-radius:2px;"
+            f"font-size:10px;color:{ACCENT.name() if on else '#8e8e93'}}}"
+            "QToolButton:hover{background:#3a3a3e}")
 
     def set_fader(self, db):
         self.fader.set_db(db)

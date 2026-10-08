@@ -1,0 +1,12 @@
+[Unit]
+Description=Openface Mixer engine for the %i (drives its hardware mixer)
+After=pipewire.service wireplumber.service
+Requires=pipewire.service
+
+[Service]
+ExecStart=%h/.local/bin/openface-mixer-engine --device %i
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=pipewire.service
