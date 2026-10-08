@@ -1,27 +1,40 @@
-"""Right-hand panel: Digiface clock/port settings, card profile and hardware mixer status."""
+"""Right-hand panel: device choice, the device's clock/port settings, card profile and hardware
+mixer status."""
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
+from . import fireface802 as ff
+from .devices import DEVICES
 from .hardware import set_card_profile
 
-UDEV_RULE_HINT = (
-    "Openface Mixer needs write access to the Digiface's USB device. Install the udev rule "
-    "once:<br><tt>sudo install -m644 packaging/70-rme-digiface.rules /etc/udev/rules.d/</tt><br>"
-    "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
+UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules"}
 
-HW_STATE_TEXT = {
-    "starting": "Connecting to the Digiface…",
-    "no-device": "<span style='color:#ff6b5b'>Digiface not found on USB.</span>",
-    "no-access": "<span style='color:#ff6b5b'>No permission to open the Digiface.</span><br>"
-                 + UDEV_RULE_HINT,
-    "busy": "<span style='color:#ff6b5b'>The Digiface mixer interface is in use by another "
-            "program.</span>",
-    "active": "<span style='color:#34c759'>Hardware mixer active</span>",
-    "no-nodes": "<span style='color:#ffd60a'>Hardware mixer active, but this mix needs more "
-                "than 2048 routes; some sends are missing.</span>",
-    "error": "<span style='color:#ff6b5b'>USB error talking to the Digiface; retrying.</span>",
-}
+
+def udev_rule_hint(dev):
+    rule = UDEV_RULES[dev.key]
+    return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. Install "
+            f"the udev rule once:<br><tt>sudo install -m644 packaging/{rule} "
+            "/etc/udev/rules.d/</tt><br>"
+            "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
+
+
+def hw_state_text(dev, state):
+    short = dev.name.replace("RME ", "")
+    red = "<span style='color:#ff6b5b'>{}</span>"
+    return {
+        "starting": f"Connecting to the {short}…",
+        "no-device": red.format(f"{short} not found on {dev.bus}."),
+        "no-access": red.format(f"No permission to open the {short}.") + "<br>"
+                     + udev_rule_hint(dev),
+        "busy": red.format(f"The {short} mixer interface is in use by another program."),
+        "active": "<span style='color:#34c759'>Hardware mixer active</span>",
+        "no-nodes": f"<span style='color:#ffd60a'>Hardware mixer active, but this mix needs "
+                    f"more than {dev.max_routes} routes; some sends are missing.</span>",
+        "error": red.format(f"{dev.bus} error talking to the {short}; retrying."),
+    }.get(state, state)
 
 
 class Led(QLabel):
@@ -33,14 +46,60 @@ class Led(QLabel):
 
 
 class SettingsPanel(QWidget):
-    def __init__(self, hw, parent=None):
+    device_selected = Signal(str)    # device key
+    hw_changed = Signal()            # a device setting (Fireface 802) changed in st["hw"]
+
+    def __init__(self, hw, dev, st, parent=None):
         super().__init__(parent)
         self.hw = hw
+        self.dev = dev
+        self.st = st
         self.setFixedWidth(310)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 0, 0, 0)
         lay.setSpacing(10)
 
+        box = QGroupBox("DEVICE")
+        bl = QVBoxLayout(box)
+        self.device = QComboBox()
+        for d in DEVICES.values():
+            self.device.addItem(d.name, d.key)
+        self.device.setCurrentIndex(self.device.findData(dev.key))
+        self.device.activated.connect(lambda i: self.device_selected.emit(self.device.itemData(i)))
+        bl.addWidget(self.device)
+        lay.addWidget(box)
+        self._card_name = None
+        self._updating = False
+
+        if dev.key == "ff802":
+            self._build_ff802(lay)
+        else:
+            self._build_digiface(lay)
+
+        eng = QGroupBox("HARDWARE MIXER")
+        el = QVBoxLayout(eng)
+        self.hw_label = QLabel("—")
+        self.hw_label.setWordWrap(True)
+        el.addWidget(self.hw_label)
+        self.eng_label = QLabel("—")
+        self.eng_label.setWordWrap(True)
+        el.addWidget(self.eng_label)
+        self.eng_btn = QPushButton("Restart engine")
+        el.addWidget(self.eng_btn)
+        lay.addWidget(eng)
+
+        note = QLabel(
+            f"<span style='color:#6e6e73;font-size:9px'>All mixing happens in the {dev.name}'s "
+            "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
+            "running with the computer idle or the engine stopped.<br><br>Playback 1/2 = the "
+            "<i>Openface Mixer Playback</i> sink. Other playback channels: send apps to the "
+            "interface's own output channels (Pro Audio profile) with qpwgraph/Helvum.</span>")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        lay.addStretch()
+
+    # ------------------------------------------------------------------ Digiface USB
+    def _build_digiface(self, lay):
         clock = QGroupBox("CLOCK")
         cl = QGridLayout(clock)
         cl.addWidget(QLabel("Clock source"), 0, 0)
@@ -80,30 +139,79 @@ class SettingsPanel(QWidget):
         vl.addWidget(self.pro_btn)
         lay.addWidget(prof)
 
-        eng = QGroupBox("HARDWARE MIXER")
-        el = QVBoxLayout(eng)
-        self.hw_label = QLabel("—")
-        self.hw_label.setWordWrap(True)
-        el.addWidget(self.hw_label)
-        self.eng_label = QLabel("—")
-        self.eng_label.setWordWrap(True)
-        el.addWidget(self.eng_label)
-        self.eng_btn = QPushButton("Restart engine")
-        el.addWidget(self.eng_btn)
-        lay.addWidget(eng)
+    # ------------------------------------------------------------------ Fireface 802
+    def _build_ff802(self, lay):
+        """TotalMix's Settings dialog for the 802: clock, sync inputs and AES/optical options.
+        The device can't report these settings, so they come from st["hw"]."""
+        hw = self.st["hw"]
+        clock = QGroupBox("CLOCK")
+        cl = QGridLayout(clock)
+        cl.addWidget(QLabel("Clock source"), 0, 0)
+        self.ff_clock = QComboBox()
+        for key, label, _ in ff.CLOCK_SOURCES:
+            self.ff_clock.addItem(label, key)
+        self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
+        self.ff_clock.activated.connect(
+            lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
+        cl.addWidget(self.ff_clock, 0, 1)
+        cl.addWidget(QLabel("Current source"), 1, 0)
+        self.cur_src = QLabel("—")
+        cl.addWidget(self.cur_src, 1, 1)
+        cl.addWidget(QLabel("Sample rate"), 2, 0)
+        self.rate = QLabel("—")
+        cl.addWidget(self.rate, 2, 1)
+        lay.addWidget(clock)
 
-        note = QLabel(
-            "<span style='color:#6e6e73;font-size:9px'>All mixing happens in the Digiface's "
-            "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
-            "running with the computer idle or the engine stopped.<br><br>Playback 1/2 = the "
-            "<i>Openface Mixer Playback</i> sink. Other playback channels: send apps to the "
-            "Digiface's own output channels (Pro Audio profile) with qpwgraph/Helvum.</span>")
-        note.setWordWrap(True)
-        lay.addWidget(note)
-        lay.addStretch()
-        self._card_name = None
-        self._updating = False
+        sync = QGroupBox("INPUT STATUS")
+        sl = QGridLayout(sync)
+        self.sync_widgets = []
+        for r, (label, *_unused) in enumerate(ff.STATUS_INPUTS):
+            led, rate = Led(), QLabel("—")
+            sl.addWidget(QLabel(label), r, 0)
+            sl.addWidget(led, r, 1)
+            sl.addWidget(rate, r, 2)
+            led.set_state(None)
+            self.sync_widgets.append((led, rate))
+        lay.addWidget(sync)
 
+        opts = QGroupBox("OPTIONS")
+        ol = QGridLayout(opts)
+        rows = (("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
+                ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
+                ("AES out", "aes_pro", (("Consumer", False), ("Professional", True))))
+        for r, (label, key, items) in enumerate(rows):
+            combo = QComboBox()
+            for text, value in items:
+                combo.addItem(text, value)
+            combo.setCurrentIndex(max(0, combo.findData(hw[key])))
+            combo.activated.connect(lambda i, c=combo, k=key: self._set_hw(k, c.itemData(i)))
+            ol.addWidget(QLabel(label), r, 0)
+            ol.addWidget(combo, r, 1)
+        single = QCheckBox("Word clock out always single speed")
+        single.setChecked(hw["word_single"])
+        single.toggled.connect(lambda on: self._set_hw("word_single", on))
+        ol.addWidget(single, len(rows), 0, 1, 2)
+        lay.addWidget(opts)
+
+    def _set_hw(self, key, value):
+        self.st["hw"][key] = value
+        self.hw_changed.emit()
+
+    def update_ff802_status(self, word):
+        """word: the 802's sync status register (Engine.status()["dev_status"]), or None."""
+        if word is None:
+            self.cur_src.setText("—")
+            self.rate.setText("<span style='color:#ff6b5b'>Fireface 802 not connected</span>")
+            for led, rate in self.sync_widgets:
+                led.set_state(None)
+                rate.setText("—")
+            return
+        st = ff.decode_status(word)
+        self.cur_src.setText(st["source"])
+        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
+            led.set_state(state)
+            rate.setText(f"{r / 1000:g}k" if r else "—")
     def _write(self, name, value):
         if not self._updating:
             self.hw.write(name, value)
@@ -160,9 +268,12 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             return
-        text = HW_STATE_TEXT.get(status["hw"], status["hw"])
+        text = hw_state_text(self.dev, status["hw"])
         if status["hw"] in ("active", "no-nodes"):
-            text += f"<br>{status['hw_nodes']} of 2048 routes in use"
+            if self.dev.max_routes:
+                text += f"<br>{status['hw_nodes']} of {self.dev.max_routes} routes in use"
+            else:
+                text += f"<br>{status['hw_nodes']} routes in use"
             if status["hw_levels"]:
                 text += " · meters from the interface"
         self.hw_label.setText(text)

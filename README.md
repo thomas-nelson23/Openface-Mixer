@@ -1,12 +1,14 @@
 # Openface Mixer
 
-A TotalMix-style mixer and control panel for the **RME Digiface USB** on Linux.
+A TotalMix-style mixer and control panel for the **RME Digiface USB** and the
+**RME Fireface 802** (FireWire) on Linux.
 
 ![Openface Mixer: mixer view with input, playback and output rows, presets and hardware panel](docs/screenshots/mixer.png)
 
-RME's TotalMix FX only runs on Windows and macOS. Linux has supported the Digiface USB for
-streaming since kernel 6.12, but nothing controlled its routing. Openface Mixer drives the
-Digiface's own DSP mixer over USB, with the familiar TotalMix workflow.
+RME's TotalMix FX only runs on Windows and macOS. Linux streams audio to both interfaces
+(`snd-usb-audio` for the Digiface since kernel 6.12, `snd-fireface` for the 802), but nothing
+controlled their routing. Openface Mixer drives the interface's own DSP mixer, over USB on the
+Digiface and over FireWire on the 802, with the familiar TotalMix workflow.
 
 - **Mixer view:** Hardware Inputs, Playback and Hardware Outputs, one row each.
   Pick an output, and the input and playback faders set the submix sent to it.
@@ -19,6 +21,11 @@ Digiface's own DSP mixer over USB, with the familiar TotalMix workflow.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only. The **SOLO**
   button in the top bar lights while anything is soloed and switches all solos off and back on.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
+  On the Fireface 802 also the AES and optical options of TotalMix's settings dialog.
+- **Channel settings (Fireface 802):** the ⚙ on each hardware input and output strip, like
+  TotalMix's wrench: phase invert, 48V and Inst on AN 9–12, level and gain on AN 1–8.
+- **Several interfaces:** pick the device in the settings panel. Each has its own mix, presets
+  and engine, so a Digiface and an 802 can run side by side.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
   it at login.
 
@@ -33,10 +40,11 @@ Digiface's own DSP mixer over USB, with the familiar TotalMix workflow.
 
 ## Requirements
 
-- Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`)
+- Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802 a
+  FireWire port and the `snd-fireface` driver (in the kernel since 5.x)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
-- libusb 1.0 and a udev rule for the Digiface (installed by `make install`)
+- libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
 - Build tools: a C compiler, `pkg-config`, and the libpipewire development headers
 - `amixer` (alsa-utils) and `pactl` (libpulse)
 
@@ -113,14 +121,30 @@ TotalMix layout printed on it:
 Key LEDs follow the state. The ARC needs no driver or setup; the window must be open for it to
 work.
 
+### Fireface 802
+
+Connect the 802 over **FireWire** (its USB port only works in Class Compliant mode, where the
+mixer can't be controlled). Openface Mixer opens the connected interface, or pick it under
+**Device** in the settings panel; `openface-mixer --device ff802` opens it directly. The first
+time, the GUI starts and enables its engine (`openface-mixer-engine@ff802`), which then restores
+the 802's mix at every login. Its playback sink is called **Openface Mixer Playback (Fireface
+802)**.
+
+Openface Mixer is the source of truth for the 802's DSP, as TotalMix is: when it connects it
+sends the whole mix and all settings, and it switches the DSP's EQ, dynamics, low cut, auto level
+and reverb/echo off, because it has no controls for them yet. Don't run
+`snd-fireface-ctl-service` alongside it.
+
 ## Files
 
 | Path | Contents |
 | --- | --- |
-| `~/.config/openface-mixer/state.json` | Current mix and UI state |
-| `~/.config/openface-mixer/presets.json` | The 8 preset slots |
-| `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup |
-| `~/.cache/openface-mixer/engine.log` | Engine log (only when started without systemd) |
+| `~/.config/openface-mixer/state.json` | Current mix and UI state (Digiface) |
+| `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
+| `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
+| `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802, plus its settings |
+| `~/.config/openface-mixer/device` | The device the GUI opened last |
+| `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
 
@@ -136,14 +160,18 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## Status and limitations
 
-- Only the Digiface USB is supported, and only tested at 48 kHz (single speed). The UI is designed
-  to adapt to 2x/4x channel counts, but that path is untested.
+- The Digiface USB is only tested at 48 kHz (single speed). The UI is designed to adapt to
+  2x/4x channel counts, but that path is untested.
+- Fireface 802 support follows the protocol documented by snd-firewire-ctl-services and has
+  not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#not-verified-on-hardware-yet)).
+  It has no EQ, dynamics, auto level or reverb/echo controls yet; those DSP effects are
+  switched off. The ARC USB's two phones keys both select PH 9/10.
 - The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
 - The mixer needs USB access to the Digiface (the udev rule installed by `make install`).
   Without it nothing is mixed, and the settings panel says why.
 - Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
 - Solo has no PFL / live mode or exclusive mode yet.
-- No EQ, dynamics or reverb: the Digiface's DSP has no effects.
+- No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
 - ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
   supported (it sent nothing in testing).
 
@@ -153,11 +181,14 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   [rmectl](https://github.com/hoshinolina/rmectl). The USB protocol for the hardware mixer comes
   from those two; the level-meter format was decoded for this project
   (see [docs/HARDWARE.md](docs/HARDWARE.md)).
+- **Takashi Sakamoto** wrote the kernel's `snd-fireface` driver and
+  [snd-firewire-ctl-services](https://github.com/alsa-project/snd-firewire-ctl-services), whose
+  Fireface 802 protocol code is where the 802's register and DSP command layout comes from.
 - [oscmix](https://github.com/michaelforney/oscmix) by Michael Forney does the same job for the
   Fireface UCX II and was the model for controlling the interface's own mixer instead of mixing
   in software. It does not support the Digiface and none of its code or protocol is used here.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Not affiliated with RME (Audio AG). "TotalMix" and "Digiface" are
-trademarks of their respective owners.
+MIT. See [LICENSE](LICENSE). Not affiliated with RME (Audio AG). "TotalMix", "Digiface" and
+"Fireface" are trademarks of their respective owners.

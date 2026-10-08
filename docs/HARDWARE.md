@@ -1,4 +1,9 @@
-# RME Digiface USB: hardware notes
+# Hardware notes
+
+Openface Mixer supports the RME Digiface USB and the RME Fireface 802 (FireWire), and reads the
+RME ARC USB remote.
+
+# RME Digiface USB
 
 ## Linux driver
 
@@ -74,7 +79,114 @@ polls all three frame types every 10 ms on a separate thread.
 
 Access needs the udev rule in `packaging/70-rme-digiface.rules`.
 
-## RME ARC USB
+## Channel naming used in the UI (Digiface)
+
+At single speed, inputs 1–32 are `AD1 1`…`AD4 8` (optical port, channel). Outputs 1–32 are named
+the same way; outputs 33/34 are `Phones`. Playback channel *n* is named after output *n*, which
+it feeds by default.
+
+## PipeWire profiles (Digiface)
+
+- **Multichannel Output**: output only. Monitoring and meters still work, because both happen
+  in the interface, but apps can't record the inputs.
+- **Pro Audio**: exposes `pro-input-0` (32 ch) and `pro-output-0` (34 ch), so apps can record
+  every input and play to every playback channel. The settings panel offers a button for it.
+
+# RME Fireface 802
+
+The original Fireface 802 (not the 802 FS) has FireWire 400 and USB 2.0. On Linux only
+**FireWire** gives access to its DSP mixer:
+
+- **FireWire:** the kernel's `snd-fireface` driver (Linux 5.x and later, unit version `0x000005`)
+  streams 30 in / 30 out at 32–48 kHz, 22 at 64–96 kHz and 14 at 128–192 kHz (no ADAT at quad
+  speed on FireWire 400). It leaves the DSP to userspace, and the protocol is known from
+  Takashi Sakamoto's [snd-firewire-ctl-services](https://github.com/alsa-project/snd-firewire-ctl-services)
+  (`protocols/fireface/src/latter.rs`, `latter/ff802.rs`). Openface Mixer's engine uses it
+  (`engine/fireface_fw.c`).
+- **USB:** without RME's driver the 802 only works in Class Compliant mode, and RME says the
+  mixer can't be remote-controlled in CC mode (only TotalMix FX for iPad does it, over a protocol
+  nobody has documented). Openface Mixer doesn't support the 802 over USB.
+
+Don't run `snd-fireface-ctl-service` at the same time: both would write the DSP.
+
+## FireWire access
+
+The engine opens the 802's node (`/dev/fwN`, found through `/sys/bus/firewire/devices/fwN.M`
+with `specifier_id 0x000a35`, `version 0x000005`) and sends asynchronous transactions with the
+firewire-core character device ioctls. That needs read/write access to `/dev/fwN`:
+`packaging/70-rme-fireface.rules` gives it to the `audio` group and the logged-in user.
+
+## Registers
+
+All values are little-endian quadlets.
+
+| Address | Access | Use |
+| --- | --- | --- |
+| `0xffff'0000'0014` | write | configuration: clock source bits 10–12 (0 internal, `0x400` word clock, `0x800` AES, `0xc00` ADAT A, `0x1000` ADAT B), `0x200` AES in from optical, `0x100` S/PDIF on optical out, `0x40` DSP effects on inputs, `0x20` AES out professional, `0x10` word clock out single speed, `0x2000` MIDI to address offset 0 (the kernel driver's) |
+| `0xffff'0000'001c` | write | DSP command (below) |
+| `0x0000'801c'0000` | read | sync status: rate bits 28–31, clock source bits 9–11 (`0xe00` internal, `0x200` word, `0x400` AES, `0x600` ADAT A, `0x800` ADAT B), sync bits 4–7 and lock bits 0–3 (word, AES, ADAT A, ADAT B), detected rate per input in bits 12–27 |
+| `0xffff'ff00'0000` | read block | meters (below) |
+
+The device can't report its DSP settings back, so the engine keeps its own copy and sends
+everything when it connects. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
+5 = 88.2k, 6 = 96k, 8 = 128k, 9 = 176.4k, 10 = 192k.
+
+## DSP commands
+
+Each command is one quadlet with **odd parity** in bit 31 (bit 31 set when bits 0–30 have an even
+number of ones).
+
+- **Channel settings:** `(channel << 24) | (command << 16) | value`. Channels 0–29 are the
+  hardware inputs, 30–59 the hardware outputs, `0x3c` the FX unit.
+
+  | Command | Inputs | Outputs |
+  | --- | --- | --- |
+  | `0x00` | | volume, dB × 10, −650…60 |
+  | `0x01` | FX send, dB × 10 | stereo balance |
+  | `0x02` | stereo link | |
+  | `0x03` | | FX return, dB × 10 |
+  | `0x04` | | stereo link |
+  | `0x06` / `0x07` | phase invert / AN 1–8 gain (0–120 = 0–12 dB) | — / phase invert |
+  | `0x08` | AN 1–8 level (0 Lo Gain, 1 +4 dBu); AN 9–12 48V | AN 1–8 level (0 −10 dBV, 1 +4 dBu, 2 Hi Gain) |
+  | `0x09` | AN 9–12 Inst | |
+  | `0x20`–`0x22` | low cut on, frequency, slope | same |
+  | `0x40`–`0x4b` | 3-band EQ | same |
+  | `0x60`–`0x67` | dynamics | same |
+  | `0x80`–`0x83` | auto level | same |
+
+  FX unit: `0x00`–`0x0d` reverb, `0x20`–`0x26` echo (`0x00`/`0x20` switch them on).
+- **Mixer:** `0x40000000 | ((0x40 * mixer + source) << 16) | gain`. Mixers 0–29 feed the
+  hardware outputs, 30/31 the FX unit. Sources 0–29 are the hardware inputs, 30/31 the FX
+  returns, 32–61 playback. Gain: 0 = off, else `0x8000 | linear × 0x1000`, so `0x9000` = unity
+  and `0xa000` = +6 dB, the same encoding as the Digiface's gains of −6 dB and up.
+
+Openface Mixer has controls for phase, gain, level, 48V and Inst, and switches low cut, EQ,
+dynamics, auto level, FX sends and returns, reverb and echo off, since it can't show them yet.
+Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
+
+## Meters
+
+Each block read of 392 bytes at `0xffff'ff00'0000` returns one chunk; successive reads cycle
+through five. The last quadlet tags the chunk: `0x11111111` hardware outputs, `0x22222222`
+input channel strips, `0x33333333` playback, `0x55555555` FX bus, `0x66666666` hardware
+inputs. Bytes 0–255 hold 32 64-bit values, bytes 256–383 32 quadlets, masked with `0x07fffff0`
+(full scale). The engine reads all five every 30 ms and uses the quadlets as peaks.
+
+## Channel naming
+
+TotalMix's names: inputs `AN 1`–`AN 12` (9–12 are the front mic/instrument inputs), `AES L/R`,
+`A 1`–`A 8` and `B 1`–`B 8` (ADAT ports); outputs `AN 1`–`AN 8`, `PH 9`–`PH 12` (two phones
+pairs), `AES`, `A`, `B`. The DSP keeps the same channel numbers at every rate; at 2x speed only
+ADAT channels 1–4 of each port exist, at 4x none.
+
+## Not verified on hardware yet
+
+Everything above comes from snd-firewire-ctl-services and the kernel driver, not from captures
+on an 802 with Openface Mixer. Worth checking first: the meter chunks (which values are peaks),
+the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
+and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
+
+# RME ARC USB
 
 The ARC USB (`2a39:0101`, "RME ARC") is a class-compliant USB MIDI device. `snd-usb-audio`
 makes it an ALSA card named `ARC` with one rawmidi port, `/dev/snd/midiC<card>D0`, which members
@@ -94,16 +206,3 @@ same note back with velocity `0x7F` and switched off with `0x00` (tested on the 
 on/off only: lower velocities don't give a dimmer level. While nothing drives them, Talkback and
 Speaker B glow faintly as the ARC's power and USB indicators, and Dim glows faintly once
 TotalMix has connected.
-
-## Channel naming used in the UI
-
-At single speed, inputs 1–32 are `AD1 1`…`AD4 8` (optical port, channel). Outputs 1–32 are named
-the same way; outputs 33/34 are `Phones`. Playback channel *n* is named after output *n*, which
-it feeds by default.
-
-## PipeWire profiles
-
-- **Multichannel Output**: output only. Monitoring and meters still work, because both happen
-  in the interface, but apps can't record the inputs.
-- **Pro Audio**: exposes `pro-input-0` (32 ch) and `pro-output-0` (34 ch), so apps can record
-  every input and play to every playback channel. The settings panel offers a button for it.
