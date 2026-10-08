@@ -17,20 +17,21 @@ Digiface and over FireWire on the 802, with the familiar TotalMix workflow.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
-  readouts at the bottom. Output master faders below.
+  readouts at the bottom. The Hardware Outputs row holds the output master faders.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only. The **SOLO**
   button in the top bar lights while anything is soloed and switches all solos off and back on.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 also the AES and optical options of TotalMix's settings dialog.
 - **Channel settings (Fireface 802):** the ⚙ on each hardware input and output strip, like
-  TotalMix's wrench: phase invert, 48V and Inst on AN 9–12, level and gain on AN 1–8.
+  TotalMix's wrench: phase invert on every channel, level and gain on inputs AN 1–8, 48V and
+  Inst on inputs AN 9–12, and level on outputs AN 1–8.
 - **Several interfaces:** pick the device in the settings panel. Each has its own mix, presets
   and engine, so a Digiface and an 802 can run side by side.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
   it at login.
 
-> **How mixing works:** Openface Mixer drives the Digiface's own DSP mixer over USB, like
-> TotalMix, so input monitoring has no added latency and the mix keeps running in the
+> **How mixing works:** Openface Mixer drives the interface's own DSP mixer (over USB on the
+> Digiface, over FireWire on the 802), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
 > interface even with the computer idle. There is no software mixing. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/HARDWARE.md](docs/HARDWARE.md).
 
@@ -76,10 +77,11 @@ This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enabl
 1. Open **Openface Mixer**.
 2. Monitoring works in any PipeWire profile, because the mix happens in the interface. To
    *record* all 32 inputs in apps, switch the Digiface to the **Pro Audio** profile: click
-   *Record all inputs* in the settings panel, or pick the profile in your sound settings.
+   *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound
+   settings.
 3. To send desktop audio through the mixer, select **Openface Mixer Playback** as your output
-   device. It feeds playback channels 1/2. Send other apps or a DAW to the Digiface's own output
-   channels (playback channel *n* = Digiface output *n*) with qpwgraph or Helvum.
+   device. It feeds playback channels 1/2. Send other apps or a DAW to the interface's own output
+   channels (playback channel *n* = output *n*) with qpwgraph or Helvum.
 4. Click an output's name tag (bottom row) to select its submix, then raise input and playback
    faders. Alternatively, click cells in the **Matrix** view.
 
@@ -142,7 +144,7 @@ and reverb/echo off, because it has no controls for them yet. Don't run
 | `~/.config/openface-mixer/state.json` | Current mix and UI state (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
-| `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802, plus its settings |
+| `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
@@ -165,10 +167,12 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Fireface 802 support follows the protocol documented by snd-firewire-ctl-services and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#not-verified-on-hardware-yet)).
   It has no EQ, dynamics, auto level or reverb/echo controls yet; those DSP effects are
-  switched off. The ARC USB's two phones keys both select PH 9/10.
+  switched off. The ARC USB's two phones keys both select the one Phones pair set in the
+  Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
 - The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
-- The mixer needs USB access to the Digiface (the udev rule installed by `make install`).
-  Without it nothing is mixed, and the settings panel says why.
+- The mixer needs USB access to the Digiface and FireWire access to the 802 (the udev rules
+  `make install` installs, which need sudo once). Without them nothing is mixed, and the
+  settings panel says why.
 - Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
 - Solo has no PFL / live mode or exclusive mode yet.
 - No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
