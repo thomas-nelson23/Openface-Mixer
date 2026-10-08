@@ -24,8 +24,8 @@ class Meter(QWidget):
         self.clip = [False] * channels
         self.max_peak = 0.0
         self._shown_peak = None
-        self.setFixedWidth(6 * channels + 2)
-        self.setMinimumHeight(110)
+        self.setFixedWidth(5 * channels + 2)
+        self.setMinimumHeight(60)
         self.setToolTip("Click to reset peak / clip")
 
     def push(self, peaks, dt):
@@ -72,14 +72,14 @@ class Meter(QWidget):
         grad.setColorAt(0.45, QColor("#34c759"))
         grad.setColorAt(1.0, QColor("#1f8a3c"))
         for i, lv in enumerate(self.levels):
-            x = 1 + i * 6
-            p.fillRect(QRectF(x, top, 5, h), QColor("#0d0d0e"))
+            x = 1 + i * 5
+            p.fillRect(QRectF(x, top, 4, h), QColor("#0d0d0e"))
             fh = self._frac(lv) * h
-            p.fillRect(QRectF(x, top + h - fh, 5, fh), grad)
+            p.fillRect(QRectF(x, top + h - fh, 4, fh), grad)
             hf = self._frac(self.holds[i][0]) * h
             if hf > 0:
-                p.fillRect(QRectF(x, top + h - hf, 5, 1.5), QColor("#f5f5f7"))
-            p.fillRect(QRectF(x, 0, 5, 3), QColor("#ff453a") if self.clip[i] else QColor("#3a3a3d"))
+                p.fillRect(QRectF(x, top + h - hf, 4, 1.5), QColor("#f5f5f7"))
+            p.fillRect(QRectF(x, 0, 4, 3), QColor("#ff453a") if self.clip[i] else QColor("#3a3a3d"))
         # faint segment lines for a hardware feel
         p.setPen(QPen(QColor(0, 0, 0, 90), 1))
         for y in range(top + h - 3, top, -3):
@@ -93,9 +93,9 @@ class Fader(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.pos = db2pos(0.0)
-        self.setMinimumHeight(110)
+        self.setMinimumHeight(60)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setFixedWidth(45)
+        self.setFixedWidth(34)
         self._drag = None
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Drag or scroll · Ctrl = fine · Double-click or Alt-click = 0 dB")
@@ -108,7 +108,7 @@ class Fader(QWidget):
         self.update()
 
     def _track(self):
-        return 14.0, self.height() - 14.0
+        return 12.0, self.height() - 12.0
 
     def _set_pos(self, p):
         p = max(0.0, min(1.0, p))
@@ -153,55 +153,58 @@ class Fader(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         top, bot = self._track()
-        tx = 12.0  # track centre
-        # printed scale on the right (Logic omits the minus signs)
+        tx = 9.0  # track centre
+        # printed scale between fader and meter, as in Pro Tools
         f = QFont(self.font())
-        f.setPointSizeF(6.5)
+        f.setPointSizeF(6.0)
         p.setFont(f)
+        last = None
         for db in self.SCALE:
             y = bot - db2pos(db) * (bot - top)
+            if last is not None and y - last < 9 and db != 0:
+                continue   # short fader: drop marks that would overlap
+            last = y
             p.setPen(QColor("#e0e0e4") if db == 0 else QColor("#76767c"))
-            p.drawText(QRectF(tx + 13, y - 6, 17, 12), Qt.AlignRight | Qt.AlignVCenter, str(abs(db)))
+            p.drawText(QRectF(tx + 9, y - 6, 15, 12), Qt.AlignRight | Qt.AlignVCenter, str(abs(db)))
         # groove
         p.setPen(Qt.NoPen)
         p.setBrush(QColor("#0b0b0c"))
-        p.drawRoundedRect(QRectF(tx - 2, top - 4, 4, bot - top + 8), 2, 2)
-        # fill from bottom to the cap, like Logic's level line
+        p.drawRoundedRect(QRectF(tx - 1.5, top - 4, 3, bot - top + 8), 1.5, 1.5)
         y = bot - self.pos * (bot - top)
         if self.pos > 0:
             p.setBrush(QColor(255, 255, 255, 38))
-            p.drawRoundedRect(QRectF(tx - 2, y, 4, bot - y + 4), 2, 2)
-        # cap: brushed-metal puck with grip lines
-        cap = QRectF(tx - 10, y - 15, 20, 30)
+            p.drawRoundedRect(QRectF(tx - 1.5, y, 3, bot - y + 4), 1.5, 1.5)
+        # cap: flat grey Pro Tools style with a white index line
+        cap = QRectF(tx - 8, y - 12, 16, 24)
         p.setBrush(QColor(0, 0, 0, 90))
-        p.drawRoundedRect(cap.translated(0, 2), 4, 4)
+        p.drawRoundedRect(cap.translated(0, 2), 2, 2)
         g = QLinearGradient(cap.topLeft(), cap.bottomLeft())
         if self.isEnabled():
-            g.setColorAt(0.0, QColor("#f2f2f4"))
-            g.setColorAt(0.45, QColor("#b9b9be"))
-            g.setColorAt(0.5, QColor("#9d9da3"))
-            g.setColorAt(1.0, QColor("#c8c8cd"))
+            g.setColorAt(0.0, QColor("#8a8a90"))
+            g.setColorAt(0.5, QColor("#5e5e64"))
+            g.setColorAt(1.0, QColor("#7a7a80"))
         else:
-            g.setColorAt(0.0, QColor("#5a5a5e"))
-            g.setColorAt(1.0, QColor("#444448"))
+            g.setColorAt(0.0, QColor("#4a4a4e"))
+            g.setColorAt(1.0, QColor("#3a3a3e"))
         p.setBrush(g)
         p.setPen(QPen(QColor("#141415"), 1))
-        p.drawRoundedRect(cap, 4, 4)
-        p.setPen(QPen(QColor(60, 60, 64, 160), 1))
-        for dy in (-9, -6, 6, 9):
-            p.drawLine(QPointF(cap.left() + 5, y + dy), QPointF(cap.right() - 5, y + dy))
-        p.setPen(QPen(QColor("#1c1c1e"), 2))
-        p.drawLine(QPointF(cap.left() + 2, y), QPointF(cap.right() - 2, y))
+        p.drawRoundedRect(cap, 2, 2)
+        p.setPen(QPen(QColor(0, 0, 0, 110), 1))
+        for dy in (-7, -4, 4, 7):
+            p.drawLine(QPointF(cap.left() + 3, y + dy), QPointF(cap.right() - 3, y + dy))
+        p.setPen(QPen(QColor("#f5f5f7"), 1.5))
+        p.drawLine(QPointF(cap.left() + 1, y), QPointF(cap.right() - 1, y))
 
 
 class Knob(QWidget):
-    """Logic-style pan knob: dark dial, white pointer, arc from centre."""
+    """Small pan knob: dark dial, white pointer, arc from centre."""
     changed = Signal(float)
+    text_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.value = 0.0
-        self.setFixedSize(34, 34)
+        self.setFixedSize(26, 26)
         self._drag = None
         self.setCursor(Qt.PointingHandCursor)
         self.set_value(0.0)
@@ -209,6 +212,7 @@ class Knob(QWidget):
     def set_value(self, v):
         self.value = v
         self.setToolTip(f"Pan {self.text()} — drag, double-click to centre")
+        self.text_changed.emit(self.text())
         self.update()
 
     def text(self):
@@ -249,14 +253,14 @@ class Knob(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         c = QPointF(self.width() / 2, self.height() / 2)
-        r = 14.0
+        r = 11.0
         ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
         p.setPen(QPen(QColor("#121213"), 3, Qt.SolidLine, Qt.RoundCap))
         p.drawArc(ring, 225 * 16, -270 * 16)
         if self.value:
             p.setPen(QPen(QColor("#8fc1ff"), 3, Qt.SolidLine, Qt.RoundCap))
             p.drawArc(ring, 90 * 16, int(-self.value * 135 * 16))
-        body = QRectF(c.x() - 10, c.y() - 10, 20, 20)
+        body = QRectF(c.x() - 8, c.y() - 8, 16, 16)
         g = QLinearGradient(body.topLeft(), body.bottomLeft())
         g.setColorAt(0, QColor("#5b5b60"))
         g.setColorAt(1, QColor("#2b2b2e"))
@@ -266,43 +270,47 @@ class Knob(QWidget):
         a = math.radians(90 - self.value * 135)
         p.setPen(QPen(QColor("#f5f5f7"), 2, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(c.x() + 3 * math.cos(a), c.y() - 3 * math.sin(a)),
-                   QPointF(c.x() + 9 * math.cos(a), c.y() - 9 * math.sin(a)))
+                   QPointF(c.x() + 7 * math.cos(a), c.y() - 7 * math.sin(a)))
 
 
 def small_button(text, color="#2f8fff", fg="white", tip="", width=26):
     b = QToolButton()
     b.setText(text)
     b.setCheckable(True)
-    b.setFixedSize(QSize(width, 18))
+    b.setFixedSize(QSize(width, 16))
     b.setToolTip(tip)
     b.setCursor(Qt.PointingHandCursor)
     b.setStyleSheet(
         "QToolButton{background:qlineargradient(y1:0,y2:1,stop:0 #4a4a4e,stop:1 #3a3a3e);"
-        "color:#d6d6da;border:1px solid #151516;border-radius:4px;font-size:9px;font-weight:bold}"
+        "color:#d6d6da;border:1px solid #151516;border-radius:2px;font-size:9px;font-weight:bold}"
         "QToolButton:hover{background:#505055}"
         f"QToolButton:checked{{background:{color};color:{fg};border-color:#151516}}")
     return b
 
 
 def lcd_style(bg="#0f0f10", fg="#d8d8dc"):
-    return (f"background:{bg};color:{fg};border:1px solid #070707;border-radius:3px;"
-            f"font-family:{MONO};font-size:9px;padding:0 1px")
+    return (f"background:{bg};color:{fg};border:1px solid #070707;border-radius:2px;"
+            f"font-family:{MONO};font-size:8px;padding:0")
 
 
 def lcd_label(text=""):
     l = QLabel(text)
     l.setAlignment(Qt.AlignCenter)
-    l.setFixedHeight(16)
+    l.setFixedHeight(15)
+    l.setMinimumWidth(0)
+    l.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     l.setStyleSheet(lcd_style())
     return l
 
 
 class Strip(QFrame):
-    """One mixer channel strip (mono or stereo), laid out like a TotalMix channel strip, with
-    its name tag on top.
+    """One mixer channel strip (mono or stereo), compact like a Pro Tools mix window strip:
+    name tag, pan, solo/mute/stereo, fader with the scale beside its meter, and the level and
+    peak readouts at the bottom.
 
     key identifies the strip in the model ("in:0", "play:2", "out:16"); see model.strip_key().
     """
+    WIDTH = 62
     clicked = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
 
@@ -314,45 +322,62 @@ class Strip(QFrame):
         self.channels = channels
         self.group = 0
         self._selected = False
-        self.setFixedWidth(76)
+        self.setFixedWidth(self.WIDTH)
         self.setObjectName("strip")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(5, 6, 5, 5)
-        lay.setSpacing(4)
+        lay.setContentsMargins(3, 4, 3, 4)
+        lay.setSpacing(3)
 
         self.title = QPushButton(title)
-        self.title.setFixedHeight(22)
+        self.title.setFixedHeight(20)
         self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
         self.title.clicked.connect(self.clicked.emit)
         lay.addWidget(self.title)
 
+        # pan knob with its value beside it, as Pro Tools shows "<64" / "64>"
         self.pan = Knob()
-        knob_row = QHBoxLayout()
-        knob_row.addStretch()
-        knob_row.addWidget(self.pan)
-        knob_row.addStretch()
+        self.pan_text = QLabel(self.pan.text())
+        self.pan_text.setStyleSheet(f"color:#a8a8ae;font-family:{MONO};font-size:8px")
+        self.pan.text_changed.connect(self.pan_text.setText)
         if show_pan:
+            knob_row = QHBoxLayout()
+            knob_row.setSpacing(2)
+            knob_row.addStretch()
+            knob_row.addWidget(self.pan)
+            knob_row.addWidget(self.pan_text)
+            knob_row.addStretch()
             lay.addLayout(knob_row)
         else:
             self.pan.hide()
-            lay.addSpacing(34)
+            self.pan_text.hide()
 
         btns = QHBoxLayout()
-        btns.setSpacing(3)
+        btns.setSpacing(2)
         btns.addStretch()
-        w = 20 if show_solo else 26   # three buttons have to fit the strip width
-        self.mute = small_button("M", "#2f8fff", tip="Mute", width=w)
-        btns.addWidget(self.mute)
+        w = 17 if show_solo else 26   # three buttons have to fit the strip width
         self.solo = small_button("S", SOLO.name(), "#1c1c1e", width=w,
                                  tip="Solo in the current submix (solo-in-place)")
         self.solo.setVisible(show_solo)
         btns.addWidget(self.solo)
+        self.mute = small_button("M", "#2f8fff", tip="Mute", width=w)
+        btns.addWidget(self.mute)
         self.stereo = small_button("ST", "#d8d8dc", "#1c1c1e", tip="Stereo-link this channel pair",
                                    width=w)
         self.stereo.setVisible(show_stereo)
         btns.addWidget(self.stereo)
         btns.addStretch()
         lay.addLayout(btns)
+
+        mid = QHBoxLayout()
+        mid.setSpacing(1)
+        mid.setContentsMargins(0, 0, 0, 0)
+        self.fader = Fader()
+        self.meter = Meter(len(channels))
+        mid.addStretch()
+        mid.addWidget(self.fader)
+        mid.addWidget(self.meter)
+        mid.addStretch()
+        lay.addLayout(mid, 1)
 
         readouts = QHBoxLayout()
         readouts.setSpacing(2)
@@ -363,16 +388,6 @@ class Strip(QFrame):
         readouts.addWidget(self.value)
         readouts.addWidget(self.peak)
         lay.addLayout(readouts)
-
-        mid = QHBoxLayout()
-        mid.setSpacing(0)
-        mid.setContentsMargins(0, 0, 0, 0)
-        self.fader = Fader()
-        self.meter = Meter(len(channels))
-        mid.addWidget(self.fader)
-        mid.addWidget(self.meter)
-        mid.addStretch()
-        lay.addLayout(mid, 1)
 
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.meter.peak_changed.connect(self._show_peak)
@@ -399,17 +414,17 @@ class Strip(QFrame):
     def set_selected(self, sel):
         self._selected = sel
         col = KIND_COLOR[self.kind]
-        top, bot = ("#4a4a4f", "#38383c") if sel else ("#38383b", "#2b2b2e")
+        top, bot = ("#45454a", "#36363a") if sel else ("#333336", "#2a2a2d")
         border = ACCENT.name() if sel else "#141415"
         # fader groups show as a coloured bar along the top edge of the strip
         top_border = (f"border-top:4px solid {GROUP_COLOR[self.group].name()};" if self.group else "")
         tag = ACCENT if sel else col
         self.setStyleSheet(
             f"QFrame#strip{{background:qlineargradient(y1:0,y2:1,stop:0 {top},stop:1 {bot});"
-            f"border:1px solid {border};{top_border}border-radius:6px}}"
+            f"border:1px solid {border};{top_border}border-radius:3px}}"
             f"QPushButton{{background:qlineargradient(y1:0,y2:1,stop:0 {tag.lighter(115).name()},"
-            f"stop:1 {tag.darker(125).name()});color:white;font-size:10px;font-weight:600;"
-            f"border:1px solid #111;border-radius:4px}}"
+            f"stop:1 {tag.darker(125).name()});color:white;font-size:9px;font-weight:600;"
+            f"border:1px solid #111;border-radius:2px;padding:0 1px}}"
             f"QPushButton:hover{{background:{tag.lighter(130).name()}}}")
 
 
@@ -441,7 +456,7 @@ class Row(QWidget):
         inner = QWidget()
         hl = QHBoxLayout(inner)
         hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(2)
+        hl.setSpacing(1)
         for s in strips:
             hl.addWidget(s)
         hl.addStretch()

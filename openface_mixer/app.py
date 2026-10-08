@@ -67,7 +67,6 @@ class MainWindow(QMainWindow):
         body.addWidget(self.tabs, 1)
         self.settings = SettingsPanel(self.hw)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
-        self.settings_btn.toggled.connect(self.settings.setVisible)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
         self.settings.layout().insertWidget(4, self.control)
@@ -76,7 +75,15 @@ class MainWindow(QMainWindow):
         self.arc.encoder.connect(self.arc_encoder)
         self.arc.status_changed.connect(self.arc_status)
         self._talkback_pressed = None     # (time, was it switched on by this press)
-        body.addWidget(self.settings)
+        # the panel scrolls instead of squashing its boxes when the window is short
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidget(self.settings)
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.NoFrame)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_scroll.setFixedWidth(self.settings.width() + 12)
+        self.settings_btn.toggled.connect(self.settings_scroll.setVisible)
+        body.addWidget(self.settings_scroll)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
 
@@ -138,7 +145,7 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         self.status.setObjectName("lcd")
         self.status.setAlignment(Qt.AlignCenter)
-        self.status.setMinimumWidth(420)
+        self.status.setMinimumWidth(160)
         top.addWidget(self.status)
         top.addStretch(1)
 

@@ -13,8 +13,9 @@ Digiface's own DSP mixer over USB, with the familiar TotalMix workflow.
 - **Matrix view:** route any input or playback channel to any output with a click.
 - **Presets:** 8 snapshot slots, like TotalMix, plus export and import of mixes as files.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
-- **Channel strips:** name tag on top, pan, mute, solo, stereo link, peak meters with clip
-  indicators, and output master faders.
+- **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
+  solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
+  readouts at the bottom. Output master faders below.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only. The **SOLO**
   button in the top bar lights while anything is soloed and switches all solos off and back on.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
