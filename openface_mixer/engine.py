@@ -20,6 +20,7 @@ SHM_VERSION = 4
 HDR_SIZE = 64
 HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
 HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED, HDR_DEV_STATUS = 7, 8, 9, 10, 11
+HDR_DEV_STATUS2 = 12
 OFF_GAIN = HDR_SIZE
 OFF_OUT_GAIN = OFF_GAIN + N_OUT * N_SRC * 4
 OFF_PEAK_SRC = OFF_OUT_GAIN + N_OUT * 4
@@ -96,7 +97,7 @@ class Engine:
             "sink_linked": bool(h[HDR_SINK_LINKED]),
             "hw": HW_STATES[h[HDR_HW_STATE]] if h[HDR_HW_STATE] < len(HW_STATES) else "error",
             "hw_nodes": h[HDR_HW_NODES], "hw_levels": bool(h[HDR_HW_LEVELS]),
-            "dev_status": h[HDR_DEV_STATUS],
+            "dev_status": h[HDR_DEV_STATUS], "dev_status2": h[HDR_DEV_STATUS2],
         }
 
     def write_matrix(self, gains, out_gains):

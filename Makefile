@@ -20,7 +20,7 @@ $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
 
-run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802)
+run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802|ff800)
 	./$(ENGINE) --device $(or $(DEVICE),digiface)
 
 test: ## Run the unit tests (no audio hardware or display needed)

@@ -65,7 +65,7 @@ if ! cmp -s packaging/70-rme-digiface.rules "$RULE"; then
     fi
 fi
 
-# --- FireWire access for the Fireface 802's hardware mixer (needs root once)
+# --- FireWire access for the Fireface 802/800 hardware mixer (needs root once)
 RULE=/etc/udev/rules.d/70-rme-fireface.rules
 if ! cmp -s packaging/70-rme-fireface.rules "$RULE"; then
     echo "Installing $RULE so the mixer can talk to RME FireWire interfaces (needs sudo)…"
@@ -73,7 +73,7 @@ if ! cmp -s packaging/70-rme-fireface.rules "$RULE"; then
         sudo udevadm control --reload
         sudo udevadm trigger --subsystem-match=firewire
     else
-        echo "  skipped: Fireface 802 mixing stays unavailable until the rule is installed"
+        echo "  skipped: Fireface mixing stays unavailable until the rule is installed"
     fi
 fi
 

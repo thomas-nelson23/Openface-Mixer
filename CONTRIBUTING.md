@@ -10,7 +10,7 @@ engine/                 C engine that drives the interface's DSP mixer. Builds t
   backend.h             what a device backend provides (open, status, sync, meters)
   backend_digiface.c    the Digiface backend, on top of digiface_usb.c
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
-  fireface_fw.c         Fireface 802 backend: FireWire transactions for mixer, settings, meters
+  fireface_fw.c         Fireface 802 and 800 backends: FireWire transactions for mixer, settings, meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
@@ -22,7 +22,8 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   config.py             file locations (per device), state load/save
   devices.py            supported devices: channel layout, names, engine and service names
   fireface802.py        Fireface 802 channel layout, settings and DSP command words (no Qt)
-  channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain)
+  fireface800.py        Fireface 800 channel layout, configuration and status words (no Qt)
+  channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain, jacks)
   engine.py             shared-memory client + starting/stopping the engine
   hardware.py           Digiface ALSA controls via amixer, PipeWire card profile via pactl
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
@@ -65,7 +66,8 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 
 The unit tests need no audio device. Without the interface the engine still runs and reports
 `no-device`; `--no-autolink` keeps it from linking the playback sink. `make run-engine DEVICE=ff802`
-runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI.
+runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI (`ff800` for
+the Fireface 800).
 
 The GUI also runs offscreen (`QT_QPA_PLATFORM=offscreen`), which is useful for screenshots
 and smoke tests.

@@ -1,21 +1,25 @@
 """Per-channel settings popup, like TotalMix's channel settings (the wrench on each strip).
 
-Shown for devices with channel settings (the Fireface 802): phase invert on every hardware input
-and output, Level and Gain on AN 1-8 inputs, 48V and Inst on AN 9-12, and Level on AN 1-8
-outputs. On a stereo strip the settings apply to both channels, except phase, which is per side.
+Fireface 802: phase invert on every hardware input and output, Level and Gain on AN 1-8 inputs,
+48V and Inst on AN 9-12, and Level on AN 1-8 outputs. On a stereo strip the settings apply to
+both channels, except phase, which is per side.
+
+Fireface 800: front/rear jack on AN 1, 7 and 8, 48V on AN 7-10, and Drive, Limiter and Speaker
+Emulation on the AN 1 instrument input.
 """
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QLabel, QVBoxLayout,
 )
 
+from . import fireface800 as ff800
 from . import fireface802 as ff
 
 
 class ChannelSettings(QFrame):
     changed = Signal()
 
-    def __init__(self, settings, kind, channels, title, parent=None):
+    def __init__(self, dev, settings, kind, channels, title, parent=None):
         """settings: the device settings dict (st["hw"]), edited in place."""
         super().__init__(parent, Qt.Popup)
         self.setObjectName("chansettings")
@@ -32,8 +36,14 @@ class ChannelSettings(QFrame):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(4)
         lay.addLayout(grid)
-        row = 0
+        if dev.key == "ff800":
+            self._build_ff800(grid)
+        else:
+            self._build_ff802(grid)
 
+    def _build_ff802(self, grid):
+        settings, kind, channels = self.s, self.kind, self.channels
+        row = 0
         part = settings["in" if kind == "in" else "out"]
         sides = ("L", "R") if len(channels) == 2 else ("",)
         for c, side in zip(channels, sides):
@@ -82,6 +92,42 @@ class ChannelSettings(QFrame):
             level.currentIndexChanged.connect(lambda i: self._set(part["level"], line, i))
             grid.addWidget(level, row, 1)
             row += 1
+
+    def _build_ff800(self, grid):
+        s, row = self.s, 0
+        for c in self.channels:
+            name = ff800.chan_label("in", c)
+            if c in ff800.JACK_INPUTS:
+                j = ff800.JACK_INPUTS.index(c)
+                grid.addWidget(QLabel(f"{name} input"), row, 0)
+                jack = QComboBox()
+                for key, label in ff800.JACKS:
+                    jack.addItem(label + (" (Inst)" if c == ff800.INST_IN and key == "front"
+                                          else ""), key)
+                jack.setCurrentIndex(max(0, jack.findData(s["jacks"][j])))
+                jack.activated.connect(
+                    lambda i, w=jack, j=j: self._set(s["jacks"], [j], w.itemData(i)))
+                grid.addWidget(jack, row, 1)
+                row += 1
+            if c in ff800.P48_INPUTS:
+                p = ff800.P48_INPUTS.index(c)
+                box = QCheckBox(f"{name} 48V phantom power")
+                box.setChecked(s["p48"][p])
+                box.toggled.connect(lambda on, p=p: self._set(s["p48"], [p], on))
+                grid.addWidget(box, row, 0, 1, 2)
+                row += 1
+            if c == ff800.INST_IN:
+                for key, label in (("drive", "Drive (+25 dB)"), ("limiter", "Limiter"),
+                                   ("speaker_emu", "Speaker emulation")):
+                    box = QCheckBox(label)
+                    box.setChecked(s[key])
+                    box.toggled.connect(lambda on, k=key: self._set_key(k, on))
+                    grid.addWidget(box, row, 0, 1, 2)
+                    row += 1
+
+    def _set_key(self, key, v):
+        self.s[key] = v
+        self.changed.emit()
 
     def _set(self, values, indices, v):
         for i in indices:
