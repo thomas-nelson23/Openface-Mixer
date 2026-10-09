@@ -1,7 +1,7 @@
 # Hardware notes
 
-Openface Mixer supports the RME Digiface USB and the RME Fireface 802 (FireWire), and reads the
-RME ARC USB remote.
+Openface Mixer supports the RME Digiface USB, the RME Fireface 802 and the RME Fireface 800
+(both FireWire), and reads the RME ARC USB remote.
 
 # RME Digiface USB
 
@@ -185,6 +185,62 @@ Everything above comes from snd-firewire-ctl-services and the kernel driver, not
 on an 802 with Openface Mixer. Worth checking first: the meter chunks (which values are peaks),
 the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
 and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
+
+# RME Fireface 800
+
+The Fireface 800 is FireWire only (FireWire 800 and 400). The kernel's `snd-fireface` driver
+(unit version `0x000001`) streams 28 in / 28 out at 32–48 kHz, 20 at 64–96 kHz and 12 at
+128–192 kHz, and leaves the mixer to userspace. It belongs to RME's older "former" protocol
+family (with the Fireface 400), which is nothing like the 802's DSP commands: the mixer, the
+output volumes and the configuration are memory blocks written with block write transactions.
+The layout comes from snd-firewire-ctl-services (`protocols/fireface/src/former.rs`,
+`former/ff800.rs`) and the kernel's `ff-protocol-former.c`. The engine finds the node the same
+way as the 802's (`specifier_id 0x000a35`, `version 0x000001`), with the same udev rule.
+
+## Registers
+
+All values are little-endian quadlets, written as blocks.
+
+| Address | Access | Use |
+| --- | --- | --- |
+| `0x0000'8008'0000` | write block | mixer: 28 blocks of 64 quadlets, one per output; quadlets 0–27 are the hardware inputs, 32–59 playback |
+| `0x0000'8008'1f80` | write block | output volumes, 28 quadlets |
+| `0x0000'fc88'f014` | write block | configuration, 3 quadlets (write only, below) |
+| `0x0000'801c'0000` | read block | status, 2 quadlets (below) |
+| `0x0000'8010'0000` | read block | meters, 1008 bytes: 84 64-bit values, then 84 quadlets (inputs, playback, outputs), full scale `0x7fffff00` |
+
+Gains and volumes are linear × `0x8000`: 0 = off, `0x8000` = unity, `0x10000` = +6 dB. The output
+volume reaches silence, so a muted output is simply volume 0.
+
+Channels: inputs 0–9 `AN 1`–`AN 10`, 10/11 `SPDIF L/R`, 12–19 `A1 1`–`A1 8`, 20–27
+`A2 1`–`A2 8`; outputs the same with 8/9 the phones (`PH 9/10`). AN 1 is the front instrument
+jack or rear line 1, AN 7/8 front mic or rear line, AN 9/10 the rear mic inputs.
+
+## Configuration
+
+| Quadlet | Bits |
+| --- | --- |
+| 0 | line in level `0x08` Lo Gain, `0x10` +4 dBu, `0x20` −10 dBV; line out level `0x400` Hi Gain, `0x800` +4 dBu, `0x1000` −10 dBV; 48V `0x01` AN 7, `0x80` AN 8, `0x02` AN 9, `0x100` AN 10; AN 1 instrument `0x200` drive, `0x04` speaker emulation |
+| 1 | line in level `0x0` Lo Gain, `0x2` +4 dBu, `0x3` −10 dBV; line out level `0x10` Hi Gain, `0x18` +4 dBu, `0x08` −10 dBV; jacks (rear, front) AN 1 (`0x4`, `0x800`), AN 7 (`0x40`, `0x20`), AN 8 (`0x100`, `0x80`), both set = front + rear; `0x200` drive again |
+| 2 | clock `0x1` internal, `0x0` ADAT 1, `0x400` ADAT 2, `0xc00` S/PDIF, `0x1400` word clock, `0x1c00` TCO; `0x1e` allow 44.1/48 kHz at all speeds; `0x200` S/PDIF in optical; `0x100` S/PDIF on optical out; `0x20` S/PDIF out professional, `0x40` emphasis, `0x80` non-audio; `0x2000` word clock out single speed; `0x10000` AN 1 limiter; `0x80000000` continue at errors |
+
+## Status
+
+Quadlet 0: lock/sync per input (ADAT 1 `0x1000`/`0x400`, ADAT 2 `0x2000`/`0x800`, S/PDIF
+`0x40000`/`0x100000`, word clock `0x20000000`/`0x40000000`), active clock source in bits 22–24,
+external rate in bits 25–28, S/PDIF rate in bits 14–17. Quadlet 1 reflects the configuration:
+clock source and rate (bits 1–4, which the kernel driver uses as the sample rate), S/PDIF in
+optical `0x200`, optical out S/PDIF `0x100`, S/PDIF out emphasis `0x40` and professional
+`0x20`, word clock single speed `0x2000`. Openface Mixer takes those options from quadlet 1 the
+first time the 800 connects; the rest of the configuration starts at defaults.
+
+## Fireface 800 not verified on hardware yet
+
+Nobody has run Openface Mixer on an 800 yet. Worth checking first: that mixing and output
+volumes work at all, the meter layout (snd-firewire-ctl-services uses the last 84 quadlets),
+the lock/sync bits (the kernel's `/proc` dump reads some of them the other way round from
+snd-firewire-ctl-services, which Openface Mixer follows), and the mixer and playback slots at
+2x/4x speed.
 
 # RME ARC USB
 

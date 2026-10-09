@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fireface802
+from . import arc, control_room, fireface800
 from .channel_settings import ChannelSettings
 from .config import (
     device_block, load_device_choice, load_state, presets_file, save_device_choice, save_state,
@@ -239,7 +239,8 @@ class MainWindow(QMainWindow):
             title = self.label(kind, c, pair=stereo)
             key = strip_key(kind, c)
             s = Strip(key, title, chans, kind, show_pan=True, show_stereo=has_pair,
-                      show_solo=True, show_settings=self.dev.has_channel_settings and kind == "in")
+                      show_solo=True, show_settings=kind == "in" and any(
+                          self.dev.channel_has_settings(kind, ch) for ch in chans))
             s.stereo.setChecked(stereo)
             s.solo.setChecked(self.st["solo"][kind][c])
             s.solo.toggled.connect(lambda on, k=kind, ch=chans: self.set_solo(k, ch, on))
@@ -267,7 +268,8 @@ class MainWindow(QMainWindow):
             title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
             s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
-                      show_settings=self.dev.has_channel_settings)
+                      show_settings=any(self.dev.channel_has_settings("out", ch)
+                                        for ch in (2 * pair, 2 * pair + 1)))
             s.pair = pair
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
@@ -405,7 +407,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ device settings
     def channel_settings(self, strip, pos):
         """TotalMix's channel settings for a hardware input or output strip (Fireface 802)."""
-        popup = ChannelSettings(self.st["hw"], strip.kind, strip.channels, strip.title.text(), self)
+        popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
+                                strip.title.text(), self)
         popup.setAttribute(Qt.WA_DeleteOnClose)
         popup.changed.connect(self.push_matrix)
         popup.changed.connect(self.refresh_settings_buttons)
@@ -413,12 +416,10 @@ class MainWindow(QMainWindow):
         popup.show()
 
     def refresh_settings_buttons(self):
-        if not self.dev.has_channel_settings:
-            return
         for s in self.strips.values():
             if s.kind != "play":
-                s.set_settings_active(any(fireface802.channel_settings_active(
-                    self.st["hw"], s.kind, c) for c in s.channels))
+                s.set_settings_active(any(self.dev.channel_settings_active(self.st, s.kind, c)
+                                          for c in s.channels))
 
     def switch_device(self, key):
         if key == self.dev.key:
@@ -660,9 +661,18 @@ class MainWindow(QMainWindow):
                 self.rate, self.mode = s["rate"], speed_mode(s["rate"])
                 self.rebuild_all()
         self.status.setText(txt)
+        active = s is not None and s["hw"] == "active"
         if self.dev.key == "ff802":
-            active = s is not None and s["hw"] == "active"
             self.settings.update_ff802_status(s["dev_status"] if active else None)
+        elif self.dev.key == "ff800":
+            hw = self.st["hw"]
+            if active and not hw["known"]:
+                # the configuration is write only: start from what the 800 reports
+                fireface800.settings_from_status(hw, s["dev_status2"])
+                self.settings.refresh_ff800_settings()
+                self.push_matrix()
+            self.settings.update_ff800_status((s["dev_status"], s["dev_status2"])
+                                              if active else None)
 
     def poll_hw(self):
         if self.dev.key == "digiface":

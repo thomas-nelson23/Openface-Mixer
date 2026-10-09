@@ -36,8 +36,10 @@ struct ofm_shm {
 	uint32_t hw_nodes;       /* hardware mixer nodes in use */
 	uint32_t hw_levels;      /* 1 while the meters come from the hardware */
 	uint32_t sink_linked;    /* 1 while the playback sink is linked to playback 1/2 */
-	uint32_t dev_status;     /* device status word (Fireface 802: sync status register) */
-	uint32_t reserved[4];
+	uint32_t dev_status;     /* device status word (Fireface 802: sync status register;
+	                          * Fireface 800: first status quadlet) */
+	uint32_t dev_status2;    /* Fireface 800: second status quadlet */
+	uint32_t reserved[3];
 
 	/* Written by the GUI: linear gain from source k to output channel o.
 	 * Pan and source mute are folded in; the output master is separate. */
@@ -52,7 +54,8 @@ struct ofm_shm {
 
 	/* Written by the GUI, for devices whose settings are DSP commands (Fireface 802): the
 	 * configuration register (0 = leave alone) and setting commands (0 = unused slot). The engine
-	 * sends the ones that changed, and all of them when it (re)connects. */
+	 * sends the ones that changed, and all of them when it (re)connects. The Fireface 800 takes
+	 * its three configuration quadlets from dev_cmd[0..2], sent while dev_config is non-zero. */
 	uint32_t dev_config;
 	uint32_t dev_cmd[OFM_N_DEV_CMD];
 };

@@ -6,11 +6,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import fireface800 as ff800
 from . import fireface802 as ff
 from .devices import DEVICES
 from .hardware import set_card_profile
 
-UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules"}
+UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
+              "ff800": "70-rme-fireface.rules"}
 
 
 def udev_rule_hint(dev):
@@ -47,7 +49,7 @@ class Led(QLabel):
 
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
-    hw_changed = Signal()            # a device setting (Fireface 802) changed in st["hw"]
+    hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
 
     def __init__(self, hw, dev, st, parent=None):
         super().__init__(parent)
@@ -73,6 +75,8 @@ class SettingsPanel(QWidget):
 
         if dev.key == "ff802":
             self._build_ff802(lay)
+        elif dev.key == "ff800":
+            self._build_ff800(lay)
         else:
             self._build_digiface(lay)
 
@@ -212,6 +216,102 @@ class SettingsPanel(QWidget):
         for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
             led.set_state(state)
             rate.setText(f"{r / 1000:g}k" if r else "—")
+
+    # ------------------------------------------------------------------ Fireface 800
+    def _build_ff800(self, lay):
+        """TotalMix's Settings dialog for the 800: clock, sync inputs, levels and S/PDIF
+        options. The clock and S/PDIF options start from what the device reports."""
+        self.ff800_combos = {}
+        clock = QGroupBox("CLOCK")
+        cl = QGridLayout(clock)
+        cl.addWidget(QLabel("Clock source"), 0, 0)
+        cl.addWidget(self._ff800_combo("clock", [(label, key) for key, label, _ in
+                                                 ff800.CLOCK_SOURCES]), 0, 1)
+        cl.addWidget(QLabel("Current source"), 1, 0)
+        self.cur_src = QLabel("—")
+        cl.addWidget(self.cur_src, 1, 1)
+        cl.addWidget(QLabel("Sample rate"), 2, 0)
+        self.rate = QLabel("—")
+        cl.addWidget(self.rate, 2, 1)
+        lay.addWidget(clock)
+
+        sync = QGroupBox("INPUT STATUS")
+        sl = QGridLayout(sync)
+        self.sync_widgets = []
+        for r, (label, *_unused) in enumerate(ff800.STATUS_INPUTS):
+            led, rate = Led(), QLabel("—")
+            sl.addWidget(QLabel(label), r, 0)
+            sl.addWidget(led, r, 1)
+            sl.addWidget(rate, r, 2)
+            led.set_state(None)
+            self.sync_widgets.append((led, rate))
+        lay.addWidget(sync)
+
+        levels = QGroupBox("LEVELS")
+        ll = QGridLayout(levels)
+        ll.addWidget(QLabel("Line inputs"), 0, 0)
+        ll.addWidget(self._ff800_combo("in_level", [(l, k) for k, l, *_ in ff800.IN_LEVELS]), 0, 1)
+        ll.addWidget(QLabel("Line outputs"), 1, 0)
+        ll.addWidget(self._ff800_combo("out_level", [(l, k) for k, l, *_ in ff800.OUT_LEVELS]),
+                     1, 1)
+        lay.addWidget(levels)
+
+        opts = QGroupBox("OPTIONS")
+        ol = QGridLayout(opts)
+        rows = (("S/PDIF in", "spdif_in", (("Coaxial", "coax"), ("Optical", "optical"))),
+                ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
+                ("S/PDIF out", "spdif_pro", (("Consumer", False), ("Professional", True))))
+        for r, (label, key, items) in enumerate(rows):
+            ol.addWidget(QLabel(label), r, 0)
+            ol.addWidget(self._ff800_combo(key, items), r, 1)
+        r = len(rows)
+        for key, label in (("emphasis", "S/PDIF out emphasis"),
+                           ("non_audio", "S/PDIF out non-audio"),
+                           ("word_single", "Word clock out always single speed")):
+            box = QCheckBox(label)
+            box.toggled.connect(lambda on, k=key: self._set_hw(k, on))
+            ol.addWidget(box, r, 0, 1, 2)
+            self.ff800_combos[key] = box
+            r += 1
+        lay.addWidget(opts)
+        self.refresh_ff800_settings()
+
+    def _ff800_combo(self, key, items):
+        combo = QComboBox()
+        for text, value in items:
+            combo.addItem(text, value)
+        combo.activated.connect(lambda i: self._set_hw(key, combo.itemData(i)))
+        self.ff800_combos[key] = combo
+        return combo
+
+    def refresh_ff800_settings(self):
+        """Show st["hw"] (after it was filled in from the device's status)."""
+        hw = self.st["hw"]
+        for key, w in self.ff800_combos.items():
+            w.blockSignals(True)
+            if isinstance(w, QCheckBox):
+                w.setChecked(hw[key])
+            else:
+                w.setCurrentIndex(max(0, w.findData(hw[key])))
+            w.blockSignals(False)
+
+    def update_ff800_status(self, words):
+        """words: the 800's two status quadlets (Engine.status() dev_status, dev_status2), or
+        None."""
+        if words is None:
+            self.cur_src.setText("—")
+            self.rate.setText("<span style='color:#ff6b5b'>Fireface 800 not connected</span>")
+            for led, rate in self.sync_widgets:
+                led.set_state(None)
+                rate.setText("—")
+            return
+        st = ff800.decode_status(*words)
+        self.cur_src.setText(st["source"])
+        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
+            led.set_state(state)
+            rate.setText(f"{r / 1000:g}k" if r else "—")
+
     def _write(self, name, value):
         if not self._updating:
             self.hw.write(name, value)

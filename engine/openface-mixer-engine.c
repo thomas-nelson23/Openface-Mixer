@@ -6,14 +6,14 @@
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
  * added latency, as with TotalMix. The device's level meters come back the same way. The
  * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c) or the
- * Fireface 802 over FireWire (fireface_fw.c).
+ * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c).
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
  * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
  * (systemd user service), and the interface keeps mixing with the last mix when it exits.
  *
  * Options:
- *   --device KEY    digiface (default) or ff802
+ *   --device KEY    digiface (default), ff802 or ff800
  *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
  *   --no-autolink   don't link the sink to the interface (useful for testing with pw-link)
  */
@@ -490,21 +490,25 @@ int main(int argc, char *argv[])
 	struct data d = { 0 };
 	int no_sink = 0;
 
+	static const struct ofm_backend *const backends[] = {
+		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff800,
+	};
 	d.be = &ofm_backend_digiface;
 	for (int i = 1; i < argc; i++) {
+		const struct ofm_backend *be = NULL;
+		if (strcmp(argv[i], "--device") == 0 && i + 1 < argc)
+			for (size_t b = 0; b < sizeof(backends) / sizeof(backends[0]); b++)
+				if (strcmp(argv[i + 1], backends[b]->key) == 0)
+					be = backends[b];
 		if (strcmp(argv[i], "--no-sink") == 0)
 			no_sink = 1;
 		else if (strcmp(argv[i], "--no-autolink") == 0)
 			d.no_autolink = 1;
-		else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc &&
-			 strcmp(argv[i + 1], ofm_backend_ff802.key) == 0)
-			d.be = &ofm_backend_ff802, i++;
-		else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc &&
-			 strcmp(argv[i + 1], ofm_backend_digiface.key) == 0)
-			i++;
+		else if (be != NULL)
+			d.be = be, i++;
 		else {
-			fprintf(stderr, "usage: %s [--device digiface|ff802] [--no-sink] [--no-autolink]\n",
-				argv[0]);
+			fprintf(stderr, "usage: %s [--device digiface|ff802|ff800] [--no-sink] "
+				"[--no-autolink]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -533,7 +537,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	/* one sink per device, so the Digiface's and the 802's engines can run side by side */
+	/* one sink per device, so several devices' engines can run side by side */
 	char sink_name[80], sink_desc[96], args[1024];
 	if (is_digiface(&d)) {
 		snprintf(sink_name, sizeof(sink_name), "%s", SINK_NAME);

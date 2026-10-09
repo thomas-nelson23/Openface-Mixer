@@ -7,7 +7,7 @@ called, and where its engine, config files and PipeWire nodes are.
 import re
 from pathlib import Path
 
-from . import fireface802
+from . import fireface800, fireface802
 from .model import chan_label as digiface_chan_label, pair_label as digiface_pair_label
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
@@ -21,7 +21,6 @@ class Device:
     bus = ""                 # "USB" or "FireWire", for messages
     phones_pairs = ()        # output pairs that are headphones
     max_routes = None        # hardware mixer crosspoint limit, or None (full matrix)
-    has_channel_settings = False   # per-channel settings (phase, 48V, ...) like TotalMix's
 
     @property
     def shm_name(self):
@@ -57,6 +56,14 @@ class Device:
     def device_words(self, st):
         """(configuration word, [DSP setting commands]) for the engine; (0, []) if none."""
         return 0, []
+
+    def channel_has_settings(self, kind, c):
+        """True if hardware channel c has TotalMix-style channel settings (the strip's ⚙)."""
+        return False
+
+    def channel_settings_active(self, st, kind, c):
+        """True if channel c has a setting worth flagging on its strip."""
+        return False
 
 
 class Digiface(Device):
@@ -96,7 +103,6 @@ class Fireface802(Device):
     name = "RME Fireface 802"
     bus = "FireWire"
     phones_pairs = fireface802.PHONES_PAIRS
-    has_channel_settings = True
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def channels(self, kind, mode):
@@ -117,8 +123,46 @@ class Fireface802(Device):
     def device_words(self, st):
         return fireface802.config_word(st["hw"]), fireface802.commands(st["hw"])
 
+    def channel_has_settings(self, kind, c):
+        return kind in ("in", "out")      # phase invert on every hardware channel
 
-DEVICES = {d.key: d for d in (Digiface(), Fireface802())}
+    def channel_settings_active(self, st, kind, c):
+        return fireface802.channel_settings_active(st["hw"], kind, c)
+
+
+class Fireface800(Device):
+    key = "ff800"
+    name = "RME Fireface 800"
+    bus = "FireWire"
+    phones_pairs = fireface800.PHONES_PAIRS
+    unit_version = 0x000001      # SND_FF_UNIT_VERSION_FF800 in the kernel driver
+
+    def channels(self, kind, mode):
+        return fireface800.channels(kind, mode)
+
+    def chan_label(self, kind, c, mode):
+        return fireface800.chan_label(kind, c)
+
+    def pair_label(self, kind, c, mode):
+        return fireface800.pair_label(kind, c)
+
+    def present(self):
+        return find_firewire_unit(RME_OUI, self.unit_version) is not None
+
+    def upgrade_settings(self, st):
+        st["hw"] = fireface800.upgrade_settings(st.get("hw"))
+
+    def device_words(self, st):
+        return fireface800.device_words(st["hw"])
+
+    def channel_has_settings(self, kind, c):
+        return fireface800.channel_has_settings(kind, c)
+
+    def channel_settings_active(self, st, kind, c):
+        return fireface800.channel_settings_active(st["hw"], kind, c)
+
+
+DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface800())}
 DEFAULT = DEVICES["digiface"]
 
 
