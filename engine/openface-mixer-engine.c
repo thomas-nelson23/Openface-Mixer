@@ -5,15 +5,16 @@
  * shm_layout.h), written by the GUI. A 20 ms main-loop timer loads it into the interface's own
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
  * added latency, as with TotalMix. The device's level meters come back the same way. The
- * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c) or the
- * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c).
+ * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c), the
+ * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c), or the HDSPe RayDAT PCIe card
+ * through its kernel driver (raydat.c).
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
  * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
  * (systemd user service), and the interface keeps mixing with the last mix when it exits.
  *
  * Options:
- *   --device KEY    digiface (default), ff802 or ff800
+ *   --device KEY    digiface (default), ff802, ff800 or raydat
  *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
  *   --no-autolink   don't link the sink to the interface (useful for testing with pw-link)
  */
@@ -43,10 +44,17 @@
 
 #define SINK_NAME       "openface_mixer_playback"  /* other devices than the Digiface: _<key> added */
 
-/* matrix.bin: "OFM3", gain[][], out_gain[]. Older files are still read, see load_matrix(). */
-#define MATRIX_FILE_MAGIC    0x334d464fu
-#define MATRIX_FILE_MAGIC_V2 0x324d464fu /* "OFM2": mixer mode, gain[][], out_gain[] */
+/* matrix.bin: "OFM4", gain[][], out_gain[]. Older files are still read, see load_matrix(). */
+#define MATRIX_FILE_MAGIC    0x344d464fu
+#define MATRIX_FILE_MAGIC_V3 0x334d464fu /* "OFM3": gains at the old 34 x 66 size */
+#define MATRIX_FILE_MAGIC_V2 0x324d464fu /* "OFM2": mixer mode, then as OFM3 */
 #define DEVICE_BLOCK_MAGIC   0x3144464fu /* "OFD1": dev_config, dev_cmd[], after out_gain[] */
+
+/* matrix sizes before version 4 (32 inputs, 34 playback, 34 outputs) */
+#define OLD_N_IN    32
+#define OLD_N_PLAY  34
+#define OLD_N_SRC   (OLD_N_IN + OLD_N_PLAY)
+#define OLD_N_OUT   34
 
 #define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
 #define HW_STATUS_TICKS  25  /* read device status every 500 ms */
@@ -58,6 +66,7 @@ struct obj {
 	uint32_t id;
 	int type; /* 1 node, 2 port, 3 link */
 	char name[160];     /* node.name or port.name */
+	char card[64];      /* nodes: ALSA card name, if any */
 	uint32_t node_id;   /* ports */
 	int dir_out;        /* ports: 1 = output */
 	uint32_t out_port, in_port; /* links */
@@ -121,11 +130,29 @@ static void matrix_path(const struct data *d, char *buf, size_t len)
 			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep);
 }
 
+/* Reads one block of gains and output gains at the old size into s. */
+static int load_old_gains(struct ofm_shm *s, FILE *f, bool with_out)
+{
+	static float g[OLD_N_OUT][OLD_N_SRC];
+	float out[OLD_N_OUT];
+	if (fread(g, sizeof(g), 1, f) != 1 || (with_out && fread(out, sizeof(out), 1, f) != 1))
+		return -1;
+	for (int o = 0; o < OLD_N_OUT; o++) {
+		for (int k = 0; k < OLD_N_IN; k++)
+			s->gain[o][k] = g[o][k];
+		for (int p = 0; p < OLD_N_PLAY; p++)
+			s->gain[o][N_IN + p] = g[o][OLD_N_IN + p];
+		s->out_gain[o] = with_out ? out[o] : 1.0f;
+	}
+	return 0;
+}
+
 /*
- * matrix.bin is "OFM3", gain[][] and out_gain[], then for devices with settings "OFD1",
- * dev_config and dev_cmd[]. "OFM2" files carry a mixer mode word before the gains, which is
- * skipped. Version 1 files hold only a gain matrix with the output masters folded in; they load
- * at unity masters.
+ * matrix.bin is "OFM4", gain[][] and out_gain[], then for devices with settings "OFD1",
+ * dev_config and dev_cmd[]. "OFM3" files hold the same at the old 34 x 66 size, which is
+ * moved into place; "OFM2" files carry a mixer mode word before that, which is skipped.
+ * Version 1 files hold only an old-size gain matrix with the output masters folded in; they
+ * load at unity masters.
  */
 static int load_matrix(struct ofm_shm *s, const char *path)
 {
@@ -134,27 +161,28 @@ static int load_matrix(struct ofm_shm *s, const char *path)
 		return -1;
 	uint32_t magic, mode;
 	int ret = -1;
-	if (fread(&magic, sizeof(magic), 1, f) == 1 &&
-	    (magic == MATRIX_FILE_MAGIC ||
-	     (magic == MATRIX_FILE_MAGIC_V2 && fread(&mode, sizeof(mode), 1, f) == 1))) {
-		uint32_t dmagic;
-		if (fread(s->gain, sizeof(s->gain), 1, f) == 1 &&
-		    fread(s->out_gain, sizeof(s->out_gain), 1, f) == 1) {
-			ret = 0;
-			if (fread(&dmagic, sizeof(dmagic), 1, f) == 1 && dmagic == DEVICE_BLOCK_MAGIC &&
-			    (fread(&s->dev_config, sizeof(s->dev_config), 1, f) != 1 ||
-			     fread(s->dev_cmd, sizeof(s->dev_cmd), 1, f) != 1)) {
-				s->dev_config = 0;
-				memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
-			}
-		}
-	} else {
+	bool ok = fread(&magic, sizeof(magic), 1, f) == 1;
+	if (ok && magic == MATRIX_FILE_MAGIC)
+		ret = fread(s->gain, sizeof(s->gain), 1, f) == 1 &&
+		      fread(s->out_gain, sizeof(s->out_gain), 1, f) == 1 ? 0 : -1;
+	else if (ok && (magic == MATRIX_FILE_MAGIC_V3 ||
+			(magic == MATRIX_FILE_MAGIC_V2 && fread(&mode, sizeof(mode), 1, f) == 1)))
+		ret = load_old_gains(s, f, true);
+	else {
 		rewind(f);
-		if (fread(s->gain, sizeof(s->gain), 1, f) == 1) {
-			for (int o = 0; o < N_OUT; o++)
+		if (load_old_gains(s, f, false) == 0) {
+			for (int o = OLD_N_OUT; o < N_OUT; o++)
 				s->out_gain[o] = 1.0f;
-			ret = 0;
+			fclose(f);
+			return 0;
 		}
+	}
+	uint32_t dmagic;
+	if (ret == 0 && fread(&dmagic, sizeof(dmagic), 1, f) == 1 && dmagic == DEVICE_BLOCK_MAGIC &&
+	    (fread(&s->dev_config, sizeof(s->dev_config), 1, f) != 1 ||
+	     fread(s->dev_cmd, sizeof(s->dev_cmd), 1, f) != 1)) {
+		s->dev_config = 0;
+		memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
 	}
 	fclose(f);
 	return ret;
@@ -226,6 +254,17 @@ static struct obj *node_by_prefix(struct data *d, const char *prefix, int exact)
 		if (o->type != 1)
 			continue;
 		if (exact ? strcmp(o->name, prefix) == 0 : strncmp(o->name, prefix, strlen(prefix)) == 0)
+			return o;
+	}
+	return NULL;
+}
+
+static struct obj *node_by_card(struct data *d, const char *prefix)
+{
+	for (int i = 0; i < d->n_objs; i++) {
+		struct obj *o = &d->objs[i];
+		if (o->type == 1 && strncmp(o->name, "alsa_output.", 12) == 0 &&
+		    strncmp(o->card, prefix, strlen(prefix)) == 0)
 			return o;
 	}
 	return NULL;
@@ -315,7 +354,8 @@ static void make_link(struct data *d, struct obj *op, struct obj *ip)
 static void relink(struct data *d)
 {
 	struct obj *sink = node_by_prefix(d, d->sink_out_name, 1);
-	struct obj *dout = node_by_prefix(d, d->be->out_node_prefix, 0);
+	struct obj *dout = d->be->out_node_card ? node_by_card(d, d->be->out_node_card)
+					        : node_by_prefix(d, d->be->out_node_prefix, 0);
 	struct obj *fl = NULL, *fr = NULL, *a0 = NULL, *a1 = NULL;
 
 	if (sink && dout) {
@@ -351,6 +391,9 @@ static void registry_global(void *data, uint32_t id, uint32_t permissions,
 		if ((v = spa_dict_lookup(props, PW_KEY_NODE_NAME)) == NULL)
 			return;
 		snprintf(o.name, sizeof(o.name), "%s", v);
+		if ((v = spa_dict_lookup(props, "alsa.card_name")) != NULL ||
+		    (v = spa_dict_lookup(props, "api.alsa.card.name")) != NULL)
+			snprintf(o.card, sizeof(o.card), "%s", v);
 	} else if (strcmp(type, PW_TYPE_INTERFACE_Port) == 0) {
 		o.type = 2;
 		if ((v = spa_dict_lookup(props, PW_KEY_PORT_NAME)) == NULL)
@@ -491,7 +534,7 @@ int main(int argc, char *argv[])
 	int no_sink = 0;
 
 	static const struct ofm_backend *const backends[] = {
-		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff800,
+		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff800, &ofm_backend_raydat,
 	};
 	d.be = &ofm_backend_digiface;
 	for (int i = 1; i < argc; i++) {
@@ -507,7 +550,7 @@ int main(int argc, char *argv[])
 		else if (be != NULL)
 			d.be = be, i++;
 		else {
-			fprintf(stderr, "usage: %s [--device digiface|ff802|ff800] [--no-sink] "
+			fprintf(stderr, "usage: %s [--device digiface|ff802|ff800|raydat] [--no-sink] "
 				"[--no-autolink]\n", argv[0]);
 			return 2;
 		}

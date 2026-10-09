@@ -86,6 +86,11 @@ uint32_t ff802_parity(uint32_t cmd)
 	return __builtin_popcount(cmd) % 2 ? cmd : cmd | 0x80000000u;
 }
 
+int ff802_shm_source(int src)
+{
+	return src < FF802_PLAY_SRC ? src : OFM_N_IN + (src - FF802_PLAY_SRC);
+}
+
 uint32_t ff802_mixer_cmd(int out, int src, uint16_t gain)
 {
 	return VIRT_CMD | ((uint32_t)(MIXER_STEP * out + src) << 16) | gain;
@@ -396,7 +401,7 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 		/* a muted output gets no signal at all: the volume only goes down to -65 dB */
 		bool muted = !(s->out_gain[o] > 0.0f);
 		for (int k = 0; k < FF802_N_SRC; k++) {
-			uint32_t g = muted ? 0 : ff802_encode_gain(s->gain[o][k]);
+			uint32_t g = muted ? 0 : ff802_encode_gain(s->gain[o][ff802_shm_source(k)]);
 			if (g)
 				routes++;
 			if (!full && g == f->sent_gain[o][k])

@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         self.dev = dev
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
-        self.hw = Hardware()
+        self.hw = Hardware(dev.alsa_card)
         self.st = load_state(dev)
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
@@ -654,7 +654,7 @@ class MainWindow(QMainWindow):
             self.settings.eng_label.setText(
                 ("Running" if s["processing"] else "Running (not responding)") +
                 "<br>Playback sink: " +
-                ("linked to playback 1/2" if s["sink_linked"] else
+                (f"linked to playback {self.dev.sink_channels}" if s["sink_linked"] else
                  f"not linked to the {self.dev.name.replace('RME ', '')}"))
             self.settings.eng_btn.setText("Restart engine")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
@@ -677,6 +677,8 @@ class MainWindow(QMainWindow):
     def poll_hw(self):
         if self.dev.key == "digiface":
             self.settings.update_hw(self.hw.read())
+        elif self.dev.key == "raydat":
+            self.settings.update_raydat(self.hw.read())
 
     def poll_profile(self):
         if self.dev.key == "digiface":

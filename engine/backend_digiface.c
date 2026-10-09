@@ -94,11 +94,11 @@ static int meters(void *h, struct ofm_shm *s)
 	int r = dfu_read_meters(d->dfu, &m);
 	if (r < 0)
 		return r;
-	for (int i = 0; i < OFM_N_IN; i++)
+	for (int i = 0; i < DFU_N_IN; i++)
 		raise_peak(&s->peak_src[i], m.peak[DFU_METER_INPUT][i]);
-	for (int i = 0; i < OFM_N_PLAY; i++)
+	for (int i = 0; i < DFU_N_PLAY; i++)
 		raise_peak(&s->peak_src[OFM_N_IN + i], m.peak[DFU_METER_PLAYBACK][i]);
-	for (int o = 0; o < OFM_N_OUT; o++)
+	for (int o = 0; o < DFU_N_OUT; o++)
 		raise_peak(&s->peak_out[o], m.peak[DFU_METER_OUTPUT][o]);
 	return 0;
 }

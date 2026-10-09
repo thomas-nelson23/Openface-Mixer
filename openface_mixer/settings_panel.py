@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 
 from . import fireface800 as ff800
 from . import fireface802 as ff
+from . import raydat
 from .devices import DEVICES
 from .hardware import set_card_profile
 
@@ -16,6 +17,10 @@ UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rul
 
 
 def udev_rule_hint(dev):
+    if dev.key not in UDEV_RULES:     # PCIe cards: plain ALSA devices
+        return ("Openface Mixer opens the card's ALSA control and hwdep devices in /dev/snd. "
+                "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
+                "local login session).")
     rule = UDEV_RULES[dev.key]
     return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. Install "
             f"the udev rule once:<br><tt>sudo install -m644 packaging/{rule} "
@@ -31,7 +36,10 @@ def hw_state_text(dev, state):
         "no-device": red.format(f"{short} not found on {dev.bus}."),
         "no-access": red.format(f"No permission to open the {short}.") + "<br>"
                      + udev_rule_hint(dev),
-        "busy": red.format(f"The {short} mixer interface is in use by another program."),
+        "busy": red.format(
+            f"The {short} driver refuses mixer changes while playback and recording are open in "
+            "two different programs. Let one program (PipeWire or JACK) use both."
+            if dev.bus == "PCIe" else f"The {short} mixer interface is in use by another program."),
         "active": "<span style='color:#34c759'>Hardware mixer active</span>",
         "no-nodes": f"<span style='color:#ffd60a'>Hardware mixer active, but this mix needs "
                     f"more than {dev.max_routes} routes; some sends are missing.</span>",
@@ -77,6 +85,8 @@ class SettingsPanel(QWidget):
             self._build_ff802(lay)
         elif dev.key == "ff800":
             self._build_ff800(lay)
+        elif dev.key == "raydat":
+            self._build_raydat(lay)
         else:
             self._build_digiface(lay)
 
@@ -95,7 +105,8 @@ class SettingsPanel(QWidget):
         note = QLabel(
             f"<span style='color:#6e6e73;font-size:9px'>All mixing happens in the {dev.name}'s "
             "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
-            "running with the computer idle or the engine stopped.<br><br>Playback 1/2 = the "
+            f"running with the computer idle or the engine stopped.<br><br>Playback "
+            f"{dev.sink_channels} = the "
             "<i>Openface Mixer Playback</i> sink. Other playback channels: send apps to the "
             "interface's own output channels (Pro Audio profile) with qpwgraph/Helvum.</span>")
         note.setWordWrap(True)
@@ -175,11 +186,12 @@ class SettingsPanel(QWidget):
         ol.addWidget(single, len(rows), 0, 1, 2)
         lay.addWidget(opts)
 
-    def _build_fw_clock(self, lay, clock_combo, status_inputs):
-        """The CLOCK and INPUT STATUS boxes of a FireWire Fireface."""
+    def _build_fw_clock(self, lay, clock_combo, status_inputs, clock_label="Clock source"):
+        """The CLOCK and INPUT STATUS boxes of a FireWire Fireface (and the RayDAT). Returns the
+        CLOCK box's grid."""
         clock = QGroupBox("CLOCK")
         cl = QGridLayout(clock)
-        cl.addWidget(QLabel("Clock source"), 0, 0)
+        cl.addWidget(QLabel(clock_label), 0, 0)
         cl.addWidget(clock_combo, 0, 1)
         cl.addWidget(QLabel("Current source"), 1, 0)
         self.cur_src = QLabel("—")
@@ -192,14 +204,17 @@ class SettingsPanel(QWidget):
         sync = QGroupBox("INPUT STATUS")
         sl = QGridLayout(sync)
         self.sync_widgets = []
+        self._sync_labels = {}
         for r, (label, *_unused) in enumerate(status_inputs):
             led, rate = Led(), QLabel("—")
-            sl.addWidget(QLabel(label), r, 0)
+            self._sync_labels[label] = QLabel(label)
+            sl.addWidget(self._sync_labels[label], r, 0)
             sl.addWidget(led, r, 1)
             sl.addWidget(rate, r, 2)
             led.set_state(None)
             self.sync_widgets.append((led, rate))
         lay.addWidget(sync)
+        return cl
 
     def _show_fw_status(self, st):
         """st: the device's decode_status() dict, or None while it is not connected."""
@@ -286,6 +301,69 @@ class SettingsPanel(QWidget):
         """words: the 800's two status quadlets (Engine.status() dev_status, dev_status2), or
         None."""
         self._show_fw_status(None if words is None else ff800.decode_status(*words))
+
+    # ------------------------------------------------------------------ HDSPe RayDAT
+    def _build_raydat(self, lay):
+        """TotalMix's Settings dialog for the RayDAT, from the driver's ALSA controls: clock mode,
+        preferred sync reference, internal rate, S/PDIF and word clock options, input status."""
+        combos = {}
+        for name in (raydat.CLOCK_MODE, raydat.PREF_SYNC_REF, raydat.INTERNAL_RATE):
+            combo = QComboBox()
+            combo.activated.connect(lambda i, n=name: self._write(n, i))
+            combos[name] = combo
+        self.rd_combos = combos
+        clock = self._build_fw_clock(lay, combos[raydat.CLOCK_MODE], raydat.STATUS_INPUTS,
+                                     "Clock mode")
+        clock.addWidget(QLabel("Prefer"), 3, 0)
+        clock.addWidget(combos[raydat.PREF_SYNC_REF], 3, 1)
+        clock.addWidget(QLabel("Internal rate"), 4, 0)
+        clock.addWidget(combos[raydat.INTERNAL_RATE], 4, 1)
+
+        opts = QGroupBox("OPTIONS")
+        ol = QVBoxLayout(opts)
+        self.rd_toggles = {}
+        for name, label in raydat.TOGGLES:
+            box = QCheckBox(label)
+            box.toggled.connect(lambda on, n=name: self._write(n, "on" if on else "off"))
+            ol.addWidget(box)
+            self.rd_toggles[name] = box
+        lay.addWidget(opts)
+
+    def update_raydat(self, ctrls):
+        """ctrls: the card's ALSA controls (Hardware.read()), or None if it is not found."""
+        st = raydat.decode_status(ctrls)
+        self._updating = True
+        try:
+            for name, combo in self.rd_combos.items():
+                c = ctrls.get(name) if st else None
+                combo.setEnabled(bool(c))
+                if not c:
+                    continue
+                if [combo.itemText(i) for i in range(combo.count())] != c["items"]:
+                    combo.clear()
+                    combo.addItems(c["items"])
+                if not combo.view().isVisible() and c["value"] is not None:
+                    combo.setCurrentIndex(c["value"])
+            for name, box in self.rd_toggles.items():
+                c = ctrls.get(name) if st else None
+                box.setEnabled(bool(c))
+                if c and c["value"] is not None:
+                    box.setChecked(bool(c["value"]))
+        finally:
+            self._updating = False
+        if st is None:
+            self._show_fw_status(None)
+            return
+        self.cur_src.setText(st["source"])
+        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        shown = {label: (state, rate) for label, state, rate in st["inputs"]}
+        for (led, rate), (label, *_unused) in zip(self.sync_widgets, raydat.STATUS_INPUTS):
+            state, r = shown.get(label, (None, None))
+            led.set_state(state)
+            rate.setText(r.replace(" kHz", "k") if r else "—")
+            # rows for the optional TCO module only show when the driver reports it
+            for w in (led, rate, self._sync_labels[label]):
+                w.setVisible(label in shown or label != "TCO")
 
     def _write(self, name, value):
         if not self._updating:

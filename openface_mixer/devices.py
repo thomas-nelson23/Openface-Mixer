@@ -1,14 +1,14 @@
 """The interfaces Openface Mixer supports, and finding which ones are connected. No Qt.
 
-Every device uses the same mix model (model.py): up to 32 hardware inputs, 34 playback channels
-and 34 outputs. A device says which of those channels exist at each speed mode, what they are
+Every device uses the same mix model (model.py): up to 36 hardware inputs, 36 playback channels
+and 36 outputs. A device says which of those channels exist at each speed mode, what they are
 called, and where its engine, config files and PipeWire nodes are.
 """
 import re
 from pathlib import Path
 
-from . import fireface800, fireface802
-from .hardware import Hardware
+from . import fireface800, fireface802, raydat
+from .hardware import DIGIFACE_CARD, Hardware
 from .model import chan_label as digiface_chan_label, pair_label as digiface_pair_label
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
@@ -18,9 +18,11 @@ RME_OUI = 0x000A35
 class Device:
     key = ""
     name = ""
-    bus = ""                 # "USB" or "FireWire", for messages
+    bus = ""                 # "USB", "FireWire" or "PCIe", for messages
     phones_pairs = ()        # output pairs that are headphones
     max_routes = None        # hardware mixer crosspoint limit, or None (full matrix)
+    alsa_card = None         # ALSA card short name holding its settings controls (Hardware)
+    sink_channels = "1/2"    # playback channels the engine's playback sink feeds (PCM 1/2)
 
     @property
     def shm_name(self):
@@ -45,10 +47,13 @@ class Device:
         raise NotImplementedError
 
     def phones_pair(self, mode):
-        return self.phones_pairs[0]
+        """The pair the mixer opens on and the control room's phones; the first pair on
+        interfaces without headphones."""
+        return self.phones_pairs[0] if self.phones_pairs else 0
 
     def present(self):
         raise NotImplementedError
+
 
     def upgrade_settings(self, st):
         """Add or complete the device's hardware settings in st (st["hw"])."""
@@ -72,6 +77,7 @@ class Digiface(Device):
     bus = "USB"
     phones_pairs = (16,)
     max_routes = 2048
+    alsa_card = DIGIFACE_CARD
 
     @staticmethod
     def _n_adat(mode):
@@ -92,7 +98,7 @@ class Digiface(Device):
         return self._n_adat(mode) // 2
 
     def present(self):
-        return Hardware.find_card() is not None
+        return Hardware.find_card(self.alsa_card) is not None
 
 
 class FireWireDevice(Device):
@@ -148,7 +154,27 @@ class Fireface800(FireWireDevice):
         return fireface800.channel_has_settings(kind, c)
 
 
-DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface800())}
+class RayDAT(Device):
+    key = "raydat"
+    name = "RME HDSPe RayDAT"
+    bus = "PCIe"
+    alsa_card = raydat.CARD_NAME
+    sink_channels = "A1 1/2"     # the driver's PCM channels start with ADAT 1
+
+    def channels(self, kind, mode):
+        return raydat.channels(kind, mode)
+
+    def chan_label(self, kind, c, mode):
+        return raydat.chan_label(kind, c, mode)
+
+    def pair_label(self, kind, c, mode):
+        return raydat.pair_label(kind, c, mode)
+
+    def present(self):
+        return Hardware.find_card(self.alsa_card) is not None
+
+
+DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface800(), RayDAT())}
 DEFAULT = DEVICES["digiface"]
 
 

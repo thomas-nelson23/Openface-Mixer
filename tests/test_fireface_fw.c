@@ -116,6 +116,10 @@ int main(void)
 	check("mixer play 1 -> AN 1", ff802_mixer_cmd(0, 32, 0x9000), 0x40209000);
 	check("mixer last", ff802_mixer_cmd(29, 61, 0), 0x40000000 | ((0x40 * 29 + 61) << 16));
 	check("vol cmd", ff802_vol_cmd(0, -60), 0x1e00ffc4);
+	check("802 input source", ff802_shm_source(29), 29);
+	check("802 FX return source", ff802_shm_source(31), 31);
+	check("802 playback 1 source", ff802_shm_source(32), OFM_N_IN);
+	check("802 playback 30 source", ff802_shm_source(61), OFM_N_IN + 29);
 	check("parity even", ff802_parity(0x40209000), 0xc0209000);
 	check("parity odd", ff802_parity(0x1e00ffc4), 0x1e00ffc4);
 	for (uint32_t c = 0; c < 4096; c += 7) {

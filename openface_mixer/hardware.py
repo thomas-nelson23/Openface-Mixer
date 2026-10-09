@@ -1,31 +1,41 @@
-"""Digiface hardware controls (via the kernel's ALSA mixer controls) and PipeWire card info.
+"""Device settings held in the kernel's ALSA mixer controls, and PipeWire card info.
 
-The snd-usb-audio Digiface quirk exposes clock source, per-port output format and
-per-port input status as ALSA controls; we drive them with amixer. See docs/HARDWARE.md.
+The snd-usb-audio Digiface quirk exposes clock source, per-port output format and per-port
+input status as ALSA controls, and snd-hdspm the RayDAT's clock settings and input status; we
+drive them with amixer. See docs/HARDWARE.md.
 """
 import re
 import subprocess
 from pathlib import Path
 
 
+DIGIFACE_CARD = "Digiface USB"
+
+
 class Hardware:
-    def __init__(self):
+    """The ALSA card whose short name contains card_name."""
+
+    def __init__(self, card_name=DIGIFACE_CARD):
+        self.card_name = card_name
         self.card = None
 
     @staticmethod
-    def find_card():
+    def find_card(card_name=DIGIFACE_CARD):
+        if not card_name:
+            return None
         try:
             text = Path("/proc/asound/cards").read_text()
         except OSError:
             return None
         for m in re.finditer(r"^\s*(\d+)\s+\[.*?\]:.*?-\s*(.*)$", text, re.M):
-            if "Digiface USB" in m.group(2):
+            if card_name in m.group(2):
                 return int(m.group(1))
         return None
 
     def read(self):
-        """{control name: {"value": int, "items": [str], "rw": bool}} or None if absent."""
-        self.card = self.find_card()
+        """{control name: {"value": int, "items": [str], "rw": bool}} or None if absent.
+        Switches read as 1 (on) or 0 (off)."""
+        self.card = self.find_card(self.card_name)
         if self.card is None:
             return None
         try:
@@ -58,9 +68,10 @@ def parse_amixer_contents(out):
         m = re.match(r"\s*; Item #\d+ '(.*)'", line)
         if m:
             cur["items"].append(m.group(1))
-        m = re.match(r"\s*: values=(-?\d+)", line)
+        m = re.match(r"\s*: values=(-?\d+|on|off)", line)
         if m:
-            cur["value"] = int(m.group(1))
+            v = m.group(1)
+            cur["value"] = 1 if v == "on" else 0 if v == "off" else int(v)
     return ctrls
 
 

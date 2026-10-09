@@ -2,10 +2,9 @@
 
 Concepts
 --------
-* Sources are mono channels: up to 32 hardware inputs ("in") and 34 playback channels from the
-  computer ("play"). These are the Digiface's counts; other devices (devices.py) use a subset.
-* Outputs are handled in stereo pairs (17 pairs at 1x speed; on the Digiface the last pair is
-  the headphones).
+* Sources are mono channels: up to 36 hardware inputs ("in") and 36 playback channels from the
+  computer ("play"), the RayDAT's counts. Each device (devices.py) uses a subset.
+* Outputs are handled in stereo pairs (up to 18; on the Digiface pair 16 is the headphones).
 * A *send* is the level (dB, or None for -inf) and pan (-1..1) of one source channel into one
   output pair. The GUI's faders show the sends into the currently selected output pair, which
   is TotalMix's "submix" workflow.
@@ -21,7 +20,7 @@ import copy
 import math
 from array import array
 
-N_IN, N_PLAY, N_OUT = 32, 34, 34
+N_IN, N_PLAY, N_OUT = 36, 36, 36
 N_SRC = N_IN + N_PLAY
 N_PAIRS = N_OUT // 2
 N_GROUPS = 4
@@ -31,7 +30,7 @@ NEG_INF = float("-inf")
 FADER_MAX_DB = 6.0
 FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
-STATE_VERSION = 4
+STATE_VERSION = 5
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
 MIX_KEYS = ("stereo", "mute", "sends", "out", "groups")
 
@@ -123,6 +122,25 @@ def default_state(selected=N_PAIRS - 1):
     return st
 
 
+def _fit_mix(st):
+    """Pad the per-channel lists of a mix saved with fewer channels (before version 5 there were
+    32 inputs, 34 playback channels and 17 output pairs) to the current counts."""
+    base = default_state(0)
+    for kind in ("in", "play"):
+        for key in ("stereo", "mute"):
+            if kind in st.get(key, {}):
+                lst, full = st[key][kind], base[key][kind]
+                lst.extend(full[len(lst):])
+        sends = st.get("sends", {}).get(kind)
+        if sends is not None:
+            for ch in sends:
+                ch.extend([None, 0.0] for _ in range(N_PAIRS - len(ch)))
+            sends.extend([[None, 0.0] for _ in range(N_PAIRS)] for _ in range(len(sends), len(
+                base["sends"][kind])))
+    if "out" in st:
+        st["out"].extend(base["out"][len(st["out"]):])
+
+
 def upgrade_state(st, selected=N_PAIRS - 1):
     """Accept older/partial state dicts (e.g. from TotalMix Lite) and fill in missing keys."""
     if not isinstance(st, dict) or "sends" not in st:
@@ -130,6 +148,7 @@ def upgrade_state(st, selected=N_PAIRS - 1):
     base = default_state(selected)
     for k, v in base.items():
         st.setdefault(k, v)
+    _fit_mix(st)
     st.pop("mixer_mode", None)          # software (PipeWire) mixing was removed in version 4
     st["solo"] = base["solo"]           # solo never survives a restart, like TotalMix
     st["version"] = STATE_VERSION
@@ -267,4 +286,5 @@ def apply_mix(st, mix):
     for k in MIX_KEYS:
         if k in mix:
             st[k] = copy.deepcopy(mix[k])
+    _fit_mix(st)
     return st
