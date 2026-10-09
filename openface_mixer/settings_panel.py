@@ -148,35 +148,13 @@ class SettingsPanel(QWidget):
         """TotalMix's Settings dialog for the 802: clock, sync inputs and AES/optical options.
         The device can't report these settings, so they come from st["hw"]."""
         hw = self.st["hw"]
-        clock = QGroupBox("CLOCK")
-        cl = QGridLayout(clock)
-        cl.addWidget(QLabel("Clock source"), 0, 0)
         self.ff_clock = QComboBox()
         for key, label, _ in ff.CLOCK_SOURCES:
             self.ff_clock.addItem(label, key)
         self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
         self.ff_clock.activated.connect(
             lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
-        cl.addWidget(self.ff_clock, 0, 1)
-        cl.addWidget(QLabel("Current source"), 1, 0)
-        self.cur_src = QLabel("—")
-        cl.addWidget(self.cur_src, 1, 1)
-        cl.addWidget(QLabel("Sample rate"), 2, 0)
-        self.rate = QLabel("—")
-        cl.addWidget(self.rate, 2, 1)
-        lay.addWidget(clock)
-
-        sync = QGroupBox("INPUT STATUS")
-        sl = QGridLayout(sync)
-        self.sync_widgets = []
-        for r, (label, *_unused) in enumerate(ff.STATUS_INPUTS):
-            led, rate = Led(), QLabel("—")
-            sl.addWidget(QLabel(label), r, 0)
-            sl.addWidget(led, r, 1)
-            sl.addWidget(rate, r, 2)
-            led.set_state(None)
-            self.sync_widgets.append((led, rate))
-        lay.addWidget(sync)
+        self._build_fw_clock(lay, self.ff_clock, ff.STATUS_INPUTS)
 
         opts = QGroupBox("OPTIONS")
         ol = QGridLayout(opts)
@@ -197,36 +175,12 @@ class SettingsPanel(QWidget):
         ol.addWidget(single, len(rows), 0, 1, 2)
         lay.addWidget(opts)
 
-    def _set_hw(self, key, value):
-        self.st["hw"][key] = value
-        self.hw_changed.emit()
-
-    def update_ff802_status(self, word):
-        """word: the 802's sync status register (Engine.status()["dev_status"]), or None."""
-        if word is None:
-            self.cur_src.setText("—")
-            self.rate.setText("<span style='color:#ff6b5b'>Fireface 802 not connected</span>")
-            for led, rate in self.sync_widgets:
-                led.set_state(None)
-                rate.setText("—")
-            return
-        st = ff.decode_status(word)
-        self.cur_src.setText(st["source"])
-        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
-        for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
-            led.set_state(state)
-            rate.setText(f"{r / 1000:g}k" if r else "—")
-
-    # ------------------------------------------------------------------ Fireface 800
-    def _build_ff800(self, lay):
-        """TotalMix's Settings dialog for the 800: clock, sync inputs, levels and S/PDIF
-        options. The clock and S/PDIF options start from what the device reports."""
-        self.ff800_combos = {}
+    def _build_fw_clock(self, lay, clock_combo, status_inputs):
+        """The CLOCK and INPUT STATUS boxes of a FireWire Fireface."""
         clock = QGroupBox("CLOCK")
         cl = QGridLayout(clock)
         cl.addWidget(QLabel("Clock source"), 0, 0)
-        cl.addWidget(self._ff800_combo("clock", [(label, key) for key, label, _ in
-                                                 ff800.CLOCK_SOURCES]), 0, 1)
+        cl.addWidget(clock_combo, 0, 1)
         cl.addWidget(QLabel("Current source"), 1, 0)
         self.cur_src = QLabel("—")
         cl.addWidget(self.cur_src, 1, 1)
@@ -238,7 +192,7 @@ class SettingsPanel(QWidget):
         sync = QGroupBox("INPUT STATUS")
         sl = QGridLayout(sync)
         self.sync_widgets = []
-        for r, (label, *_unused) in enumerate(ff800.STATUS_INPUTS):
+        for r, (label, *_unused) in enumerate(status_inputs):
             led, rate = Led(), QLabel("—")
             sl.addWidget(QLabel(label), r, 0)
             sl.addWidget(led, r, 1)
@@ -246,6 +200,39 @@ class SettingsPanel(QWidget):
             led.set_state(None)
             self.sync_widgets.append((led, rate))
         lay.addWidget(sync)
+
+    def _show_fw_status(self, st):
+        """st: the device's decode_status() dict, or None while it is not connected."""
+        if st is None:
+            self.cur_src.setText("—")
+            self.rate.setText(f"<span style='color:#ff6b5b'>{self.dev.name.replace('RME ', '')} "
+                              "not connected</span>")
+            for led, rate in self.sync_widgets:
+                led.set_state(None)
+                rate.setText("—")
+            return
+        self.cur_src.setText(st["source"])
+        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
+            led.set_state(state)
+            rate.setText(f"{r / 1000:g}k" if r else "—")
+
+    def _set_hw(self, key, value):
+        self.st["hw"][key] = value
+        self.hw_changed.emit()
+
+    def update_ff802_status(self, word):
+        """word: the 802's sync status register (Engine.status()["dev_status"]), or None."""
+        self._show_fw_status(None if word is None else ff.decode_status(word))
+
+    # ------------------------------------------------------------------ Fireface 800
+    def _build_ff800(self, lay):
+        """TotalMix's Settings dialog for the 800: clock, sync inputs, levels and S/PDIF
+        options. The clock and S/PDIF options start from what the device reports."""
+        self.ff800_combos = {}
+        self._build_fw_clock(lay, self._ff800_combo("clock", [(label, key) for key, label, _ in
+                                                               ff800.CLOCK_SOURCES]),
+                             ff800.STATUS_INPUTS)
 
         levels = QGroupBox("LEVELS")
         ll = QGridLayout(levels)
@@ -298,19 +285,7 @@ class SettingsPanel(QWidget):
     def update_ff800_status(self, words):
         """words: the 800's two status quadlets (Engine.status() dev_status, dev_status2), or
         None."""
-        if words is None:
-            self.cur_src.setText("—")
-            self.rate.setText("<span style='color:#ff6b5b'>Fireface 800 not connected</span>")
-            for led, rate in self.sync_widgets:
-                led.set_state(None)
-                rate.setText("—")
-            return
-        st = ff800.decode_status(*words)
-        self.cur_src.setText(st["source"])
-        self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
-        for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
-            led.set_state(state)
-            rate.setText(f"{r / 1000:g}k" if r else "—")
+        self._show_fw_status(None if words is None else ff800.decode_status(*words))
 
     def _write(self, name, value):
         if not self._updating:

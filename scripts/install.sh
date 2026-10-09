@@ -7,7 +7,6 @@ cd "$(dirname "$0")/.."
 PREFIX="${PREFIX:-$HOME/.local}"
 SHARE="$PREFIX/share/openface-mixer"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 if command -v pacman >/dev/null; then
     missing=()
@@ -21,22 +20,6 @@ if command -v pacman >/dev/null; then
 fi
 
 make engine
-
-# --- one-time migration from the prototype, "TotalMix Lite" (tmlite)
-if systemctl --user cat tmlite-engine.service &>/dev/null; then
-    echo "Migrating from TotalMix Lite…"
-    systemctl --user disable --now tmlite-engine.service || true
-    if [[ -d "$CONFIG/tmlite" && ! -e "$CONFIG/openface-mixer/state.json" ]]; then
-        mkdir -p "$CONFIG/openface-mixer"
-        cp -n "$CONFIG/tmlite/state.json" "$CONFIG/tmlite/matrix.bin" "$CONFIG/openface-mixer/" 2>/dev/null || true
-        echo "  copied your saved mix to $CONFIG/openface-mixer"
-    fi
-    rm -f "$PREFIX/bin/tmlite" "$PREFIX/bin/tmlite-engine" \
-          "$PREFIX/share/applications/tmlite.desktop" "$UNIT_DIR/tmlite-engine.service" \
-          "/dev/shm/tmlite-$(id -u)"
-    rm -rf "$PREFIX/share/tmlite"
-fi
-pkill -x tmlite-engine 2>/dev/null || true
 
 # --- files
 install -Dm755 engine/openface-mixer-engine "$PREFIX/bin/openface-mixer-engine"

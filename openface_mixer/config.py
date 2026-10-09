@@ -16,12 +16,9 @@ from .model import compute_matrix, compute_out_gains, upgrade_state
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_ID
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
 
-STATE_FILE = CONFIG_DIR / "state.json"      # full GUI state (mix + UI bits)
-MATRIX_FILE = CONFIG_DIR / "matrix.bin"     # gains, read by the engine at startup
 MATRIX_MAGIC = 0x334D464F                   # "OFM3", see load_matrix() in the engine
 DEVICE_MAGIC = 0x3144464F                   # "OFD1": device settings block after the gains
 N_DEV_CMD = 512                             # OFM_N_DEV_CMD in engine/shm_layout.h
-PRESETS_FILE = CONFIG_DIR / "presets.json"  # the 8 snapshot slots
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last
 
 
@@ -30,15 +27,15 @@ def device_dir(dev=DEFAULT):
 
 
 def state_file(dev=DEFAULT):
-    return device_dir(dev) / "state.json"
+    return device_dir(dev) / "state.json"         # full GUI state (mix + UI bits)
 
 
 def matrix_file(dev=DEFAULT):
-    return device_dir(dev) / "matrix.bin"
+    return device_dir(dev) / "matrix.bin"         # gains, read by the engine at startup
 
 
 def presets_file(dev=DEFAULT):
-    return device_dir(dev) / "presets.json"
+    return device_dir(dev) / "presets.json"       # the 8 snapshot slots
 
 
 def atomic_write(path, data):

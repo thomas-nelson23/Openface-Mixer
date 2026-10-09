@@ -12,12 +12,6 @@ struct digiface {
 	bool enabled;      /* we switched the DSP mixer on */
 };
 
-static void raise_peak(float *dst, float v)
-{
-	if (v > *dst)
-		*dst = v;
-}
-
 static void *create(void)
 {
 	struct digiface *d = calloc(1, sizeof(*d));

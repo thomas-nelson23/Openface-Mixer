@@ -26,7 +26,7 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
-from .theme import ACCENT, GROUP_COLOR, apply_theme
+from .theme import ACCENT, apply_theme
 from .widgets import Row, Strip
 
 

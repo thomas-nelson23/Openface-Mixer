@@ -34,6 +34,13 @@ struct ofm_backend {
 	int (*meters)(void *h, struct ofm_shm *s);
 };
 
+/* Max-hold for the shared-memory peak meters. */
+static inline void raise_peak(float *dst, float v)
+{
+	if (v > *dst)
+		*dst = v;
+}
+
 extern const struct ofm_backend ofm_backend_digiface;
 extern const struct ofm_backend ofm_backend_ff802;
 extern const struct ofm_backend ofm_backend_ff800;

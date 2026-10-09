@@ -31,8 +31,11 @@ class Meter(QWidget):
     def push(self, peaks, dt):
         now = time.monotonic()
         fall = 10 ** (-26.0 * dt / 20.0)  # 26 dB/s release
+        floor = 10 ** (self.FLOOR_DB / 20.0)
+        before = (self.levels[:], [h[0] for h in self.holds], self.clip[:])
         for i, p in enumerate(peaks):
             v = max(p, self.levels[i] * fall)
+            v = v if v >= floor else 0.0    # below the scale: drawn as empty anyway
             self.levels[i] = v
             if v >= self.holds[i][0] or now - self.holds[i][1] > 1.5:
                 self.holds[i] = (v, now)
@@ -43,7 +46,9 @@ class Meter(QWidget):
         if shown != self._shown_peak:
             self._shown_peak = shown
             self.peak_changed.emit(NEG_INF if shown is None else shown)
-        self.update()
+        # ~80 meters at 30 fps: repaint only the ones whose picture changed (silent ones don't)
+        if (self.levels, [h[0] for h in self.holds], self.clip) != before:
+            self.update()
 
     def reset_peak(self):
         self.clip = [False] * len(self.clip)
