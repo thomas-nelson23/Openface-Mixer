@@ -33,6 +33,11 @@
 
 #define DFU_MAX_NODES 2048
 
+/* the Digiface's own channels at single speed; the shared memory has room for more */
+#define DFU_N_IN   32
+#define DFU_N_PLAY 34
+#define DFU_N_OUT  34
+
 /* values for ofm_shm.hw_state */
 enum {
 	DFU_STATE_STARTING = 0,   /* engine has not looked for the device yet */

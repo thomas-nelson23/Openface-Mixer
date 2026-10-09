@@ -1,14 +1,16 @@
 # Openface Mixer
 
 A TotalMix-style mixer and control panel for the **RME Digiface USB**, the
-**RME Fireface 802** and the **RME Fireface 800** (both FireWire) on Linux.
+**RME Fireface 802** and the **RME Fireface 800** (both FireWire) and the **RME HDSPe RayDAT**
+(PCIe) on Linux.
 
 ![Openface Mixer: mixer view with input, playback and output rows, presets and hardware panel](docs/screenshots/mixer.png)
 
 RME's TotalMix only runs on Windows and macOS. Linux streams audio to these interfaces
-(`snd-usb-audio` for the Digiface since kernel 6.12, `snd-fireface` for the 802 and 800), but
-nothing controlled their routing. Openface Mixer drives the interface's own DSP mixer, over USB
-on the Digiface and over FireWire on the Firefaces, with the familiar TotalMix workflow.
+(`snd-usb-audio` for the Digiface since kernel 6.12, `snd-fireface` for the 802 and 800,
+`snd-hdspm` for the RayDAT), but nothing gave them the TotalMix workflow. Openface Mixer drives
+the interface's own DSP mixer, over USB on the Digiface, over FireWire on the Firefaces and
+through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 
 - **Mixer view:** Hardware Inputs, Playback and Hardware Outputs, one row each.
   Pick an output, and the input and playback faders set the submix sent to it.
@@ -22,7 +24,8 @@ on the Digiface and over FireWire on the Firefaces, with the familiar TotalMix w
   button in the top bar lights while anything is soloed and switches all solos off and back on.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 also the AES and optical options of TotalMix's settings dialog, on the
-  Fireface 800 the line levels and the S/PDIF, optical and word clock options.
+  Fireface 800 the line levels and the S/PDIF, optical and word clock options, on the RayDAT
+  clock mode, preferred sync reference, internal rate and the S/PDIF and word clock options.
 - **Channel settings (Fireface 802):** the ⚙ on each hardware input and output strip, like
   TotalMix's wrench: phase invert on every channel, level and gain on inputs AN 1–8, 48V and
   Inst on inputs AN 9–12, and level on outputs AN 1–8.
@@ -35,7 +38,7 @@ on the Digiface and over FireWire on the Firefaces, with the familiar TotalMix w
   it at login.
 
 > **How mixing works:** Openface Mixer drives the interface's own DSP mixer (over USB on the
-> Digiface, over FireWire on the Firefaces), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
+> Digiface, over FireWire on the Firefaces, through `snd-hdspm` on the RayDAT), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
 > interface even with the computer idle. There is no software mixing. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/HARDWARE.md](docs/HARDWARE.md).
 
@@ -46,7 +49,8 @@ on the Digiface and over FireWire on the Firefaces, with the familiar TotalMix w
 ## Requirements
 
 - Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802 or 800
-  a FireWire port and the `snd-fireface` driver (in the kernel since 5.x)
+  a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the RayDAT the
+  `snd-hdspm` driver (in the kernel for years)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
@@ -155,6 +159,22 @@ rest (line levels, input jacks, 48V, instrument options) at their defaults (Lo G
 out, front jacks, 48V off), and from then on sends its own copy, as TotalMix does. Don't run
 `snd-fireface-ctl-service` alongside it either.
 
+### HDSPe RayDAT
+
+The RayDAT needs nothing beyond the kernel's `snd-hdspm` driver: pick **RME HDSPe RayDAT** under
+**Device** (or run `openface-mixer --device raydat`), and its engine
+(`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
+channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
+then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). The driver
+starts with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
+it up.
+
+The **Openface Mixer Playback (RayDAT)** sink feeds the driver's first two playback channels,
+which are ADAT 1 channels 1/2 (`A1 1/2`), not AES. The card has no output faders of its own, so
+the output masters are folded into every send, as TotalMix does on this card. The clock and
+S/PDIF settings are the driver's ALSA controls, which Openface Mixer reads and writes live; they
+aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to write wins.
+
 ## Files
 
 | Path | Contents |
@@ -164,6 +184,7 @@ out, front jacks, 48V off), and from then on sends its own copy, as TotalMix doe
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
+| `~/.config/openface-mixer/raydat/` | The same for the HDSPe RayDAT |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
@@ -191,6 +212,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
   The TCO module isn't offered as a clock source.
+- HDSPe RayDAT support is built on the kernel's `snd-hdspm` driver and alsa-tools' hdspmixer
+  and has not been checked on a card yet (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
+  The driver only accepts mixer changes while playback and recording are opened by the same
+  program (PipeWire or JACK normally do that). No TCO settings.
 - The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
 - The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
   `make install` installs, which need sudo once). Without them nothing is mixed, and the

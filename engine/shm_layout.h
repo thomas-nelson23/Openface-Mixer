@@ -4,7 +4,8 @@
  * The engine creates /dev/shm/openface-mixer-<uid> (Digiface) or /dev/shm/openface-mixer-<device>-<uid>
  * and maps this struct into it. The GUI writes gain[][] and out_gain[], which the engine loads
  * into the interface's DSP mixer, and reads/clears the peak meters, which the engine fills from
- * the device. Channel counts are the Digiface's; other devices use a subset.
+ * the device. Channel counts are the largest any device has (the RayDAT's); each device uses a
+ * subset.
  * If you change anything here, bump OFM_SHM_VERSION and update
  * the HDR/OFF constants in openface_mixer/engine.py to match.
  */
@@ -13,15 +14,15 @@
 
 #include <stdint.h>
 
-#define OFM_N_IN    32                      /* Digiface hardware inputs (1x speed) */
-#define OFM_N_PLAY  34                      /* playback channels from the computer */
+#define OFM_N_IN    36                      /* hardware inputs (RayDAT: 36 at 1x speed) */
+#define OFM_N_PLAY  36                      /* playback channels from the computer */
 #define OFM_N_SRC   (OFM_N_IN + OFM_N_PLAY) /* mixer sources: inputs then playback */
-#define OFM_N_OUT   34                      /* Digiface hardware outputs (32 ADAT + phones) */
+#define OFM_N_OUT   36                      /* hardware outputs */
 
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
 #define OFM_N_DEV_CMD 512                   /* device setting command slots */
 
-#define OFM_SHM_VERSION 4
+#define OFM_SHM_VERSION 5
 
 /* Header is exactly 64 bytes; all fields are written by the engine. */
 struct ofm_shm {

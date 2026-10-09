@@ -18,9 +18,9 @@
  *                                     (0x66666666) and two others. Peaks are 32-bit words at
  *                                     byte 256 + 4 * channel, full scale 0x07fffff0.
  *
- * Mixer sources 0-29 are the hardware inputs, 30/31 the FX returns, 32-61 playback, which is
- * the shared-memory source numbering. Gains: 0 = off, else 0x8000 | (linear * 0x1000), so
- * 0x9000 = unity and 0xa000 = +6 dB (the Digiface's encoding for gains >= 0.5).
+ * Mixer sources 0-29 are the hardware inputs, 30/31 the FX returns, 32-61 playback (shared
+ * memory sources OFM_N_IN and up, see ff802_shm_source). Gains: 0 = off, else
+ * 0x8000 | (linear * 0x1000), so 0x9000 = unity and 0xa000 = +6 dB (the Digiface's encoding for gains >= 0.5).
  * Output volume: value = dB * 10, -650..60.
  *
  * Fireface 800 ("former" protocol family; all registers little-endian, written as blocks):
@@ -48,6 +48,7 @@
 #define FF802_N_IN    30
 #define FF802_N_OUT   30
 #define FF802_N_SRC   62   /* inputs, FX returns, playback */
+#define FF802_PLAY_SRC 32  /* mixer source of playback 1 */
 #define FF802_METER_CHUNK 392
 
 #define FF800_N_IN    28
@@ -65,6 +66,8 @@
 uint16_t ff802_encode_gain(float lin);
 int16_t ff802_out_vol(float lin);
 uint32_t ff802_parity(uint32_t cmd);
+/* Shared-memory source of 802 mixer source src. */
+int ff802_shm_source(int src);
 uint32_t ff802_mixer_cmd(int out, int src, uint16_t gain);
 uint32_t ff802_vol_cmd(int out, int16_t vol);
 uint32_t ff802_status_rate(uint32_t status);

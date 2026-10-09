@@ -1,8 +1,8 @@
 # Architecture
 
 Openface Mixer is two programs that share one block of memory. All mixing happens in the
-interface's own DSP; the computer only tells it what to do. The Digiface USB, the Fireface 802 and the
-Fireface 800 use the same mix model and GUI; what differs is described by a device (`openface_mixer/devices.py`)
+interface's own DSP; the computer only tells it what to do. The Digiface USB, the Fireface 802, the
+Fireface 800 and the HDSPe RayDAT use the same mix model and GUI; what differs is described by a device (`openface_mixer/devices.py`)
 in the GUI and a backend (`engine/backend.h`) in the engine. Each device has its own engine
 process, shared memory and config files, so several can run at once.
 
@@ -20,9 +20,10 @@ process, shared memory and config files, so several can run at once.
 
 ## Engine (`engine/openface-mixer-engine.c`)
 
-`--device digiface` (default), `--device ff802` or `--device ff800` picks the backend:
-`backend_digiface.c` on top of `digiface_usb.c` (libusb), or the 802 or 800 backend in
-`fireface_fw.c` (FireWire transactions through `/dev/fw*`). The rest of the engine is the same
+`--device digiface` (default), `--device ff802`, `--device ff800` or `--device raydat` picks the
+backend: `backend_digiface.c` on top of `digiface_usb.c` (libusb), the 802 or 800 backend in
+`fireface_fw.c` (FireWire transactions through `/dev/fw*`), or `raydat.c` (snd-hdspm's `Mixer`
+control and hwdep meters in `/dev/snd`). The rest of the engine is the same
 for all of them.
 
 - A 20 ms main-loop timer (`hw_tick`) opens the device and sends only the changed crosspoints,
@@ -34,11 +35,12 @@ for all of them.
 - A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
   it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`), re-linking on hotplug or profile changes. No audio passes
-  through the engine itself.
+  `alsa_output.usb-RME_Digiface_USB`; the RayDAT's by its ALSA card name), re-linking on
+  hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
-  `openface-mixer-engine@ff802` and `@ff800` for the Firefaces. At startup it loads the device's `matrix.bin` (gain
-  matrix, output gains and device settings), which the GUI keeps up to date. When it exits, the
+  `openface-mixer-engine@ff802`, `@ff800` and `@raydat` for the others. At startup it loads the
+  device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
+  to date; files from before the 36-channel layout are moved into place. When it exits, the
   interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
   mix and all settings, about 2,300 transactions. The 800 takes its mixer as one block write
@@ -47,17 +49,18 @@ for all of them.
 ## Shared memory (`engine/shm_layout.h`)
 
 One `struct ofm_shm` per user and device at `/dev/shm/openface-mixer-<uid>` (Digiface) or
-`/dev/shm/openface-mixer-<device>-<uid>`. Its channel counts are the Digiface's; the 802 uses
-inputs 0–29, playback 0–29 (sources 32–61, the 802's own mixer numbering) and outputs 0–29; the
-800 inputs 0–27, playback 0–27 (sources 32–59) and outputs 0–27.
+`/dev/shm/openface-mixer-<device>-<uid>`. It has room for 36 inputs, 36 playback channels and 36
+outputs, the RayDAT's counts; source k is input k below 36 and playback k − 36 above. The
+Digiface uses inputs 0–31, playback 0–33 and outputs 0–33; the 802 inputs 0–31 (30/31 its FX
+returns), playback 0–29 and outputs 0–29; the 800 inputs, playback and outputs 0–27.
 
 | Field | Writer | Meaning |
 | --- | --- | --- |
 | header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, playback sink linked |
 | `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use, meters live |
-| `gain[34][66]` | GUI | linear send gains, with pan, source mute and solo folded in |
-| `out_gain[34]` | GUI | output master per channel, 0 when muted |
-| `peak_src[66]`, `peak_out[34]` | engine raises, GUI zeroes | max-hold peak meters |
+| `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
+| `out_gain[36]` | GUI | output master per channel, 0 when muted |
+| `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
 | `dev_config`, `dev_cmd[512]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
 
@@ -78,8 +81,8 @@ app.MainWindow
 
 ### The mixer model
 
-- **Sources** are mono channels (`in` 0–31, `play` 0–33). Adjacent pairs can be stereo-linked.
-- **Outputs** are stereo pairs (0–16; on the Digiface pair 16 = phones at single speed).
+- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked.
+- **Outputs** are stereo pairs (0–17; on the Digiface pair 16 = phones at single speed).
 - The device decides which channels exist at the current rate and their names
   (`Device.channels()`, `chan_label()`, `pair_label()`); the window only builds strips for those.
 - **Device settings** (802, 800) live in `state["hw"]`. `fireface802.commands()` turns them into
@@ -95,7 +98,7 @@ app.MainWindow
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
   `upgrade_state` clears it) and is not part of a mix. The top bar's SOLO button clears all
   solos and brings the same set back on the next click.
-- `compute_matrix()` folds sends, pan, source mutes and solo into the 34×66 gain matrix;
+- `compute_matrix()` folds sends, pan, source mutes and solo into the 36×72 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the

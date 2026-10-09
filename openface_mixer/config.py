@@ -16,7 +16,7 @@ from .model import compute_matrix, compute_out_gains, upgrade_state
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_ID
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
 
-MATRIX_MAGIC = 0x334D464F                   # "OFM3", see load_matrix() in the engine
+MATRIX_MAGIC = 0x344D464F                   # "OFM4", see load_matrix() in the engine
 DEVICE_MAGIC = 0x3144464F                   # "OFD1": device settings block after the gains
 N_DEV_CMD = 512                             # OFM_N_DEV_CMD in engine/shm_layout.h
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last

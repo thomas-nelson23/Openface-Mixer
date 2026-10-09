@@ -230,6 +230,12 @@ static void add_cmd(struct dfu *d, uint32_t c)
 		d->cmd[d->n_cmd++] = c;
 }
 
+/* True if crosspoint o, k exists on the Digiface. */
+static bool has_crosspoint(int o, int k)
+{
+	return o < DFU_N_OUT && (k < DFU_N_IN || (k >= OFM_N_IN && k < OFM_N_IN + DFU_N_PLAY));
+}
+
 static uint32_t mixer_src(int k)
 {
 	return k < OFM_N_IN ? (uint32_t)k : SRC_PLAYBACK + (uint32_t)(k - OFM_N_IN);
@@ -253,7 +259,7 @@ int dfu_sync(struct dfu *d, const float gain[OFM_N_OUT][OFM_N_SRC],
 	for (int o = 0; o < OFM_N_OUT; o++) {
 		for (int k = 0; k < OFM_N_SRC; k++) {
 			int node = d->node[o][k];
-			if (node == NO_NODE || dfu_encode_gain(gain[o][k]) != 0)
+			if (node == NO_NODE || (has_crosspoint(o, k) && dfu_encode_gain(gain[o][k]) != 0))
 				continue;
 			add_cmd(d, (uint32_t)node << 16);
 			d->node[o][k] = NO_NODE;
@@ -264,7 +270,7 @@ int dfu_sync(struct dfu *d, const float gain[OFM_N_OUT][OFM_N_SRC],
 
 	for (int o = 0; o < OFM_N_OUT; o++) {
 		for (int k = 0; k < OFM_N_SRC; k++) {
-			uint16_t v = dfu_encode_gain(gain[o][k]);
+			uint16_t v = has_crosspoint(o, k) ? dfu_encode_gain(gain[o][k]) : 0;
 			if (v == 0 || v == d->sent[o][k])
 				continue;
 			int node = d->node[o][k];
@@ -288,7 +294,7 @@ int dfu_sync(struct dfu *d, const float gain[OFM_N_OUT][OFM_N_SRC],
 	if (r < 0)
 		return r;
 
-	for (int o = 0; o < OFM_N_OUT; o++) {
+	for (int o = 0; o < DFU_N_OUT; o++) {
 		uint16_t v = dfu_encode_gain(out_gain[o]);
 		if (v == d->sent_out[o])
 			continue;

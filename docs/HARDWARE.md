@@ -1,7 +1,7 @@
 # Hardware notes
 
 Openface Mixer supports the RME Digiface USB, the RME Fireface 802 and the RME Fireface 800
-(both FireWire), and reads the RME ARC USB remote.
+(both FireWire) and the RME HDSPe RayDAT (PCIe), and reads the RME ARC USB remote.
 
 # RME Digiface USB
 
@@ -241,6 +241,68 @@ volumes work at all, the meter layout (snd-firewire-ctl-services uses the last 8
 the lock/sync bits (the kernel's `/proc` dump reads some of them the other way round from
 snd-firewire-ctl-services, which Openface Mixer follows), and the mixer and playback slots at
 2x/4x speed.
+
+# RME HDSPe RayDAT
+
+The RayDAT is a PCIe card with four ADAT ports, AES and S/PDIF. The kernel's `snd-hdspm` driver
+(firmware revision 211) streams 36 in / 36 out at 32–48 kHz, 20 at 64–96 kHz and 12 at
+128–192 kHz, and, unlike the USB and FireWire drivers, already exposes the card's hardware
+mixer to userspace. That is what alsa-tools' `hdspmixer` uses, and what Openface Mixer's engine
+uses too (`engine/raydat.c`). No low-level protocol and no udev rule are needed: the engine
+opens the card's `/dev/snd/controlC<n>` and `/dev/snd/hwC<n>D0`, found by driver name `HDSPM`
+and short name `RME RayDAT_<serial>`.
+
+## Mixer
+
+The ALSA control `Mixer` (iface HWDEP) takes three integers: source, destination, gain.
+
+| Value | Meaning |
+| --- | --- |
+| source | 0–63 hardware input, 64–127 playback 0–63 |
+| destination | hardware output 0–63 |
+| gain | 0–65535, linear, 32768 = unity (so at most +6 dB) |
+
+The hardware matrix is write only; the driver keeps a copy, which reads of the control return.
+The driver zeroes the whole mixer when it loads, so the card is silent until a mixer program
+sets it up. It answers writes with `EBUSY` while playback and capture are open in two different
+processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
+each send by its output's master level. The engine writes only changed crosspoints, reads one
+output's sends back from the driver every 500 ms, and sends everything again if they differ (the
+driver was reloaded, or another program changed the mixer).
+
+## Channels
+
+The mixer, the meters and Openface Mixer use the card's own channel numbers: 0/1 AES, 2/3
+S/PDIF, then ADAT 1–4 from 4 up (8 channels per port at single speed, 4 at double, 2 at quad,
+packed together). ALSA's PCM channels are ordered differently (ADAT first, then AES and
+S/PDIF), so PipeWire's `playback_AUX0/1`, which the playback sink feeds, are ADAT 1 channels
+1/2. The engine finds that PipeWire node by its ALSA card name (`alsa.card_name`), since PCI
+node names only carry the slot.
+
+## Meters and status
+
+The hwdep ioctl `SNDRV_HDSPM_IOCTL_GET_PEAK_RMS` returns peak and RMS values for 64 inputs,
+playback channels and outputs. Peaks: bits 8–30 are the level, full scale `0x7fffff`; bits 0–3
+count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate.
+
+The settings are ordinary ALSA mixer controls, which the GUI reads and writes with amixer:
+
+| Control | Access | Values |
+| --- | --- | --- |
+| `Clock Mode` | rw | Master, AutoSync |
+| `Pref Sync Ref` | rw | Word Clock, ADAT 1–4, AES, SPDIF, (TCO,) Sync In |
+| `Internal Clock` | rw | 32 kHz … 192 kHz (the rate as master) |
+| `System Sample Rate` | rw | Hz |
+| `S/PDIF Out Professional`, `Single Speed WordClock Out` | rw | on/off |
+| `WC`, `AES`, `SPDIF`, `ADAT1`–`ADAT4`, `TCO`, `SYNC IN` `SyncCheck` | r | No Lock, Lock, Sync, N/A |
+| the same with `Frequency` | r | No Lock, 32 kHz … 192 kHz |
+
+## RayDAT not verified on hardware yet
+
+Nobody has run Openface Mixer on a RayDAT yet. Worth checking first: that the mixer accepts
+writes with PipeWire running (the `EBUSY` rule above compares the processes that opened
+playback and capture), the PipeWire card name property the engine matches, the meter scale,
+and the channel layout at 2x/4x speed.
 
 # RME ARC USB
 
