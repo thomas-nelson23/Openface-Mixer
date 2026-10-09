@@ -46,6 +46,7 @@ cp -r openface_mixer "$SHARE/"
 find "$SHARE" -name __pycache__ -prune -exec rm -rf {} +
 install -Dm644 packaging/openface-mixer.desktop "$PREFIX/share/applications/openface-mixer.desktop"
 install -Dm644 packaging/openface-mixer-engine.service "$UNIT_DIR/openface-mixer-engine.service"
+install -Dm644 packaging/openface-mixer-engine@.service "$UNIT_DIR/openface-mixer-engine@.service"
 cat > "$PREFIX/bin/openface-mixer" <<SH
 #!/bin/sh
 PYTHONPATH="$SHARE\${PYTHONPATH:+:\$PYTHONPATH}" exec python3 -m openface_mixer "\$@"
@@ -64,11 +65,29 @@ if ! cmp -s packaging/70-rme-digiface.rules "$RULE"; then
     fi
 fi
 
-# --- engine service (restart so an upgrade takes effect)
+# --- FireWire access for the Fireface 802/800 hardware mixer (needs root once)
+RULE=/etc/udev/rules.d/70-rme-fireface.rules
+if ! cmp -s packaging/70-rme-fireface.rules "$RULE"; then
+    echo "Installing $RULE so the mixer can talk to RME FireWire interfaces (needs sudo)…"
+    if sudo install -Dm644 packaging/70-rme-fireface.rules "$RULE"; then
+        sudo udevadm control --reload
+        sudo udevadm trigger --subsystem-match=firewire
+    else
+        echo "  skipped: Fireface mixing stays unavailable until the rule is installed"
+    fi
+fi
+
+# --- engine services (restart so an upgrade takes effect). The Digiface's always runs; other
+# devices' engines (openface-mixer-engine@<device>) are enabled by the GUI the first time it
+# opens that device, and restarted here if they are.
+device_units=$(systemctl --user list-units --plain --no-legend 'openface-mixer-engine@*' | awk '{print $1}')
 pkill -x openface-mixer-engine 2>/dev/null || true
 systemctl --user daemon-reload
 systemctl --user enable openface-mixer-engine.service
 systemctl --user restart openface-mixer-engine.service
+for unit in $device_units; do
+    systemctl --user restart "$unit"
+done
 
 echo
 echo "Installed. Launch 'Openface Mixer' from your app menu or run: openface-mixer"

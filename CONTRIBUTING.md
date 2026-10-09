@@ -5,22 +5,32 @@ Thanks for helping! This document covers how the project is laid out and how to 
 ## Repository layout
 
 ```
-engine/                 C engine that drives the Digiface's DSP mixer. Builds to engine/openface-mixer-engine
+engine/                 C engine that drives the interface's DSP mixer. Builds to engine/openface-mixer-engine
   openface-mixer-engine.c
+  backend.h             what a device backend provides (open, status, sync, meters)
+  backend_digiface.c    the Digiface backend, on top of digiface_usb.c
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
+  fireface_fw.c         Fireface 802 and 800 backends: FireWire transactions for mixer, settings, meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
   model.py              mixer state, fader taper, gain-matrix maths, fader groups (no Qt!)
   presets.py            8-slot preset bank + mix file export/import (no Qt)
-  config.py             file locations, state load/save
+  control_room.py       Dim, Mono, Speaker B, Talkback, Ext In on top of the matrix (no Qt)
+  arc.py                ARC USB remote: find it, parse its MIDI, key layout and LEDs (no Qt)
+  control_panel.py      Control Room settings box and the ARC USB port watcher
+  config.py             file locations (per device), state load/save
+  devices.py            supported devices: channel layout, names, engine and service names
+  fireface802.py        Fireface 802 channel layout, settings and DSP command words (no Qt)
+  fireface800.py        Fireface 800 channel layout, configuration and status words (no Qt)
+  channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain, jacks)
   engine.py             shared-memory client + starting/stopping the engine
   hardware.py           Digiface ALSA controls via amixer, PipeWire card profile via pactl
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
   theme.py              colours and the Qt stylesheet
-packaging/              .desktop file and systemd user unit
+packaging/              .desktop file, systemd user units, udev rules
 scripts/                install.sh / uninstall.sh (user install to ~/.local)
 docs/                   ARCHITECTURE.md (how it fits together), HARDWARE.md (device notes)
 tests/                  unittest suite for the Qt-free modules
@@ -54,8 +64,10 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 
 ## Testing without hardware
 
-The unit tests need no audio device. Without a Digiface the engine still runs and reports
-`no-device`; `--no-autolink` keeps it from linking the playback sink.
+The unit tests need no audio device. Without the interface the engine still runs and reports
+`no-device`; `--no-autolink` keeps it from linking the playback sink. `make run-engine DEVICE=ff802`
+runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI (`ff800` for
+the Fireface 800).
 
 The GUI also runs offscreen (`QT_QPA_PLATFORM=offscreen`), which is useful for screenshots
 and smoke tests.

@@ -9,14 +9,20 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from .config import load_state, save_state
+from . import arc, control_room, fireface800
+from .channel_settings import ChannelSettings
+from .config import (
+    device_block, load_device_choice, load_state, presets_file, save_device_choice, save_state,
+)
+from .control_panel import ArcLink, ControlRoomPanel
+from .devices import DEVICES, detect
 from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, chan_label, compute_matrix,
-    compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, pair_label,
-    set_strip_db, speed_mode, strip_channels, strip_key,
+    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
+    compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, set_strip_db,
+    speed_mode, strip_channels, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
@@ -25,13 +31,15 @@ from .widgets import Row, Strip
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, dev):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} — RME Digiface USB")
-        self.engine = Engine()
+        self.dev = dev
+        self.setWindowTitle(f"{APP_NAME} — {dev.name}")
+        self.engine = Engine(dev)
         self.hw = Hardware()
-        self.st = load_state()
-        self.presets = PresetBank()
+        self.st = load_state(dev)
+        self.presets = PresetBank(presets_file(dev))
+        self.switch_to = None              # device key to reopen the window for, see main()
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
@@ -63,10 +71,27 @@ class MainWindow(QMainWindow):
         self.tabs.addWidget(mscroll)
         self.tabs.currentChanged.connect(self._tab_changed)
         body.addWidget(self.tabs, 1)
-        self.settings = SettingsPanel(self.hw)
+        self.settings = SettingsPanel(self.hw, dev, self.st)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
-        self.settings_btn.toggled.connect(self.settings.setVisible)
-        body.addWidget(self.settings)
+        self.settings.device_selected.connect(self.switch_device)
+        self.settings.hw_changed.connect(self.push_matrix)
+        self.control = ControlRoomPanel(self.st)
+        self.control.changed.connect(self.push_matrix)
+        self.settings.layout().insertWidget(self.settings.layout().count() - 2, self.control)
+        self.arc = ArcLink(self)
+        self.arc.key.connect(self.arc_key)
+        self.arc.encoder.connect(self.arc_encoder)
+        self.arc.status_changed.connect(self.arc_status)
+        self._talkback_pressed = None     # (time, was it switched on by this press)
+        # the panel scrolls instead of squashing its boxes when the window is short
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidget(self.settings)
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.NoFrame)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_scroll.setFixedWidth(self.settings.width() + 12)
+        self.settings_btn.toggled.connect(self.settings_scroll.setVisible)
+        body.addWidget(self.settings_scroll)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
 
@@ -128,7 +153,7 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         self.status.setObjectName("lcd")
         self.status.setAlignment(Qt.AlignCenter)
-        self.status.setMinimumWidth(420)
+        self.status.setMinimumWidth(160)
         top.addWidget(self.status)
         top.addStretch(1)
 
@@ -175,30 +200,47 @@ class MainWindow(QMainWindow):
         return lbl
 
     # ------------------------------------------------------------------ building strips
-    def counts(self):
-        """(inputs, outputs, ADAT outputs) for the current speed mode."""
-        n_adat = N_IN // self.mode
-        return n_adat, n_adat + 2, n_adat
+    def channels(self, kind):
+        """The device's channels of this kind ("in", "play", "out") at the current speed."""
+        return self.dev.channels(kind, self.mode)
+
+    def label(self, kind, c, pair=False):
+        # playback channel n is meant for output n, so it is named like the output
+        k = "out" if kind == "play" else kind
+        return self.dev.pair_label(k, c, self.mode) if pair else self.dev.chan_label(k, c, self.mode)
+
+    def out_pairs(self):
+        return [c // 2 for c in self.channels("out") if c % 2 == 0]
 
     def rebuild_all(self):
         self.rebuild_sources("in")
         self.rebuild_sources("play")
         self.rebuild_outputs()
+        self.refresh_control_channels()
+
+    def refresh_control_channels(self):
+        ins = self.channels("in")
+        pairs = [(self.label("out", 2 * p, True), p) for p in self.out_pairs()]
+        inputs = [(self.label("in", c), c) for c in ins]
+        input_pairs = [(self.label("in", c, True), c) for c in ins if c % 2 == 0 and c + 1 in ins]
+        self.control.set_channels(pairs, inputs, input_pairs)
 
     def rebuild_sources(self, kind):
-        n_in, n_out, n_adat = self.counts()
-        n = n_in if kind == "in" else n_out
-        named_like_outputs = kind == "play"   # playback channel n is meant for output n
+        chans_all = self.channels(kind)
+        present = set(chans_all)
         self.strips = {k: s for k, s in self.strips.items() if not k.startswith(kind + ":")}
-        strips, c = [], 0
-        while c < n:
-            chans = strip_channels(self.st, kind, c) if c + 1 < n else [c]
+        strips = []
+        for c in chans_all:
+            if c % 2 == 1 and c - 1 in present and self.st["stereo"][kind][c // 2]:
+                continue                     # right channel of a linked pair: shares its strip
+            has_pair = c % 2 == 0 and c + 1 in present
+            chans = strip_channels(self.st, kind, c) if has_pair else [c]
             stereo = len(chans) == 2
-            title = (pair_label(c, n_adat, named_like_outputs) if stereo
-                     else chan_label(c, n_adat, named_like_outputs))
+            title = self.label(kind, c, pair=stereo)
             key = strip_key(kind, c)
-            s = Strip(key, title, chans, kind, show_pan=True, show_stereo=(c % 2 == 0 and c + 1 < n),
-                      show_solo=True)
+            s = Strip(key, title, chans, kind, show_pan=True, show_stereo=has_pair,
+                      show_solo=True, show_settings=kind == "in" and any(
+                          self.dev.channel_has_settings(kind, ch) for ch in chans))
             s.stereo.setChecked(stereo)
             s.solo.setChecked(self.st["solo"][kind][c])
             s.solo.toggled.connect(lambda on, k=kind, ch=chans: self.set_solo(k, ch, on))
@@ -208,24 +250,26 @@ class MainWindow(QMainWindow):
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.pan.changed.connect(lambda v, k=kind, ch=chans: self.set_pan(k, ch, v))
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
+            s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
-            c += len(chans)
         (self.row_in if kind == "in" else self.row_play).set_strips(strips)
+        self.refresh_settings_buttons()
         self.refresh_sends(kind)
         self.refresh_solo()
         self.matrix.rebuild()
 
     def rebuild_outputs(self):
-        _, n_out, n_adat = self.counts()
         self.strips = {k: s for k, s in self.strips.items() if not k.startswith("out:")}
         strips = []
         self.submix.clear()
-        for pair in range(n_out // 2):
-            title = pair_label(2 * pair, n_adat, True)
+        for pair in self.out_pairs():
+            title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
-            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False)
+            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
+                      show_settings=any(self.dev.channel_has_settings("out", ch)
+                                        for ch in (2 * pair, 2 * pair + 1)))
             s.pair = pair
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
@@ -234,11 +278,13 @@ class MainWindow(QMainWindow):
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.mute.toggled.connect(lambda on, pr=pair: self.set_out_mute(pr, on))
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
+            s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
             self.submix.addItem(title, pair)
         self.row_out.set_strips(strips)
+        self.refresh_settings_buttons()
         self.matrix.rebuild()
         sel = self.st["selected"]
         if sel not in [s.pair for s in strips]:
@@ -358,6 +404,29 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
 
+    # ------------------------------------------------------------------ device settings
+    def channel_settings(self, strip, pos):
+        """TotalMix's channel settings for a hardware input or output strip (Fireface 802)."""
+        popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
+                                strip.title.text(), self)
+        popup.setAttribute(Qt.WA_DeleteOnClose)
+        popup.changed.connect(self.push_matrix)
+        popup.changed.connect(self.refresh_settings_buttons)
+        popup.move(pos)
+        popup.show()
+
+    def refresh_settings_buttons(self):
+        for s in self.strips.values():
+            if s.kind != "play":
+                s.set_settings_active(any(self.dev.channel_settings_active(self.st, s.kind, c)
+                                          for c in s.channels))
+
+    def switch_device(self, key):
+        if key == self.dev.key:
+            return
+        self.switch_to = key
+        self.close()
+
     def _tab_changed(self, i):
         for n, b in enumerate(self.view_btns):
             b.setChecked(n == i)
@@ -391,6 +460,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ presets
     def refresh_slots(self):
+        self.update_arc_leds()
         active = self.st.get("active_slot")
         for i, b in enumerate(self.slot_btns):
             name = self.presets.name(i)
@@ -471,7 +541,7 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self, "Reset mix",
                                 "Reset all routing to the default (playback n → output n, "
                                 "no input monitoring, no groups)?") == QMessageBox.Yes:
-            apply_mix(self.st, extract_mix(default_state()))
+            apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
             self.st["active_slot"] = None
             self.rebuild_all()
             self.refresh_slots()
@@ -479,15 +549,68 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
-        self.engine.write_matrix(compute_matrix(self.st), compute_out_gains(self.st))
+        self.engine.write_matrix(*control_room.apply(self.st, compute_matrix(self.st),
+                                                     compute_out_gains(self.st)))
+        self.engine.write_device(device_block(self.st, self.dev))
         self.matrix.update()
+        self.control.refresh()
+        self.update_arc_leds()
         self.schedule_save()
+
+    # ------------------------------------------------------------------ ARC USB
+    def arc_key(self, key, pressed):
+        """An ARC key went down or up. Keys act on press; Talkback also on release."""
+        action = arc.DEFAULT_KEYS[key]
+        cr = control_room.control_room(self.st)
+        if action == "talkback":
+            if pressed:
+                self._talkback_pressed = (time.monotonic(), not cr["talkback"])
+                cr["talkback"] = not cr["talkback"]
+            elif self._talkback_pressed:
+                t, switched_on = self._talkback_pressed
+                self._talkback_pressed = None
+                if switched_on and time.monotonic() - t > arc.TALKBACK_HOLD_S:
+                    cr["talkback"] = False     # held: momentary, like a talkback button
+                else:
+                    return
+            self.push_matrix()
+            return
+        if not pressed:
+            return
+        if action.startswith("snapshot:"):
+            slot = int(action.split(":")[1]) - 1
+            if self.presets.slots[slot]:
+                self.recall_slot(slot)
+            return
+        if action == "phones":
+            cr["encoder"] = "main" if cr["encoder"] == "phones" else "phones"
+            self.update_arc_leds()
+            self.schedule_save()
+            return
+        control_room.toggle(self.st, action)
+        self.push_matrix()
+
+    def arc_encoder(self, clicks):
+        pair, db = control_room.step_volume(self.st, clicks)
+        strip = self.strips.get(strip_key("out", pair))
+        if strip is not None:
+            strip.set_fader(db)
+        self.push_matrix()
+
+    def arc_status(self, status):
+        self.control.set_arc_status(status)
+        if status == "connected":
+            self.update_arc_leds()
+
+    def update_arc_leds(self):
+        slot = self.st.get("active_slot")
+        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
 
     def schedule_save(self):
         self._save_timer.start()
 
     def save(self):
-        save_state(self.st)
+        save_state(self.st, self.dev)
 
     def ensure_engine(self):
         if self.engine.outdated():
@@ -524,23 +647,40 @@ class MainWindow(QMainWindow):
             hw_col = ("#34c759" if s["hw"] == "active" else
                       "#ffd60a" if s["hw"] in ("no-nodes", "starting") else "#ff453a")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
-            routes = f"{s['hw_nodes']}/2048 routes" if s["hw"] in ("active", "no-nodes") else "offline"
+            limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
+            routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
+                      else "offline")
             txt = f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP{sep}{rate}{sep}{routes}"
             self.settings.eng_label.setText(
                 ("Running" if s["processing"] else "Running (not responding)") +
                 "<br>Playback sink: " +
-                ("linked to playback 1/2" if s["sink_linked"] else "not linked to the Digiface"))
+                ("linked to playback 1/2" if s["sink_linked"] else
+                 f"not linked to the {self.dev.name.replace('RME ', '')}"))
             self.settings.eng_btn.setText("Restart engine")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
                 self.rate, self.mode = s["rate"], speed_mode(s["rate"])
                 self.rebuild_all()
         self.status.setText(txt)
+        active = s is not None and s["hw"] == "active"
+        if self.dev.key == "ff802":
+            self.settings.update_ff802_status(s["dev_status"] if active else None)
+        elif self.dev.key == "ff800":
+            hw = self.st["hw"]
+            if active and not hw["known"]:
+                # the configuration is write only: start from what the 800 reports
+                fireface800.settings_from_status(hw, s["dev_status2"])
+                self.settings.refresh_ff800_settings()
+                self.push_matrix()
+            self.settings.update_ff800_status((s["dev_status"], s["dev_status2"])
+                                              if active else None)
 
     def poll_hw(self):
-        self.settings.update_hw(self.hw.read())
+        if self.dev.key == "digiface":
+            self.settings.update_hw(self.hw.read())
 
     def poll_profile(self):
-        self.settings.update_profile(*pw_digiface_card())
+        if self.dev.key == "digiface":
+            self.settings.update_profile(*pw_digiface_card())
 
     def update_meters(self):
         now = time.monotonic()
@@ -565,6 +705,20 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
     apply_theme(app)
-    w = MainWindow()
-    w.show()
-    sys.exit(app.exec())
+    args = app.arguments()[1:]
+    if "--device" in args and args.index("--device") + 1 < len(args):
+        dev = DEVICES.get(args[args.index("--device") + 1])
+        if dev is None:
+            sys.exit(f"--device: one of {', '.join(DEVICES)}")
+    else:
+        dev = detect(load_device_choice())
+    while True:
+        save_device_choice(dev)
+        w = MainWindow(dev)
+        w.show()
+        code = app.exec()
+        if w.switch_to is None:
+            sys.exit(code)
+        dev = DEVICES[w.switch_to]
+        w.arc.disconnect_port()      # so the next window can open the ARC USB
+        w.deleteLater()

@@ -1,0 +1,3 @@
+# Let the logged-in user (and the audio group) open RME FireWire interfaces (Fireface 802, 800), so
+# Openface Mixer can drive the DSP mixer over FireWire. Install to /etc/udev/rules.d/.
+SUBSYSTEM=="firewire", ATTR{vendor}=="0x000a35", MODE="0660", GROUP="audio", TAG+="uaccess"

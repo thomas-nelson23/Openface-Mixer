@@ -13,3 +13,4 @@ __pycache__/
 *.swp
 .DS_Store
 tests/test_digiface_usb
+tests/test_fireface_fw
