@@ -31,7 +31,6 @@ SHM_SIZE = OFF_DEV_CMD + N_DEV_CMD * 4
 
 # hw_state values (DFU_STATE_* in engine/digiface_usb.h)
 HW_STATES = ("starting", "no-device", "no-access", "busy", "active", "no-nodes", "error")
-HW_MAX_NODES = 2048
 
 
 class Engine:

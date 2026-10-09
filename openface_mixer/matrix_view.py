@@ -101,7 +101,7 @@ class MatrixView(QWidget):
         if len(self.cols) > self.n_in_cols:
             p.setPen(KIND_COLOR["play"].lighter(130))
             p.drawText(QRectF(self._x(self.n_in_cols), 0, 400, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                       "SOFTWARE PLAYBACK")
+                       "PLAYBACK")
         for ci, (_, _, name) in enumerate(self.cols):
             p.setPen(txt if self.hover and self.hover[0] == ci else dim)
             p.drawText(QRectF(self._x(ci), 18, self.CW, self.HH - 20), Qt.AlignCenter, name)

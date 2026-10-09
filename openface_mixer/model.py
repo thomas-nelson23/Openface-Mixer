@@ -32,7 +32,6 @@ FADER_MAX_DB = 6.0
 FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
 STATE_VERSION = 4
-KINDS = ("in", "play")
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
 MIX_KEYS = ("stereo", "mute", "sends", "out", "groups")
 

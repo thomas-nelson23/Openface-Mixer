@@ -8,10 +8,10 @@ import re
 from pathlib import Path
 
 from . import fireface800, fireface802
+from .hardware import Hardware
 from .model import chan_label as digiface_chan_label, pair_label as digiface_pair_label
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
-ASOUND_CARDS = Path("/proc/asound/cards")
 RME_OUI = 0x000A35
 
 
@@ -92,33 +92,40 @@ class Digiface(Device):
         return self._n_adat(mode) // 2
 
     def present(self):
-        try:
-            return "Digiface USB" in ASOUND_CARDS.read_text()
-        except OSError:
-            return False
+        return Hardware.find_card() is not None
 
 
-class Fireface802(Device):
-    key = "ff802"
-    name = "RME Fireface 802"
+class FireWireDevice(Device):
+    """An RME FireWire interface; proto is its protocol module (fireface802 or fireface800)."""
     bus = "FireWire"
-    phones_pairs = fireface802.PHONES_PAIRS
-    unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
+    proto = None
+    unit_version = 0
 
     def channels(self, kind, mode):
-        return fireface802.channels(kind, mode)
+        return self.proto.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
-        return fireface802.chan_label(kind, c)
+        return self.proto.chan_label(kind, c)
 
     def pair_label(self, kind, c, mode):
-        return fireface802.pair_label(kind, c)
+        return self.proto.pair_label(kind, c)
 
     def present(self):
         return find_firewire_unit(RME_OUI, self.unit_version) is not None
 
     def upgrade_settings(self, st):
-        st["hw"] = fireface802.upgrade_settings(st.get("hw"))
+        st["hw"] = self.proto.upgrade_settings(st.get("hw"))
+
+    def channel_settings_active(self, st, kind, c):
+        return self.proto.channel_settings_active(st["hw"], kind, c)
+
+
+class Fireface802(FireWireDevice):
+    key = "ff802"
+    name = "RME Fireface 802"
+    proto = fireface802
+    phones_pairs = fireface802.PHONES_PAIRS
+    unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
         return fireface802.config_word(st["hw"]), fireface802.commands(st["hw"])
@@ -126,40 +133,19 @@ class Fireface802(Device):
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
 
-    def channel_settings_active(self, st, kind, c):
-        return fireface802.channel_settings_active(st["hw"], kind, c)
 
-
-class Fireface800(Device):
+class Fireface800(FireWireDevice):
     key = "ff800"
     name = "RME Fireface 800"
-    bus = "FireWire"
+    proto = fireface800
     phones_pairs = fireface800.PHONES_PAIRS
     unit_version = 0x000001      # SND_FF_UNIT_VERSION_FF800 in the kernel driver
-
-    def channels(self, kind, mode):
-        return fireface800.channels(kind, mode)
-
-    def chan_label(self, kind, c, mode):
-        return fireface800.chan_label(kind, c)
-
-    def pair_label(self, kind, c, mode):
-        return fireface800.pair_label(kind, c)
-
-    def present(self):
-        return find_firewire_unit(RME_OUI, self.unit_version) is not None
-
-    def upgrade_settings(self, st):
-        st["hw"] = fireface800.upgrade_settings(st.get("hw"))
 
     def device_words(self, st):
         return fireface800.device_words(st["hw"])
 
     def channel_has_settings(self, kind, c):
         return fireface800.channel_has_settings(kind, c)
-
-    def channel_settings_active(self, st, kind, c):
-        return fireface800.channel_settings_active(st["hw"], kind, c)
 
 
 DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface800())}

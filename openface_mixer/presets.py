@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from .config import PRESETS_FILE, atomic_write
+from .config import atomic_write
 from .model import MIX_KEYS, N_SLOTS
 
 FILE_FORMAT = "openface-mixer-mix"
@@ -11,7 +11,7 @@ FILE_FORMAT = "openface-mixer-mix"
 class PresetBank:
     """8 slots; each is None or {"name": str, "mix": {...}} (mix = model.extract_mix())."""
 
-    def __init__(self, path=PRESETS_FILE):
+    def __init__(self, path):
         self.path = Path(path)
         self.slots = [None] * N_SLOTS
         self.load()

@@ -181,7 +181,8 @@ class FileTest(unittest.TestCase):
         self.assertEqual(len(data), 4 + (m.N_OUT * m.N_SRC + m.N_OUT) * 4)
 
     def test_device_dirs(self):
-        self.assertEqual(config.state_file(devices.DEVICES["digiface"]), config.STATE_FILE)
+        self.assertEqual(config.state_file(devices.DEVICES["digiface"]),
+                         config.CONFIG_DIR / "state.json")
         self.assertEqual(config.state_file(devices.DEVICES["ff802"]),
                          config.CONFIG_DIR / "ff802" / "state.json")
 

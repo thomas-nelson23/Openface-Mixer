@@ -109,12 +109,6 @@ static uint32_t le32(const uint8_t *p)
 	return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
-static void raise_peak(float *dst, float v)
-{
-	if (v > *dst)
-		*dst = v;
-}
-
 uint32_t ff802_decode_meter_chunk(const uint8_t *chunk, struct ofm_shm *s)
 {
 	uint32_t tag = le32(chunk + FF802_METER_CHUNK - 4);

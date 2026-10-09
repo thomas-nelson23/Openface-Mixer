@@ -31,7 +31,7 @@ class MatrixFileTest(unittest.TestCase):
         written = {}
         with mock.patch.object(config, "atomic_write", lambda path, data: written.update({path: data})):
             config.save_state(st)
-        self.assertNotIn("solo", json.loads(written[config.STATE_FILE]))
+        self.assertNotIn("solo", json.loads(written[config.state_file()]))
         self.assertTrue(st["solo"]["in"][0])   # the live state keeps it
 
 
