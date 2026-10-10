@@ -50,7 +50,28 @@ float raydat_peak(uint32_t word)
 
 bool raydat_card_match(const char *driver, const char *name)
 {
-	return strcmp(driver, "HDSPM") == 0 && strncmp(name, "RME RayDAT", 10) == 0;
+	return (strcmp(driver, "HDSPM") == 0 || strcmp(driver, "HDSPe") == 0) &&
+	       strncmp(name, "RME RayDAT", 10) == 0;
+}
+
+bool raydat_driver_usable(const char *driver, unsigned int pci_vendor)
+{
+	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == RAYDAT_VENDOR_RME);
+}
+
+/* PCI vendor ID of ALSA card n, or 0 if unknown. */
+static unsigned int card_pci_vendor(int n)
+{
+	char path[64];
+	unsigned int v = 0;
+	snprintf(path, sizeof(path), "/sys/class/sound/card%d/device/vendor", n);
+	FILE *f = fopen(path, "r");
+	if (f == NULL)
+		return 0;
+	if (fscanf(f, "%x", &v) != 1)
+		v = 0;
+	fclose(f);
+	return v;
 }
 
 /* shared-memory source of mixer source slot j (0-35 inputs, 36-71 playback) */
@@ -104,8 +125,11 @@ static int find_card(int *card, int *state)
 		memset(&info, 0, sizeof(info));
 		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
 		    raydat_card_match((const char *)info.driver, (const char *)info.name)) {
-			*card = n;
-			return fd;
+			if (raydat_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
+				*card = n;
+				return fd;
+			}
+			*state = DFU_STATE_WRONG_DRIVER;
 		}
 		close(fd);
 	}

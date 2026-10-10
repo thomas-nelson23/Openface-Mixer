@@ -64,6 +64,94 @@ numid=1,iface=HWDEP,name='Mixer'
   : values=0,0,0
 """
 
+# the same card under snd-hdspe (develop branch): CARD controls, status as multi-value controls
+AMIXER_HDSPE = """\
+numid=5,iface=CARD,name='Running'
+  ; type=BOOLEAN,access=r--v----,values=1
+  : values=on
+numid=2,iface=CARD,name='Firmware Build'
+  ; type=INTEGER,access=r-------,values=1,min=0,max=0,step=1
+  : values=12
+numid=9,iface=CARD,name='Internal Frequency'
+  ; type=ENUMERATED,access=rw------,values=1,items=9
+  ; Item #0 '32 KHz'
+  ; Item #1 '44.1 KHz'
+  ; Item #2 '48 KHz'
+  ; Item #3 '64 KHz'
+  ; Item #4 '88.2 KHz'
+  ; Item #5 '96 KHz'
+  ; Item #6 '128 KHz'
+  ; Item #7 '176.4 KHz'
+  ; Item #8 '192 KHz'
+  : values=2
+numid=7,iface=HWDEP,name='Raw Sample Rate'
+  ; type=INTEGER64,access=r--v----,values=2,min=0,max=0,step=0
+  : values=48000000000,1000000
+numid=10,iface=CARD,name='Current AutoSync Reference'
+  ; type=ENUMERATED,access=r--v----,values=1,items=9
+  ; Item #0 'WordClk'
+  ; Item #1 'AES'
+  ; Item #2 'S/PDIF'
+  ; Item #3 'ADAT1'
+  ; Item #4 'ADAT2'
+  ; Item #5 'ADAT3'
+  ; Item #6 'ADAT4'
+  ; Item #7 'SyncIn'
+  ; Item #8 'Intern'
+  : values=3
+numid=11,iface=CARD,name='Clock Mode'
+  ; type=ENUMERATED,access=rw------,values=1,items=2
+  ; Item #0 'AutoSync'
+  ; Item #1 'Master'
+  : values=0
+numid=12,iface=CARD,name='Preferred AutoSync Reference'
+  ; type=ENUMERATED,access=rw------,values=1,items=8
+  ; Item #0 'WordClk'
+  ; Item #1 'AES'
+  ; Item #2 'S/PDIF'
+  ; Item #3 'ADAT1'
+  ; Item #4 'ADAT2'
+  ; Item #5 'ADAT3'
+  ; Item #6 'ADAT4'
+  ; Item #7 'SyncIn'
+  : values=3
+numid=13,iface=CARD,name='AutoSync Status'
+  ; type=ENUMERATED,access=r--v----,values=8,items=4
+  ; Item #0 'No Lock'
+  ; Item #1 'Lock'
+  ; Item #2 'Sync'
+  ; Item #3 'N/A'
+  : values=0,3,1,2,0,0,0,0
+numid=14,iface=CARD,name='AutoSync Frequency'
+  ; type=ENUMERATED,access=r--v----,values=8,items=10
+  ; Item #0 ''
+  ; Item #1 '32 KHz'
+  ; Item #2 '44.1 KHz'
+  ; Item #3 '48 KHz'
+  ; Item #4 '64 KHz'
+  ; Item #5 '88.2 KHz'
+  ; Item #6 '96 KHz'
+  ; Item #7 '128 KHz'
+  ; Item #8 '176.4 KHz'
+  ; Item #9 '192 KHz'
+  : values=0,0,3,3,0,0,0,0
+numid=15,iface=CARD,name='S/PDIF In'
+  ; type=ENUMERATED,access=rw------,values=1,items=3
+  ; Item #0 'Optical'
+  ; Item #1 'Coaxial'
+  ; Item #2 'Internal'
+  : values=1
+numid=16,iface=CARD,name='S/PDIF Out Optical'
+  ; type=BOOLEAN,access=rw------,values=1
+  : values=off
+numid=17,iface=CARD,name='ADAT1 Internal'
+  ; type=BOOLEAN,access=rw------,values=1
+  : values=on
+numid=1,iface=HWDEP,name='Mixer'
+  ; type=INTEGER,access=rw---R--,values=3,min=0,max=65535,step=1
+  : values=0,0,0
+"""
+
 CARDS = """\
  0 [PCH            ]: HDA-Intel - HDA Intel PCH
                       HDA Intel PCH at 0xf7f10000 irq 32
@@ -105,6 +193,48 @@ class StatusTest(unittest.TestCase):
         # TCO (no module: N/A) is left out; AES has no lock, so no rate
         self.assertEqual(st["inputs"], [("AES", "No Lock", None), ("ADAT 1", "Sync", "96 kHz")])
 
+    def test_decode_hdspe(self):
+        c = hardware.parse_amixer_contents(AMIXER_HDSPE)
+        self.assertEqual(c["AutoSync Status"]["values"], [0, 3, 1, 2, 0, 0, 0, 0])
+        self.assertEqual(c["Raw Sample Rate"]["values"], [48000000000, 1000000])
+        self.assertEqual(c["Clock Mode"]["numid"], 11)
+        st = rd.decode_status(c)
+        self.assertEqual(st["driver"], rd.HDSPE)
+        self.assertEqual(st["source"], "AutoSync, on ADAT 1")
+        self.assertEqual(st["rate"], 48000)
+        self.assertTrue(st["running"])
+        self.assertEqual(st["firmware"], 12)
+        # AES (N/A) left out; word clock unlocked; frequencies as kHz
+        self.assertEqual(st["inputs"], [("Word Clock", "No Lock", None), ("S/PDIF", "Lock", "48 kHz"),
+                                        ("ADAT 1", "Sync", "48 kHz"), ("ADAT 2", "No Lock", None),
+                                        ("ADAT 3", "No Lock", None), ("ADAT 4", "No Lock", None),
+                                        ("Sync In", "No Lock", None)])
+        self.assertEqual(rd.control(c, "pref")[0], "Preferred AutoSync Reference")
+        self.assertEqual(rd.control(c, "spdif_in")[1]["value"], 1)
+        self.assertEqual(rd.display_item("ADAT1"), "ADAT 1")
+        self.assertEqual(rd.display_item("44.1 KHz"), "44.1 kHz")
+
+    def test_profiles(self):
+        hdspm = hardware.parse_amixer_contents(AMIXER)
+        self.assertEqual(rd.profile(hdspm), rd.HDSPM)
+        self.assertEqual(rd.decode_status(hdspm)["driver"], rd.HDSPM)
+        self.assertEqual(rd.control(hdspm, "internal"), (None, None))   # not in the fixture
+        self.assertEqual(rd.control(hdspm, "spdif_in"), (None, None))
+
+    def test_driver_usable(self):
+        self.assertTrue(rd.driver_usable(rd.HDSPM, 0x10ee))
+        self.assertFalse(rd.driver_usable(rd.HDSPM, rd.VENDOR_RME))
+        self.assertTrue(rd.driver_usable(rd.HDSPE, rd.VENDOR_RME))
+
+    def test_write_by_numid(self):
+        hw = hardware.Hardware(rd.CARD_NAME)
+        hw.card, hw.ctrls = 1, hardware.parse_amixer_contents(AMIXER_HDSPE)
+        with mock.patch.object(hardware.subprocess, "run") as run:
+            hw.write("Clock Mode", 1)
+            hw.write("Unknown", 0)
+        self.assertEqual(run.call_args_list[0].args[0][4:], ["cset", "numid=11", "1"])
+        self.assertEqual(run.call_args_list[1].args[0][4:], ["cset", "name=Unknown", "0"])
+
     def test_not_found(self):
         self.assertIsNone(rd.decode_status(None))
         self.assertIsNone(rd.decode_status({}))
@@ -124,6 +254,8 @@ class DeviceTest(unittest.TestCase):
             self.assertEqual(hardware.Hardware.find_card(rd.CARD_NAME), 1)
             self.assertIsNone(hardware.Hardware.find_card())       # no Digiface
             self.assertTrue(devices.DEVICES["raydat"].present())
+            self.assertEqual(hardware.Hardware.card_driver(1), "HDSPM")
+            self.assertEqual(hardware.Hardware.card_driver(0), "HDA-Intel")
             self.assertFalse(devices.DEVICES["digiface"].present())
 
 

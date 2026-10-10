@@ -1,8 +1,8 @@
 """Device settings held in the kernel's ALSA mixer controls, and PipeWire card info.
 
 The snd-usb-audio Digiface quirk exposes clock source, per-port output format and per-port
-input status as ALSA controls, and snd-hdspm the RayDAT's clock settings and input status; we
-drive them with amixer. See docs/HARDWARE.md.
+input status as ALSA controls, and snd-hdspm or snd-hdspe the RayDAT's clock settings and input
+status; we drive them with amixer. See docs/HARDWARE.md.
 """
 import re
 import subprocess
@@ -18,6 +18,7 @@ class Hardware:
     def __init__(self, card_name=DIGIFACE_CARD):
         self.card_name = card_name
         self.card = None
+        self.ctrls = {}
 
     @staticmethod
     def find_card(card_name=DIGIFACE_CARD):
@@ -32,9 +33,28 @@ class Hardware:
                 return int(m.group(1))
         return None
 
+    @staticmethod
+    def card_driver(card):
+        """The ALSA driver name of card number card (e.g. "HDSPM", "HDSPe"), or None."""
+        try:
+            text = Path("/proc/asound/cards").read_text()
+        except OSError:
+            return None
+        m = re.search(rf"^\s*{card}\s+\[.*?\]:\s*(\S+)\s+-", text, re.M)
+        return m.group(1) if m else None
+
+    @staticmethod
+    def pci_vendor(card):
+        """The PCI vendor ID of card number card, or 0 if it isn't a PCI card."""
+        try:
+            return int(Path(f"/sys/class/sound/card{card}/device/vendor").read_text(), 16)
+        except (OSError, ValueError):
+            return 0
+
     def read(self):
-        """{control name: {"value": int, "items": [str], "rw": bool}} or None if absent.
-        Switches read as 1 (on) or 0 (off)."""
+        """{control name: {"value": int, "values": [int], "items": [str], "rw": bool, "numid":
+        int}} or None if absent. "value" is the first of "values"; switches read as 1 (on) or 0
+        (off)."""
         self.card = self.find_card(self.card_name)
         if self.card is None:
             return None
@@ -43,21 +63,27 @@ class Hardware:
                                  capture_output=True, text=True, timeout=2).stdout
         except (OSError, subprocess.TimeoutExpired):
             return None
-        return parse_amixer_contents(out)
+        self.ctrls = parse_amixer_contents(out)
+        return self.ctrls
 
     def write(self, name, value):
+        """Sets a control by name. Controls seen by the last read() are addressed by numid, so
+        it works for any interface (snd-hdspe's settings are CARD controls, not MIXER)."""
         if self.card is None:
             return
-        subprocess.run(["amixer", "-q", "-c", str(self.card), "cset", f"name={name}", str(value)],
+        c = self.ctrls.get(name)
+        ident = f"numid={c['numid']}" if c else f"name={name}"
+        subprocess.run(["amixer", "-q", "-c", str(self.card), "cset", ident, str(value)],
                        capture_output=True, timeout=2)
 
 
 def parse_amixer_contents(out):
     ctrls, cur = {}, None
     for line in out.splitlines():
-        m = re.match(r"numid=\d+,iface=\w+,name='(.*)'", line)
+        m = re.match(r"numid=(\d+),iface=\w+,name='(.*)'", line)
         if m:
-            cur = {"name": m.group(1), "items": [], "value": None, "rw": False}
+            cur = {"name": m.group(2), "numid": int(m.group(1)), "items": [], "value": None,
+                   "values": [], "rw": False}
             ctrls[cur["name"]] = cur
             continue
         if cur is None:
@@ -68,10 +94,14 @@ def parse_amixer_contents(out):
         m = re.match(r"\s*; Item #\d+ '(.*)'", line)
         if m:
             cur["items"].append(m.group(1))
-        m = re.match(r"\s*: values=(-?\d+|on|off)", line)
+        m = re.match(r"\s*: values=(\S+)", line)
         if m:
-            v = m.group(1)
-            cur["value"] = 1 if v == "on" else 0 if v == "off" else int(v)
+            try:
+                cur["values"] = [1 if v == "on" else 0 if v == "off" else int(v)
+                                 for v in m.group(1).split(",")]
+            except ValueError:
+                cur["values"] = []
+            cur["value"] = cur["values"][0] if cur["values"] else None
     return ctrls
 
 

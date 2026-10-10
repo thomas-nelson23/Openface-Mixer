@@ -11,7 +11,7 @@ engine/                 C engine that drives the interface's DSP mixer. Builds t
   backend_digiface.c    the Digiface backend, on top of digiface_usb.c
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
   fireface_fw.c         Fireface 802 and 800 backends: FireWire transactions for mixer, settings, meters
-  raydat.c              HDSPe RayDAT backend: snd-hdspm's Mixer control and hwdep meters
+  raydat.c              HDSPe RayDAT backend: snd-hdspm/snd-hdspe Mixer control and hwdep meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
