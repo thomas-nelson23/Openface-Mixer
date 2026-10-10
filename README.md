@@ -117,7 +117,7 @@ the output pair set as **Main Out** and are not part of presets:
 | --- | --- |
 | Dim | Lowers Main Out by 20 dB |
 | Mono | Sums Main Out to mono |
-| Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level |
+| Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level. Pick the pair under *Speaker B* first; it stays silent while Speaker B is off |
 | Talkback | Sends the talkback mic input to Phones, with the rest of the phones mix 20 dB down |
 | Ext In | Replaces the Main Out mix with the External In input pair |
 
@@ -127,7 +127,8 @@ TotalMix layout printed on it:
 - Rows 1 and 2: recall presets 1 to 8.
 - Row 3: Mono, Phones (both phones keys), External Input.
 - Bottom: Talkback (tap to latch, hold to talk), Speaker B, Dim.
-- Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit.
+- Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit. Faders
+  grouped with it follow, as with the mouse.
 
 Key LEDs follow the state. The ARC needs no driver or setup; the window must be open for it to
 work.
