@@ -47,6 +47,7 @@ enum {
 	DFU_STATE_ACTIVE,         /* hardware mixer running our matrix */
 	DFU_STATE_NO_NODES,       /* active, but the matrix needs more than DFU_MAX_NODES */
 	DFU_STATE_ERROR,          /* USB error; will retry */
+	DFU_STATE_WRONG_DRIVER,   /* the kernel driver bound to the device can't run it (RayDAT) */
 };
 
 struct dfu;

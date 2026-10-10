@@ -244,13 +244,25 @@ snd-firewire-ctl-services, which Openface Mixer follows), and the mixer and play
 
 # RME HDSPe RayDAT
 
-The RayDAT is a PCIe card with four ADAT ports, AES and S/PDIF. The kernel's `snd-hdspm` driver
+The RayDAT is a PCIe card with four ADAT ports, AES and S/PDIF. Two drivers run it: the kernel's
+`snd-hdspm` and the out-of-tree [snd-hdspe](https://github.com/Schroedingers-Cat/snd-hdspe)
+(`develop` branch), a rewrite that keeps snd-hdspm's mixer control and ioctls for hdspmixer and
+adds a fuller settings interface. The kernel's `snd-hdspm` driver
 (firmware revision 211) streams 36 in / 36 out at 32–48 kHz, 20 at 64–96 kHz and 12 at
 128–192 kHz, and, unlike the USB and FireWire drivers, already exposes the card's hardware
 mixer to userspace. That is what alsa-tools' `hdspmixer` uses, and what Openface Mixer's engine
 uses too (`engine/raydat.c`). No low-level protocol and no udev rule are needed: the engine
 opens the card's `/dev/snd/controlC<n>` and `/dev/snd/hwC<n>D0`, found by driver name `HDSPM`
-and short name `RME RayDAT_<serial>`.
+or `HDSPe` and short name `RME RayDAT_<serial>`.
+
+## Which driver
+
+Cards made from 2022 on need snd-hdspe; snd-hdspm still binds to them (its PCI table lists
+device `3fc6` under both Xilinx's vendor ID `10ee` and RME's `1d18`) but doesn't run them
+properly. Openface Mixer tells them apart by PCI vendor (`/sys/class/sound/card<n>/device/vendor`):
+a card with RME's `1d18` under snd-hdspm is left alone, and the engine reports `wrong-driver`
+instead of writing its mixer. That the vendor ID is what marks the newer cards is inferred from
+the drivers' ID tables and user reports, not from RME documentation.
 
 ## Mixer
 
@@ -268,7 +280,9 @@ sets it up. It answers writes with `EBUSY` while playback and capture are open i
 processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
 each send by its output's master level. The engine writes only changed crosspoints, reads one
 output's sends back from the driver every 500 ms, and sends everything again if they differ (the
-driver was reloaded, or another program changed the mixer).
+driver was reloaded, or another program changed the mixer). snd-hdspe also mutes the mixer
+channels that don't exist when the speed mode changes; the same read-back catches that and
+restores the mix.
 
 ## Channels
 
@@ -285,7 +299,9 @@ The hwdep ioctl `SNDRV_HDSPM_IOCTL_GET_PEAK_RMS` returns peak and RMS values for
 playback channels and outputs. Peaks: bits 8–30 are the level, full scale `0x7fffff`; bits 0–3
 count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate.
 
-The settings are ordinary ALSA mixer controls, which the GUI reads and writes with amixer:
+The settings are ordinary ALSA controls, which the GUI reads and writes with amixer, addressed
+by `numid` (snd-hdspe puts them on the CARD interface, which `amixer cset name=…` alone doesn't
+find). Under snd-hdspm:
 
 | Control | Access | Values |
 | --- | --- | --- |
@@ -297,12 +313,31 @@ The settings are ordinary ALSA mixer controls, which the GUI reads and writes wi
 | `WC`, `AES`, `SPDIF`, `ADAT1`–`ADAT4`, `TCO`, `SYNC IN` `SyncCheck` | r | No Lock, Lock, Sync, N/A |
 | the same with `Frequency` | r | No Lock, 32 kHz … 192 kHz |
 
+Under snd-hdspe (`hdspe_control.c`; hdspeconf's RayDAT page shows the same):
+
+| Control | Access | Values |
+| --- | --- | --- |
+| `Clock Mode` | rw | AutoSync, Master |
+| `Preferred AutoSync Reference` | rw | WordClk, AES, S/PDIF, ADAT1–4, (TCO,) SyncIn |
+| `Current AutoSync Reference` | r | the same, then Intern |
+| `AutoSync Status` | r | one value per preferred-reference item: No Lock, Lock, Sync, N/A |
+| `AutoSync Frequency` | r | one value per item: "" (no lock), 32 KHz … 192 KHz |
+| `Internal Frequency` | rw | 32 KHz … 192 KHz; hdspeconf only offers it while audio isn't running |
+| `Raw Sample Rate` (HWDEP) | r | numerator, denominator (64-bit); the rate is their quotient |
+| `Running`, `Firmware Build`, `Serial`, `Buffer Size` | r | |
+| `S/PDIF In` | rw | Optical, Coaxial, Internal |
+| `S/PDIF Out Optical` (on the ADAT 4 port), `S/PDIF Out Professional` | rw | on/off |
+| `ADAT1 Internal`, `ADAT2 Internal` (AEB/TEB boards) | rw | on/off |
+| `Single Speed WordClk Out`, `Clear TMS` | rw | on/off |
+
+`DDS` (pitch) and the TCO controls aren't offered.
+
 ## RayDAT not verified on hardware yet
 
 Nobody has run Openface Mixer on a RayDAT yet. Worth checking first: that the mixer accepts
 writes with PipeWire running (the `EBUSY` rule above compares the processes that opened
 playback and capture), the PipeWire card name property the engine matches, the meter scale,
-and the channel layout at 2x/4x speed.
+the channel layout at 2x/4x speed, and the driver check on a 2022-or-later card.
 
 # RME ARC USB
 

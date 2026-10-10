@@ -8,7 +8,7 @@ A TotalMix-style mixer and control panel for the **RME Digiface USB**, the
 
 RME's TotalMix only runs on Windows and macOS. Linux streams audio to these interfaces
 (`snd-usb-audio` for the Digiface since kernel 6.12, `snd-fireface` for the 802 and 800,
-`snd-hdspm` for the RayDAT), but nothing gave them the TotalMix workflow. Openface Mixer drives
+`snd-hdspm` or `snd-hdspe` for the RayDAT), but nothing gave them the TotalMix workflow. Openface Mixer drives
 the interface's own DSP mixer, over USB on the Digiface, over FireWire on the Firefaces and
 through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 
@@ -38,7 +38,7 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
   it at login.
 
 > **How mixing works:** Openface Mixer drives the interface's own DSP mixer (over USB on the
-> Digiface, over FireWire on the Firefaces, through `snd-hdspm` on the RayDAT), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
+> Digiface, over FireWire on the Firefaces, through `snd-hdspm` or `snd-hdspe` on the RayDAT), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
 > interface even with the computer idle. There is no software mixing. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/HARDWARE.md](docs/HARDWARE.md).
 
@@ -50,7 +50,8 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 
 - Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802 or 800
   a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the RayDAT the
-  `snd-hdspm` driver (in the kernel for years)
+  `snd-hdspm` driver (in the kernel; cards before 2022) or the `snd-hdspe` driver (cards from
+  2022 on, see below)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
@@ -161,13 +162,26 @@ out, front jacks, 48V off), and from then on sends its own copy, as TotalMix doe
 
 ### HDSPe RayDAT
 
-The RayDAT needs nothing beyond the kernel's `snd-hdspm` driver: pick **RME HDSPe RayDAT** under
-**Device** (or run `openface-mixer --device raydat`), and its engine
+Pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
 (`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
 channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
 then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). The driver
 starts with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
 it up.
+
+Which driver the card needs depends on its age:
+
+- Cards from before 2022 run on the kernel's own `snd-hdspm`; nothing to install.
+- Cards from 2022 on need [snd-hdspe](https://github.com/Schroedingers-Cat/snd-hdspe) (its
+  `develop` branch). The kernel's `snd-hdspm` still claims them but can't run them, so Openface
+  Mixer leaves such a card alone and says so. Install snd-hdspe with DKMS as its README
+  describes (`make install`) and blacklist the old driver:
+
+      echo "blacklist snd-hdspm" | sudo tee /etc/modprobe.d/hdspe.conf
+
+  snd-hdspe works on older cards too. With it, the settings panel also offers the S/PDIF input,
+  optical S/PDIF out, the internal ADAT boards (AEB/TEB) and track marker options that its
+  configuration tool, hdspeconf, has.
 
 The **Openface Mixer Playback (RayDAT)** sink feeds the driver's first two playback channels,
 which are ADAT 1 channels 1/2 (`A1 1/2`), not AES. The card has no output faders of its own, so
@@ -212,10 +226,11 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
   The TCO module isn't offered as a clock source.
-- HDSPe RayDAT support is built on the kernel's `snd-hdspm` driver and alsa-tools' hdspmixer
-  and has not been checked on a card yet (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
+- HDSPe RayDAT support is built on the kernel's `snd-hdspm` driver, the `snd-hdspe` driver,
+  hdspeconf and alsa-tools' hdspmixer, and has not been checked on a card yet (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
   The driver only accepts mixer changes while playback and recording are opened by the same
-  program (PipeWire or JACK normally do that). No TCO settings.
+  program (PipeWire or JACK normally do that). No TCO or pitch settings. A card counts as
+  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
 - The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
 - The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
   `make install` installs, which need sudo once). Without them nothing is mixed, and the

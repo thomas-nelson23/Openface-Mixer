@@ -22,7 +22,7 @@ process, shared memory and config files, so several can run at once.
 
 `--device digiface` (default), `--device ff802`, `--device ff800` or `--device raydat` picks the
 backend: `backend_digiface.c` on top of `digiface_usb.c` (libusb), the 802 or 800 backend in
-`fireface_fw.c` (FireWire transactions through `/dev/fw*`), or `raydat.c` (snd-hdspm's `Mixer`
+`fireface_fw.c` (FireWire transactions through `/dev/fw*`), or `raydat.c` (snd-hdspm's or snd-hdspe's `Mixer`
 control and hwdep meters in `/dev/snd`). The rest of the engine is the same
 for all of them.
 

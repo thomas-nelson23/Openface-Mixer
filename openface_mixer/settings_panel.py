@@ -10,7 +10,7 @@ from . import fireface800 as ff800
 from . import fireface802 as ff
 from . import raydat
 from .devices import DEVICES
-from .hardware import set_card_profile
+from .hardware import Hardware, set_card_profile
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules"}
@@ -44,6 +44,9 @@ def hw_state_text(dev, state):
         "no-nodes": f"<span style='color:#ffd60a'>Hardware mixer active, but this mix needs "
                     f"more than {dev.max_routes} routes; some sends are missing.</span>",
         "error": red.format(f"{dev.bus} error talking to the {short}; retrying."),
+        "wrong-driver": red.format(
+            f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards from 2022 on. "
+            "Install snd-hdspe and blacklist snd-hdspm (see the README)."),
     }.get(state, state)
 
 
@@ -305,55 +308,92 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------------ HDSPe RayDAT
     def _build_raydat(self, lay):
         """TotalMix's Settings dialog for the RayDAT, from the driver's ALSA controls: clock mode,
-        preferred sync reference, internal rate, S/PDIF and word clock options, input status."""
+        preferred sync reference, internal rate, S/PDIF and word clock options, input status.
+        snd-hdspm and snd-hdspe name the controls differently (raydat.DRIVERS); options a driver
+        lacks are hidden."""
         combos = {}
-        for name in (raydat.CLOCK_MODE, raydat.PREF_SYNC_REF, raydat.INTERNAL_RATE):
+        for role in raydat.COMBOS:
             combo = QComboBox()
-            combo.activated.connect(lambda i, n=name: self._write(n, i))
-            combos[name] = combo
+            combo.activated.connect(lambda i, r=role: self._write_role(r, i))
+            combos[role] = combo
         self.rd_combos = combos
-        clock = self._build_fw_clock(lay, combos[raydat.CLOCK_MODE], raydat.STATUS_INPUTS,
-                                     "Clock mode")
+        clock = self._build_fw_clock(lay, combos["clock"], raydat.STATUS_INPUTS, "Clock mode")
         clock.addWidget(QLabel("Prefer"), 3, 0)
-        clock.addWidget(combos[raydat.PREF_SYNC_REF], 3, 1)
+        clock.addWidget(combos["pref"], 3, 1)
         clock.addWidget(QLabel("Internal rate"), 4, 0)
-        clock.addWidget(combos[raydat.INTERNAL_RATE], 4, 1)
+        clock.addWidget(combos["internal"], 4, 1)
 
         opts = QGroupBox("OPTIONS")
-        ol = QVBoxLayout(opts)
+        ol = QGridLayout(opts)
+        self.rd_spdif_label = QLabel("S/PDIF in")
+        ol.addWidget(self.rd_spdif_label, 0, 0)
+        ol.addWidget(combos["spdif_in"], 0, 1)
         self.rd_toggles = {}
-        for name, label in raydat.TOGGLES:
+        for r, (name, label) in enumerate(raydat.TOGGLES, 1):
             box = QCheckBox(label)
             box.toggled.connect(lambda on, n=name: self._write(n, "on" if on else "off"))
-            ol.addWidget(box)
+            ol.addWidget(box, r, 0, 1, 2)
             self.rd_toggles[name] = box
+        self.rd_info = QLabel()
+        self.rd_info.setWordWrap(True)
+        ol.addWidget(self.rd_info, len(raydat.TOGGLES) + 1, 0, 1, 2)
         lay.addWidget(opts)
+        self._rd_ctrls = None
+
+    def _write_role(self, role, value):
+        name, _c = raydat.control(self._rd_ctrls, role)
+        if name:
+            self._write(name, value)
 
     def update_raydat(self, ctrls):
         """ctrls: the card's ALSA controls (Hardware.read()), or None if it is not found."""
         st = raydat.decode_status(ctrls)
+        usable = True
+        if st:
+            drv = Hardware.card_driver(self.hw.card) or st["driver"]
+            usable = raydat.driver_usable(drv, Hardware.pci_vendor(self.hw.card))
+        self._rd_ctrls = ctrls if st else None
         self._updating = True
         try:
-            for name, combo in self.rd_combos.items():
-                c = ctrls.get(name) if st else None
-                combo.setEnabled(bool(c))
+            for role, combo in self.rd_combos.items():
+                _name, c = raydat.control(ctrls, role) if st else (None, None)
+                # snd-hdspe can't change the internal rate while audio runs (as in hdspeconf)
+                combo.setEnabled(bool(c) and usable and c["rw"]
+                                 and not (role == "internal" and st["running"]
+                                          and st["driver"] == raydat.HDSPE))
+                if role == "spdif_in":
+                    combo.setVisible(bool(c))
+                    self.rd_spdif_label.setVisible(bool(c))
                 if not c:
                     continue
-                if [combo.itemText(i) for i in range(combo.count())] != c["items"]:
+                texts = [raydat.display_item(t) for t in c["items"]]
+                if [combo.itemText(i) for i in range(combo.count())] != texts:
                     combo.clear()
-                    combo.addItems(c["items"])
+                    combo.addItems(texts)
                 if not combo.view().isVisible() and c["value"] is not None:
                     combo.setCurrentIndex(c["value"])
             for name, box in self.rd_toggles.items():
                 c = ctrls.get(name) if st else None
-                box.setEnabled(bool(c))
+                # before the card is found, show the snd-hdspm set
+                box.setVisible(bool(c) or (st is None and name in raydat.HDSPM_TOGGLES))
+                box.setEnabled(bool(c) and usable)
                 if c and c["value"] is not None:
                     box.setChecked(bool(c["value"]))
         finally:
             self._updating = False
         if st is None:
+            self.rd_info.setText("")
             self._show_fw_status(None)
             return
+        if not usable:
+            self.rd_info.setText(
+                "<span style='color:#ff6b5b'>Settings off: snd-hdspm can't run this card."
+                "</span>")
+        else:
+            info = "snd-hdspe driver" if st["driver"] == raydat.HDSPE else "snd-hdspm driver"
+            if st["firmware"]:
+                info += f", firmware {st['firmware']}"
+            self.rd_info.setText(f"<span style='color:#8e8e93'>{info}</span>")
         self.cur_src.setText(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}

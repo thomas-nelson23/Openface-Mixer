@@ -41,6 +41,13 @@ int main(void)
 	check("card without serial", raydat_card_match("HDSPM", "RME RayDAT"), 1);
 	check("AIO", raydat_card_match("HDSPM", "RME AIO_1a2b3c"), 0);
 	check("other driver", raydat_card_match("USB-Audio", "RME RayDAT"), 0);
+	check("snd-hdspe card", raydat_card_match("HDSPe", "RME RayDAT_00012345"), 1);
+
+	check("old card, snd-hdspm", raydat_driver_usable("HDSPM", 0x10ee), 1);
+	check("new card, snd-hdspm", raydat_driver_usable("HDSPM", RAYDAT_VENDOR_RME), 0);
+	check("new card, snd-hdspe", raydat_driver_usable("HDSPe", RAYDAT_VENDOR_RME), 1);
+	check("old card, snd-hdspe", raydat_driver_usable("HDSPe", 0x10ee), 1);
+	check("unknown vendor, snd-hdspm", raydat_driver_usable("HDSPM", 0), 1);
 
 	if (!failed)
 		printf("test_raydat: ok\n");
