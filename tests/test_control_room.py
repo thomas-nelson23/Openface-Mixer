@@ -46,6 +46,7 @@ class ControlRoomTest(unittest.TestCase):
 
     def test_speaker_b_moves_main_mix(self):
         st = mixed()
+        cr.control_room(st)["main_b"] = 1
         st["out"][0]["gain"] = -6.0
         cr.toggle(st, "speaker_b")
         g, og = run(st)
@@ -55,8 +56,41 @@ class ControlRoomTest(unittest.TestCase):
         self.assertEqual(og[0], 0.0)
         self.assertAlmostEqual(og[2], m.db2lin(-6.0), places=6)
 
+    def test_speaker_b_pair_silent_while_off(self):
+        st = mixed()
+        st["sends"]["in"][4][1] = [0.0, 0.0]     # B's own mix, and playback 3/4 by default
+        cr.control_room(st)["main_b"] = 1
+        g, og = run(st)
+        self.assertAlmostEqual(gain(g, 0, 0), 1.0)
+        for o in (2, 3):
+            self.assertEqual(gain(g, o, 4), 0.0)
+            self.assertEqual(gain(g, o, m.N_IN + o), 0.0)
+            self.assertEqual(og[o], 0.0)
+        cr.toggle(st, "speaker_b")
+        cr.toggle(st, "speaker_b")
+        g2, og2 = run(st)
+        self.assertEqual(list(g2), list(g))
+        self.assertEqual(list(og2), list(og))
+
+    def test_speaker_b_needs_a_pair(self):
+        st = mixed()
+        self.assertFalse(cr.toggle(st, "speaker_b"))
+        g, og = run(st)
+        self.assertEqual(list(g), list(m.compute_matrix(st)))
+        self.assertEqual(list(og), list(m.compute_out_gains(st)))
+
+    def test_old_state_unassigns_speaker_b_unless_on(self):
+        st = mixed()
+        st["control_room"] = {"main_b": 1, "speaker_b": False}
+        self.assertEqual(cr.control_room(st)["main_b"], cr.NO_PAIR)
+        st["control_room"] = {"main_b": 2, "speaker_b": True}
+        self.assertEqual(cr.control_room(st)["main_b"], 2)
+        cr.control_room(st)["main_b"] = 3          # current version: left alone
+        self.assertEqual(cr.control_room(st)["main_b"], 3)
+
     def test_dim_follows_speaker_b(self):
         st = mixed()
+        cr.control_room(st)["main_b"] = 1
         cr.toggle(st, "speaker_b")
         cr.toggle(st, "dim")
         _, og = run(st)

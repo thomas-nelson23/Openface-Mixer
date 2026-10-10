@@ -591,10 +591,15 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def arc_encoder(self, clicks):
-        pair, db = control_room.step_volume(self.st, clicks)
-        strip = self.strips.get(strip_key("out", pair))
-        if strip is not None:
-            strip.set_fader(db)
+        """The encoder turns the Main Out (or Phones) master; its fader group follows, as when
+        the fader is moved with the mouse."""
+        key = strip_key("out", control_room.encoder_pair(self.st))
+        old = get_strip_db(self.st, key)
+        _pair, db = control_room.step_volume(self.st, clicks)
+        moved = {key: db, **group_follow(self.st, key, old, db)}
+        for k, val in moved.items():
+            if k in self.strips:
+                self.strips[k].set_fader(val)
         self.push_matrix()
 
     def arc_status(self, status):

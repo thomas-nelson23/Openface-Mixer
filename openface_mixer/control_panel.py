@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
 from PySide6.QtWidgets import QComboBox, QGridLayout, QGroupBox, QLabel, QPushButton
 
 from . import arc
-from .control_room import control_room
+from .control_room import NO_PAIR, control_room, has_speaker_b
 from .theme import ACCENT
 
 SWITCHES = (("dim", "Dim"), ("mono", "Mono"), ("speaker_b", "Speaker B"),
@@ -129,7 +129,7 @@ class ControlRoomPanel(QGroupBox):
     def set_channels(self, pairs, inputs, input_pairs):
         """pairs / inputs / input_pairs: lists of (label, index) for the combos."""
         self._updating = True
-        for key, items in (("main", pairs), ("main_b", pairs), ("phones", pairs),
+        for key, items in (("main", pairs), ("main_b", [("Off", NO_PAIR)] + pairs), ("phones", pairs),
                            ("talkback_src", inputs), ("ext_src", input_pairs)):
             c = self.combos[key]
             c.clear()
@@ -143,6 +143,7 @@ class ControlRoomPanel(QGroupBox):
         self._updating = True
         for key, b in self.buttons.items():
             b.setChecked(bool(cr[key]))
+        self.buttons["speaker_b"].setEnabled(has_speaker_b(self.st))
         for key, c in self.combos.items():
             i = c.findData(cr[key])
             if i >= 0:
@@ -161,5 +162,8 @@ class ControlRoomPanel(QGroupBox):
             return
         val = self.combos[key].currentData()
         if val is not None:
-            control_room(self.st)[key] = val
+            cr = control_room(self.st)
+            cr[key] = val
+            if not has_speaker_b(self.st):
+                cr["speaker_b"] = False
             self.changed.emit()
