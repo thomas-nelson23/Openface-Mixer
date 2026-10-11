@@ -1,4 +1,4 @@
-"""RME Fireface 802 over FireWire: channel layout, DSP commands and registers. Pure Python, no Qt.
+"""RME Fireface 802: channel layout, DSP commands and registers. Pure Python, no Qt.
 
 The 802's TotalMix FX DSP is controlled with asynchronous FireWire transactions. The kernel's
 snd-fireface driver only streams audio; mixer, input and output settings are left to userspace.
@@ -11,6 +11,10 @@ parity bit 31):
 * (channel << 24) | (command << 16) | value     settings of a hardware input or output channel.
   Channels 0-29 are the hardware inputs, 30-59 the hardware outputs, 0x3c the FX unit.
 * 0x40000000 | ((0x40 * mixer + source) << 16) | gain     a mixer crosspoint (engine only).
+
+Over USB the 802 runs in Class Compliant mode, where the same DSP takes the same words as
+SysEx register writes on its second USB MIDI port ((channel << 8) | command is the register,
+see engine/fireface_usb.h). Clock and options there are registers too (usb_commands()).
 
 Channel layout (the same numbering for meters and the mixer):
   inputs   0-7 AN 1-8 (line), 8-11 AN 9-12 (mic/inst), 12-13 AES, 14-21 ADAT A, 22-29 ADAT B
@@ -59,6 +63,17 @@ CLOCK_SOURCES = (                       # (key, label, config bits), TotalMix's 
     ("adat_b", "ADAT B", 0x00001000),
 )
 
+# Class Compliant mode (USB) registers, from oscmix's Fireface 802 notes
+USB_CARD_NAME = "Fireface 802 ("   # ALSA card name in CC mode: "Fireface 802 (<serial>)"
+USB_REG_CLOCK = 0x3D20          # clock source, index into CLOCK_SOURCES
+USB_REG_RATE = 0x3D21           # sample rate (read only), index into USB_RATES
+USB_REG_WORD_SINGLE = 0x3D22
+USB_REG_OPT_IN_SPDIF = 0x3D40   # the second optical input carries AES/S/PDIF
+USB_REG_AES_PRO = 0x3D42
+USB_REG_OPT_OUT_SPDIF = 0x3D46
+USB_RATES = (32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400, 192000)
+USB_STATUS_VALID = 0x80000000   # engine's dev_status: rate in bits 8-15, clock in bits 0-7
+
 # sync status register 0x0000'801c'0000, as the kernel decodes it (ff-protocol-latter.c)
 RATES = {0x0: 32000, 0x1: 44100, 0x2: 48000, 0x4: 64000, 0x5: 88200, 0x6: 96000,
          0x8: 128000, 0x9: 176400, 0xA: 192000}
@@ -86,6 +101,15 @@ def channels(kind, mode):
     per_port = 8 // mode
     return analog_aes + list(range(ADAT_A, ADAT_A + per_port)) + \
         list(range(ADAT_B, ADAT_B + per_port))
+
+
+def usb_channels(kind, mode):
+    """Channels present over USB. The hardware inputs and outputs are all there, but Class
+    Compliant mode streams only analog, AES and the first ADAT port (22 channels at 1x)."""
+    if kind != "play":
+        return channels(kind, mode)
+    analog_aes = list(range(ADAT_A))
+    return analog_aes if mode >= 4 else analog_aes + list(range(ADAT_A, ADAT_A + 8 // mode))
 
 
 def chan_label(kind, c):
@@ -202,6 +226,23 @@ def commands(s):
     return cmds
 
 
+def reg_cmd(reg, value):
+    return (reg << 16) | (int(value) & 0xFFFF)
+
+
+def usb_commands(s):
+    """commands(s), plus the clock and option registers that FireWire sets with config_word()."""
+    keys = [k for k, _, _ in CLOCK_SOURCES]
+    clock = keys.index(s["clock"]) if s["clock"] in keys else 0
+    return commands(s) + [
+        reg_cmd(USB_REG_CLOCK, clock),
+        reg_cmd(USB_REG_WORD_SINGLE, s["word_single"]),
+        reg_cmd(USB_REG_OPT_IN_SPDIF, s["aes_in"] == "optical"),
+        reg_cmd(USB_REG_AES_PRO, s["aes_pro"]),
+        reg_cmd(USB_REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
+    ]
+
+
 def config_word(s):
     word = CFG_MIDI_LOW_OFFSET_0000
     word |= dict((k, bits) for k, _, bits in CLOCK_SOURCES).get(s["clock"], 0)
@@ -228,6 +269,19 @@ def decode_status(word):
         "rate": RATES.get((word >> 28) & 0xF),
         "source": STATUS_SOURCES.get(word & 0xE00, "—"),
         "inputs": inputs,
+    }
+
+
+def decode_usb_status(word):
+    """The USB engine's dev_status -> decode_status()'s dict. Class Compliant mode reports the
+    clock source setting and the rate, not the lock state of each input."""
+    if not word & USB_STATUS_VALID:
+        return {"rate": None, "source": "—", "inputs": []}
+    rate, clock = (word >> 8) & 0xFF, word & 0xFF
+    return {
+        "rate": USB_RATES[rate] if rate < len(USB_RATES) else None,
+        "source": CLOCK_SOURCES[clock][1] if clock < len(CLOCK_SOURCES) else "—",
+        "inputs": [],
     }
 
 

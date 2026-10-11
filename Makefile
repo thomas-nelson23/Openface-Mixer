@@ -11,8 +11,9 @@ all: engine ## Build everything (just the engine; the GUI is plain Python)
 engine: $(ENGINE) ## Build the C mixer engine
 
 ENGINE_SRC = engine/openface-mixer-engine.c engine/backend_digiface.c engine/digiface_usb.c \
-	     engine/fireface_fw.c engine/raydat.c
-ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/raydat.h \
+	     engine/fireface_fw.c engine/fireface_usb.c engine/raydat.c
+ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/fireface_usb.h \
+	     engine/raydat.h \
 	     engine/shm_layout.h
 
 $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
@@ -21,7 +22,7 @@ $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
 
-run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802|ff800|raydat)
+run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802|ff802usb|ff800|raydat)
 	./$(ENGINE) --device $(or $(DEVICE),digiface)
 
 test: ## Run the unit tests (no audio hardware or display needed)
@@ -31,6 +32,9 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	./tests/test_digiface_usb
 	$(CC) $(CFLAGS) -o tests/test_fireface_fw tests/test_fireface_fw.c engine/fireface_fw.c -lm
 	./tests/test_fireface_fw
+	$(CC) $(CFLAGS) -o tests/test_fireface_usb tests/test_fireface_usb.c engine/fireface_usb.c \
+		engine/fireface_fw.c -lm
+	./tests/test_fireface_usb
 	$(CC) $(CFLAGS) -o tests/test_raydat tests/test_raydat.c engine/raydat.c -lm
 	./tests/test_raydat
 
@@ -44,7 +48,7 @@ uninstall: ## Remove the user install (keeps saved mixes)
 	./scripts/uninstall.sh
 
 clean: ## Remove build output
-	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_raydat
+	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_raydat
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
 help: ## Show this help

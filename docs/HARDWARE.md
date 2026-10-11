@@ -94,8 +94,8 @@ it feeds by default.
 
 # RME Fireface 802
 
-The original Fireface 802 (not the 802 FS) has FireWire 400 and USB 2.0. On Linux only
-**FireWire** gives access to its DSP mixer:
+The original Fireface 802 (not the 802 FS) has FireWire 400 and USB 2.0. On Linux both reach its
+DSP mixer:
 
 - **FireWire:** the kernel's `snd-fireface` driver (Linux 5.x and later, unit version `0x000005`)
   streams 30 in / 30 out at 32–48 kHz, 22 at 64–96 kHz and 14 at 128–192 kHz (no ADAT at quad
@@ -103,9 +103,12 @@ The original Fireface 802 (not the 802 FS) has FireWire 400 and USB 2.0. On Linu
   Takashi Sakamoto's [snd-firewire-ctl-services](https://github.com/alsa-project/snd-firewire-ctl-services)
   (`protocols/fireface/src/latter.rs`, `latter/ff802.rs`). Openface Mixer's engine uses it
   (`engine/fireface_fw.c`).
-- **USB:** without RME's driver the 802 only works in Class Compliant mode, and RME says the
-  mixer can't be remote-controlled in CC mode (only TotalMix FX for iPad does it, over a protocol
-  nobody has documented). Openface Mixer doesn't support the 802 over USB.
+- **USB:** without RME's driver the 802 only works in Class Compliant (CC) mode, where
+  `snd-usb-audio` streams 22 channels each way (analog, AES, ADAT 1–8 at 48 kHz) and two USB MIDI
+  ports appear. RME's TotalMix FX for iPad controls the DSP through the second one with SysEx;
+  Michael Forney's [oscmix](https://github.com/michaelforney/oscmix) documented that protocol
+  (wiki pages *Protocol* and *Devices/Fireface-802*). Openface Mixer's engine uses it
+  (`engine/fireface_usb.c`, device `ff802usb`). See [Fireface 802 over USB](#fireface-802-over-usb-class-compliant-mode).
 
 Don't run `snd-fireface-ctl-service` at the same time: both would write the DSP.
 
@@ -179,10 +182,48 @@ TotalMix's names: inputs `AN 1`–`AN 12` (9–12 are the front mic/instrument i
 pairs), `AES`, `A`, `B`. The DSP keeps the same channel numbers at every rate; at 2x speed only
 ADAT channels 1–4 of each port exist, at 4x none.
 
+## Fireface 802 over USB (Class Compliant mode)
+
+SysEx on the 802's second MIDI port (sequencer port 1 of the "Fireface 802 (serial)" client):
+
+    F0 00 20 0D 10 <subid> <payload> F7
+
+The payload is 32-bit words, five 7-bit bytes each, least significant first. Sub ID 0 writes
+registers (host) or reports changed ones (device): `(register << 16) | value`, bit 31 set when
+the rest has an even number of ones, the same parity as over FireWire. Sub ID 2 with no payload
+asks for levels; the device answers with sub IDs 1–5 (inputs post/pre FX are 1/4, playback 2,
+outputs pre/post fader 3/5), three words per channel: RMS low, RMS high, peak (bits 4–27).
+
+The registers are the FireWire DSP command words above: `(channel << 8) | command` for channel
+settings (AN 1 gain `0x0007`, AN 9 48V `0x0808`, AN 1 out volume `0x1e00`), and
+`0x4000 + 0x40 * output + source` for the mixer, sources 0–29 inputs and `0x20`–`0x3d` playback.
+Mixer values are `0x8000 | L * 0x1000` above −6 dB and `L * 0x8000` below. Instead of the FireWire
+configuration register, CC mode has registers for clock and options:
+
+| Register | Meaning |
+| --- | --- |
+| `0x3d20` | clock source: 0 internal, 1 word clock, 2 AES, 3 ADAT A, 4 ADAT B |
+| `0x3d21` | sample rate (reported): 0 32k, 1 44.1k, 2 48k, … 5 96k, … 8 192k |
+| `0x3d22` | word clock out always single speed |
+| `0x3d40` | optical input 2 carries AES/S/PDIF |
+| `0x3d42` | AES out channel status professional |
+| `0x3d46` | optical output S/PDIF |
+| `0x3f00` | host keep-alive, written with a cycling 0–15 |
+| `0x3f99` | `0x0812` asks the device to report every register |
+
+The engine reaches the port through the ALSA sequencer, which shares it with PipeWire's MIDI
+bridge. The sequencer drops events that don't fit in the port's MIDI output buffer, so the engine
+sends at most what `/proc/asound/cardN/midi0` says is free on each tick and carries the rest
+over. A full send (every crosspoint and setting) is about 2,300 register writes, 28 KB.
+
 ## Not verified on hardware yet
 
-Everything above comes from snd-firewire-ctl-services and the kernel driver, not from captures
-on an 802 with Openface Mixer. Worth checking first: the meter chunks (which values are peaks),
+Everything above comes from snd-firewire-ctl-services, the kernel driver and oscmix's notes, not
+from captures on an 802 with Openface Mixer. Over USB, worth checking first: that the mixer and
+settings take effect, the level packets' channel order, the clock option registers (`0x3d40`,
+`0x3d46` are oscmix's best guesses), and whether the 802 needs the `0x3f00` keep-alive. oscmix's
+notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
+follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
 the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
 and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
 

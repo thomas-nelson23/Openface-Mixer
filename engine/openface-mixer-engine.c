@@ -6,7 +6,8 @@
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
  * added latency, as with TotalMix. The device's level meters come back the same way. The
  * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c), the
- * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c), or the HDSPe RayDAT PCIe card
+ * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c), the Fireface 802 over USB in
+ * Class Compliant mode (fireface_usb.c), or the HDSPe RayDAT PCIe card
  * through its kernel driver (raydat.c).
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
@@ -14,7 +15,7 @@
  * (systemd user service), and the interface keeps mixing with the last mix when it exits.
  *
  * Options:
- *   --device KEY    digiface (default), ff802, ff800 or raydat
+ *   --device KEY    digiface (default), ff802, ff802usb, ff800 or raydat
  *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
  *   --no-autolink   don't link the sink to the interface (useful for testing with pw-link)
  */
@@ -534,7 +535,8 @@ int main(int argc, char *argv[])
 	int no_sink = 0;
 
 	static const struct ofm_backend *const backends[] = {
-		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff800, &ofm_backend_raydat,
+		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff802usb, &ofm_backend_ff800,
+		&ofm_backend_raydat,
 	};
 	d.be = &ofm_backend_digiface;
 	for (int i = 1; i < argc; i++) {
@@ -550,7 +552,7 @@ int main(int argc, char *argv[])
 		else if (be != NULL)
 			d.be = be, i++;
 		else {
-			fprintf(stderr, "usage: %s [--device digiface|ff802|ff800|raydat] [--no-sink] "
+			fprintf(stderr, "usage: %s [--device digiface|ff802|ff802usb|ff800|raydat] [--no-sink] "
 				"[--no-autolink]\n", argv[0]);
 			return 2;
 		}

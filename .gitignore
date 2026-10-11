@@ -14,4 +14,5 @@ __pycache__/
 .DS_Store
 tests/test_digiface_usb
 tests/test_fireface_fw
+tests/test_fireface_usb
 tests/test_raydat

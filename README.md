@@ -1,13 +1,14 @@
 # Openface Mixer
 
 A TotalMix-style mixer and control panel for the **RME Digiface USB**, the
-**RME Fireface 802** and the **RME Fireface 800** (both FireWire) and the **RME HDSPe RayDAT**
-(PCIe) on Linux.
+**RME Fireface 802** (FireWire, or USB in Class Compliant mode), the **RME Fireface 800**
+(FireWire) and the **RME HDSPe RayDAT** (PCIe) on Linux.
 
 ![Openface Mixer: mixer view with input, playback and output rows, presets and hardware panel](docs/screenshots/mixer.png)
 
 RME's TotalMix only runs on Windows and macOS. Linux streams audio to these interfaces
-(`snd-usb-audio` for the Digiface since kernel 6.12, `snd-fireface` for the 802 and 800,
+(`snd-usb-audio` for the Digiface since kernel 6.12 and the 802 over USB, `snd-fireface` for the
+802 and 800 over FireWire,
 `snd-hdspm` or `snd-hdspe` for the RayDAT), but nothing gave them the TotalMix workflow. Openface Mixer drives
 the interface's own DSP mixer, over USB on the Digiface, over FireWire on the Firefaces and
 through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
@@ -49,7 +50,8 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 ## Requirements
 
 - Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802 or 800
-  a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the RayDAT the
+  a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the 802 over
+  USB the 802 in Class Compliant mode (`snd-usb-audio`, any recent kernel), or for the RayDAT the
   `snd-hdspm` driver (in the kernel; cards before 2022) or the `snd-hdspe` driver (cards from
   2022 on, see below)
 - PipeWire with WirePlumber
@@ -135,12 +137,20 @@ work.
 
 ### Fireface 802
 
-Connect the 802 over **FireWire** (its USB port only works in Class Compliant mode, where the
-mixer can't be controlled). Openface Mixer opens the connected interface, or pick it under
-**Device** in the settings panel; `openface-mixer --device ff802` opens it directly. The first
-time, the GUI starts and enables its engine (`openface-mixer-engine@ff802`), which then restores
-the 802's mix at every login. Its playback sink is called **Openface Mixer Playback (Fireface
-802)**.
+Connect the 802 over **FireWire** or **USB**. Openface Mixer opens the connected interface, or
+pick it under **Device** in the settings panel: **RME Fireface 802** is the FireWire connection
+(`openface-mixer --device ff802`), **RME Fireface 802 (USB)** the USB one
+(`openface-mixer --device ff802usb`). The first time, the GUI starts and enables the device's
+engine (`openface-mixer-engine@ff802` or `@ff802usb`), which then restores the 802's mix at every
+login. Its playback sink is called **Openface Mixer Playback (Fireface 802)** or **(Fireface 802
+USB)**. The two connections keep separate mixes.
+
+Over USB, Linux runs the 802 only in **Class Compliant mode** (switch it on at the 802, see its
+manual). There the mixer is controlled through the 802's second USB MIDI port, the way RME's
+TotalMix FX for iPad does it, so the 802's MIDI ports must not be held open exclusively by another
+program (sharing them through PipeWire's MIDI bridge is fine). Class Compliant mode streams 22
+playback channels (AN 1–8, PH 9–12, AES, ADAT 1–8); all 30 hardware inputs and outputs are in the
+mix.
 
 Openface Mixer is the source of truth for the 802's DSP, as TotalMix is: when it connects it
 sends the whole mix and all settings, and it switches the DSP's EQ, dynamics, low cut, auto level
@@ -198,6 +208,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
+| `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
 | `~/.config/openface-mixer/raydat/` | The same for the HDSPe RayDAT |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
@@ -222,7 +233,8 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Fireface 802 support follows the protocol documented by snd-firewire-ctl-services and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#not-verified-on-hardware-yet)).
   It has no EQ, dynamics, auto level or reverb/echo controls yet; those DSP effects are
-  switched off. The ARC USB's two phones keys both select the one Phones pair set in the
+  switched off. Over USB the 802 follows the Class Compliant protocol documented by oscmix,
+  also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys both select the one Phones pair set in the
   Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
@@ -254,7 +266,9 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   from.
 - [oscmix](https://github.com/michaelforney/oscmix) by Michael Forney does the same job for the
   Fireface UCX II and was the model for controlling the interface's own mixer instead of mixing
-  in software. It does not support the Digiface and none of its code or protocol is used here.
+  in software. Its documentation of the Class Compliant SysEx protocol and of the Fireface 802's
+  registers (on its wiki, with contributions from its users) is what the 802's USB support is
+  built on. None of its code is used here, and it does not support the Digiface.
 
 ## License
 
