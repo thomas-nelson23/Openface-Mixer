@@ -11,7 +11,7 @@
 #include "shm_layout.h"
 
 struct ofm_backend {
-	const char *key;              /* --device value: "digiface", "ff802", "ff800" or "raydat" */
+	const char *key;              /* --device value: "digiface", "ff802", "ff802usb", "ff800" or "raydat" */
 	const char *name;             /* for log messages */
 	const char *out_node_prefix;  /* PipeWire node name prefix of its ALSA playback device */
 	const char *out_node_card;    /* or, for PCI cards whose node names carry only the slot,
@@ -45,6 +45,7 @@ static inline void raise_peak(float *dst, float v)
 
 extern const struct ofm_backend ofm_backend_digiface;
 extern const struct ofm_backend ofm_backend_ff802;
+extern const struct ofm_backend ofm_backend_ff802usb;
 extern const struct ofm_backend ofm_backend_ff800;
 extern const struct ofm_backend ofm_backend_raydat;
 

@@ -20,9 +20,10 @@ process, shared memory and config files, so several can run at once.
 
 ## Engine (`engine/openface-mixer-engine.c`)
 
-`--device digiface` (default), `--device ff802`, `--device ff800` or `--device raydat` picks the
-backend: `backend_digiface.c` on top of `digiface_usb.c` (libusb), the 802 or 800 backend in
-`fireface_fw.c` (FireWire transactions through `/dev/fw*`), or `raydat.c` (snd-hdspm's or snd-hdspe's `Mixer`
+`--device digiface` (default), `--device ff802`, `--device ff802usb`, `--device ff800` or
+`--device raydat` picks the backend: `backend_digiface.c` on top of `digiface_usb.c` (libusb), the
+802 or 800 backend in `fireface_fw.c` (FireWire transactions through `/dev/fw*`), the 802 over USB
+in `fireface_usb.c` (SysEx through the ALSA sequencer, `/dev/snd/seq`), or `raydat.c` (snd-hdspm's or snd-hdspe's `Mixer`
 control and hwdep meters in `/dev/snd`). The rest of the engine is the same
 for all of them.
 
@@ -38,12 +39,13 @@ for all of them.
   `alsa_output.usb-RME_Digiface_USB`; the RayDAT's by its ALSA card name), re-linking on
   hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
-  `openface-mixer-engine@ff802`, `@ff800` and `@raydat` for the others. At startup it loads the
+  `openface-mixer-engine@ff802`, `@ff802usb`, `@ff800` and `@raydat` for the others. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
   to date; files from before the 36-channel layout are moved into place. When it exits, the
   interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
-  mix and all settings, about 2,300 transactions. The 800 takes its mixer as one block write
+  mix and all settings, about 2,300 transactions (over USB, the same as register writes, spread
+  over the ticks the MIDI output buffer needs). The 800 takes its mixer as one block write
   per output, so a full send is about 60 transactions.
 
 ## Shared memory (`engine/shm_layout.h`)

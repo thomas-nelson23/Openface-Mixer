@@ -11,6 +11,7 @@ engine/                 C engine that drives the interface's DSP mixer. Builds t
   backend_digiface.c    the Digiface backend, on top of digiface_usb.c
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
   fireface_fw.c         Fireface 802 and 800 backends: FireWire transactions for mixer, settings, meters
+  fireface_usb.c        Fireface 802 over USB (Class Compliant): SysEx through the ALSA sequencer
   raydat.c              HDSPe RayDAT backend: snd-hdspm/snd-hdspe Mixer control and hwdep meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
@@ -68,8 +69,8 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 
 The unit tests need no audio device. Without the interface the engine still runs and reports
 `no-device`; `--no-autolink` keeps it from linking the playback sink. `make run-engine DEVICE=ff802`
-runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI (`ff800` for
-the Fireface 800, `raydat` for the HDSPe RayDAT).
+runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI (`ff802usb`
+for the 802 over USB, `ff800` for the Fireface 800, `raydat` for the HDSPe RayDAT).
 
 The GUI also runs offscreen (`QT_QPA_PLATFORM=offscreen`), which is useful for screenshots
 and smoke tests.

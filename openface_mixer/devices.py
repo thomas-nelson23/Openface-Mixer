@@ -17,6 +17,7 @@ RME_OUI = 0x000A35
 
 class Device:
     key = ""
+    family = None            # the protocol module's key when two devices share it (ff802)
     name = ""
     bus = ""                 # "USB", "FireWire" or "PCIe", for messages
     phones_pairs = ()        # output pairs that are headphones
@@ -54,6 +55,9 @@ class Device:
     def present(self):
         raise NotImplementedError
 
+    def missing_hint(self):
+        """Why the device may not be found, for the settings panel; "" if nothing to add."""
+        return ""
 
     def upgrade_settings(self, st):
         """Add or complete the device's hardware settings in st (st["hw"])."""
@@ -128,6 +132,7 @@ class FireWireDevice(Device):
 
 class Fireface802(FireWireDevice):
     key = "ff802"
+    family = "ff802"
     name = "RME Fireface 802"
     proto = fireface802
     phones_pairs = fireface802.PHONES_PAIRS
@@ -138,6 +143,37 @@ class Fireface802(FireWireDevice):
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
+
+    def missing_hint(self):
+        if DEVICES["ff802usb"].present():
+            return ("This 802 is connected over USB. Choose “RME Fireface 802 (USB)” "
+                    "under Device.")
+        return ""
+
+
+class Fireface802USB(Fireface802):
+    """The Fireface 802 over USB, in Class Compliant mode: the same DSP, driven with SysEx on
+    its second USB MIDI port (engine/fireface_usb.c). Its own mix, files and engine."""
+    key = "ff802usb"
+    name = "RME Fireface 802 (USB)"
+    bus = "USB"
+
+    def channels(self, kind, mode):
+        return fireface802.usb_channels(kind, mode)
+
+    def present(self):
+        card = Hardware.find_card(fireface802.USB_CARD_NAME)
+        return card is not None and Hardware.card_driver(card) == "USB-Audio"
+
+    def device_words(self, st):
+        return 0, fireface802.usb_commands(st["hw"])
+
+    def missing_hint(self):
+        if find_firewire_unit(RME_OUI, self.unit_version) is not None:
+            return ("This 802 is connected over FireWire. Choose “RME Fireface 802” "
+                    "under Device.")
+        return ("Over USB the 802 works on Linux only in Class Compliant mode. Switch the 802 to "
+                "Class Compliant mode (see its manual), then reconnect the USB cable.")
 
 
 class Fireface800(FireWireDevice):
@@ -174,7 +210,8 @@ class RayDAT(Device):
         return Hardware.find_card(self.alsa_card) is not None
 
 
-DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface800(), RayDAT())}
+DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface802USB(), Fireface800(),
+                               RayDAT())}
 DEFAULT = DEVICES["digiface"]
 
 

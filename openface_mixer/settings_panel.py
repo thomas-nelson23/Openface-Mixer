@@ -17,8 +17,8 @@ UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rul
 
 
 def udev_rule_hint(dev):
-    if dev.key not in UDEV_RULES:     # PCIe cards: plain ALSA devices
-        return ("Openface Mixer opens the card's ALSA control and hwdep devices in /dev/snd. "
+    if dev.key not in UDEV_RULES:     # plain ALSA devices (PCIe cards, the 802's USB MIDI)
+        return ("Openface Mixer opens the device's ALSA devices in /dev/snd. "
                 "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
                 "local login session).")
     rule = UDEV_RULES[dev.key]
@@ -31,9 +31,10 @@ def udev_rule_hint(dev):
 def hw_state_text(dev, state):
     short = dev.name.replace("RME ", "")
     red = "<span style='color:#ff6b5b'>{}</span>"
+    hint = dev.missing_hint() if state == "no-device" else ""
     return {
         "starting": f"Connecting to the {short}…",
-        "no-device": red.format(f"{short} not found on {dev.bus}."),
+        "no-device": red.format(f"{short} not found on {dev.bus}.") + (hint and f"<br>{hint}"),
         "no-access": red.format(f"No permission to open the {short}.") + "<br>"
                      + udev_rule_hint(dev),
         "busy": red.format(
@@ -84,7 +85,7 @@ class SettingsPanel(QWidget):
         self._card_name = None
         self._updating = False
 
-        if dev.key == "ff802":
+        if dev.family == "ff802":
             self._build_ff802(lay)
         elif dev.key == "ff800":
             self._build_ff800(lay)
@@ -168,7 +169,9 @@ class SettingsPanel(QWidget):
         self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
         self.ff_clock.activated.connect(
             lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
-        self._build_fw_clock(lay, self.ff_clock, ff.STATUS_INPUTS)
+        # over USB the 802 reports its clock setting and rate, not the inputs' lock state
+        self._build_fw_clock(lay, self.ff_clock,
+                             () if self.dev.bus == "USB" else ff.STATUS_INPUTS)
 
         opts = QGroupBox("OPTIONS")
         ol = QGridLayout(opts)
@@ -216,7 +219,8 @@ class SettingsPanel(QWidget):
             sl.addWidget(rate, r, 2)
             led.set_state(None)
             self.sync_widgets.append((led, rate))
-        lay.addWidget(sync)
+        if status_inputs:
+            lay.addWidget(sync)
         return cl
 
     def _show_fw_status(self, st):
@@ -241,7 +245,8 @@ class SettingsPanel(QWidget):
 
     def update_ff802_status(self, word):
         """word: the 802's sync status register (Engine.status()["dev_status"]), or None."""
-        self._show_fw_status(None if word is None else ff.decode_status(word))
+        decode = ff.decode_usb_status if self.dev.bus == "USB" else ff.decode_status
+        self._show_fw_status(None if word is None else decode(word))
 
     # ------------------------------------------------------------------ Fireface 800
     def _build_ff800(self, lay):

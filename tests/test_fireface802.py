@@ -97,6 +97,39 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(inputs["AES"], ("No Lock", None))
 
 
+class UsbTest(unittest.TestCase):
+    def test_usb_commands(self):
+        s = ff.default_settings()
+        s.update(clock="adat_b", opt_out="spdif", aes_pro=True)
+        cmds = ff.usb_commands(s)
+        self.assertLessEqual(len(cmds), config.N_DEV_CMD)
+        self.assertEqual(cmds[:len(ff.commands(s))], ff.commands(s))
+        self.assertIn(0x3D200004, cmds)                  # clock: ADAT B
+        self.assertIn(0x3D460001, cmds)                  # optical out: S/PDIF
+        self.assertIn(0x3D420001, cmds)                  # AES out: professional
+        self.assertIn(0x3D400000, cmds)                  # AES in: XLR
+        self.assertNotIn(0, cmds)
+
+    def test_registers_are_the_firewire_commands(self):
+        # oscmix's 802 register map: AN 1 gain 0x0007, Mic 9 48V 0x0808, AN 1 out level 0x1E08
+        self.assertEqual(ff.phys_cmd(0, ff.IN_LINE_GAIN, 0) >> 16, 0x0007)
+        self.assertEqual(ff.phys_cmd(8, ff.IN_MIC_POWER, 0) >> 16, 0x0808)
+        self.assertEqual(ff.phys_cmd(ff.OUT_CH_OFFSET, ff.OUT_LINE_LEVEL, 0) >> 16, 0x1E08)
+        self.assertEqual(ff.virt_cmd(29, 0x3D, 0) >> 16 & 0x7FFF, 0x477D)   # PB ADAT 16 -> ADAT 16
+
+    def test_decode_usb_status(self):
+        st = ff.decode_usb_status(ff.USB_STATUS_VALID | (2 << 8) | 3)
+        self.assertEqual(st["rate"], 48000)
+        self.assertEqual(st["source"], "ADAT A")
+        self.assertEqual(st["inputs"], [])
+        self.assertIsNone(ff.decode_usb_status(0)["rate"])
+
+    def test_usb_channels(self):
+        self.assertEqual(len(ff.usb_channels("play", 1)), 22)
+        self.assertEqual(ff.usb_channels("play", 4), list(range(14)))
+        self.assertEqual(ff.usb_channels("in", 1), ff.channels("in", 1))
+
+
 class LayoutTest(unittest.TestCase):
     def test_channels(self):
         self.assertEqual(ff.channels("in", 1), list(range(30)))
@@ -152,6 +185,13 @@ class DeviceTest(unittest.TestCase):
         self.assertEqual(digi.service, "openface-mixer-engine.service")
         self.assertEqual(ff802.shm_name, "openface-mixer-ff802")
         self.assertEqual(ff802.service, "openface-mixer-engine@ff802.service")
+
+    def test_usb_device(self):
+        usb = devices.DEVICES["ff802usb"]
+        self.assertEqual(usb.service, "openface-mixer-engine@ff802usb.service")
+        self.assertEqual(usb.family, "ff802")
+        self.assertEqual(usb.device_words({"hw": ff.default_settings()})[0], 0)
+        self.assertEqual(config.state_file(usb), config.CONFIG_DIR / "ff802usb" / "state.json")
 
     def test_digiface_layout_unchanged(self):
         digi = devices.DEVICES["digiface"]

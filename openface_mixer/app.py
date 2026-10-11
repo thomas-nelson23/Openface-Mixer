@@ -667,7 +667,7 @@ class MainWindow(QMainWindow):
                 self.rebuild_all()
         self.status.setText(txt)
         active = s is not None and s["hw"] == "active"
-        if self.dev.key == "ff802":
+        if self.dev.family == "ff802":
             self.settings.update_ff802_status(s["dev_status"] if active else None)
         elif self.dev.key == "ff800":
             hw = self.st["hw"]
