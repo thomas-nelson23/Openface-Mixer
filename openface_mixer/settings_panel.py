@@ -10,20 +10,18 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import fireface800 as ff800
-from . import fireface802 as ff
-from . import raydat, updater
+from . import hdspe, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 from .theme import SANS, Section, caption_html, font, key_label, px
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
-              "ff800": "70-rme-fireface.rules"}
+              "ff800": "70-rme-fireface.rules", "ff400": "70-rme-fireface.rules"}
 
 
 def udev_rule_hint(dev):
-    if dev.key not in UDEV_RULES:     # plain ALSA devices (PCIe cards, the 802's USB MIDI)
+    if dev.key not in UDEV_RULES:     # plain ALSA devices (PCIe cards, USB MIDI)
         return ("Openface Mixer opens the device's ALSA devices in /dev/snd. "
                 "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
                 "local login session).")
@@ -177,7 +175,7 @@ class Sidebar(QFrame):
 
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
-    hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
+    hw_changed = Signal()            # a device setting (Fireface) changed in st["hw"]
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
@@ -226,12 +224,12 @@ class SettingsPanel(QWidget):
         el.setColumnStretch(1, 1)
         lay.addWidget(eng)
 
-        if dev.family == "ff802":
-            self._build_ff802(lay)
-        elif dev.key == "ff800":
-            self._build_ff800(lay)
-        elif dev.key == "raydat":
-            self._build_raydat(lay)
+        if dev.family == "latter":
+            self._build_latter(lay)
+        elif dev.family == "former":
+            self._build_former(lay)
+        elif dev.family == "hdspe":
+            self._build_hdspe(lay)
         else:
             self._build_digiface(lay)
         self._control_room_at = lay.count()   # add_control_room() slots its section here
@@ -435,26 +433,25 @@ class SettingsPanel(QWidget):
         self.pro_btn.clicked.connect(self._enable_pro)
         grid.addWidget(self.pro_btn, grid.rowCount(), 0, 1, 2)
 
-    # ------------------------------------------------------------------ Fireface 802
-    def _build_ff802(self, lay):
-        """TotalMix's Settings dialog for the 802: clock, sync inputs and AES/optical options.
-        The device can't report these settings, so they come from st["hw"]."""
-        hw = self.st["hw"]
+    # ------------------------------------------------------------------ Fireface 802, UCX II
+    def _build_latter(self, lay):
+        """TotalMix's Settings dialog for the 802 and UCX II: clock, sync inputs and
+        AES/S/PDIF/optical options. The device can't report these settings, so they come from
+        st["hw"]."""
+        hw, proto = self.st["hw"], self.dev.proto
         self.ff_clock = QComboBox()
-        for key, label, _ in ff.CLOCK_SOURCES:
+        for key, label, _ in proto.CLOCK_SOURCES:
             self.ff_clock.addItem(label, key)
         self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
         self.ff_clock.activated.connect(
             lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
-        # over USB the 802 reports its clock setting and rate, not the inputs' lock state
+        # over USB the DSP reports its clock setting and rate, not the inputs' lock state
         self._build_fw_clock(lay, self.ff_clock,
-                             () if self.dev.bus == "USB" else ff.STATUS_INPUTS)
+                             () if self.dev.bus == "USB" else proto.STATUS_INPUTS)
 
         opts = Section("OPTIONS")
         ol = QGridLayout(opts)
-        rows = (("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
-                ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
-                ("AES out", "aes_pro", (("Consumer", False), ("Professional", True))))
+        rows = proto.OPTION_ROWS
         for r, (label, key, items) in enumerate(rows):
             combo = QComboBox()
             for text, value in items:
@@ -520,27 +517,32 @@ class SettingsPanel(QWidget):
         self.st["hw"][key] = value
         self.hw_changed.emit()
 
-    def update_ff802_status(self, word):
-        """word: the 802's sync status register (Engine.status()["dev_status"]), or None."""
-        decode = ff.decode_usb_status if self.dev.bus == "USB" else ff.decode_status
+    def update_latter_status(self, word):
+        """word: the 802's sync status register, or the USB engine's clock report
+        (Engine.status()["dev_status"]), or None."""
+        proto = self.dev.proto
+        decode = proto.decode_usb_status if self.dev.bus == "USB" else proto.decode_status
         self._show_fw_status(None if word is None else decode(word))
 
-    # ------------------------------------------------------------------ Fireface 800
-    def _build_ff800(self, lay):
-        """TotalMix's Settings dialog for the 800: clock, sync inputs, levels and S/PDIF
+    # ------------------------------------------------------------------ Fireface 800, 400
+    def _build_former(self, lay):
+        """TotalMix's Settings dialog for the 800 and 400: clock, sync inputs, levels and S/PDIF
         options. The clock and S/PDIF options start from what the device reports."""
+        proto = self.dev.proto
         self.ff800_combos = {}
         self._build_fw_clock(lay, self._ff800_combo("clock", [(label, key) for key, label, _ in
-                                                               ff800.CLOCK_SOURCES]),
-                             ff800.STATUS_INPUTS)
+                                                               proto.CLOCK_SOURCES]),
+                             proto.STATUS_INPUTS)
 
         levels = Section("LEVELS")
         ll = QGridLayout(levels)
-        ll.addWidget(key_label("Line inputs"), 0, 0)
-        ll.addWidget(self._ff800_combo("in_level", [(l, k) for k, l, *_ in ff800.IN_LEVELS]), 0, 1)
-        ll.addWidget(key_label("Line outputs"), 1, 0)
-        ll.addWidget(self._ff800_combo("out_level", [(l, k) for k, l, *_ in ff800.OUT_LEVELS]),
-                     1, 1)
+        for r, (label, key, table) in enumerate(
+                (("Line inputs", "in_level", proto.IN_LEVELS),
+                 ("Line outputs", "out_level", proto.OUT_LEVELS),
+                 ("Phones", "phones_level", getattr(proto, "PHONES_LEVELS", None)))):
+            if table:
+                ll.addWidget(key_label(label), r, 0)
+                ll.addWidget(self._ff800_combo(key, [(l, k) for k, l, *_ in table]), r, 1)
         lay.addWidget(levels)
 
         opts = Section("OPTIONS")
@@ -582,24 +584,24 @@ class SettingsPanel(QWidget):
                 w.setCurrentIndex(max(0, w.findData(hw[key])))
             w.blockSignals(False)
 
-    def update_ff800_status(self, words):
-        """words: the 800's two status quadlets (Engine.status() dev_status, dev_status2), or
-        None."""
-        self._show_fw_status(None if words is None else ff800.decode_status(*words))
+    def update_former_status(self, words):
+        """words: the two status quadlets (Engine.status() dev_status, dev_status2), or None."""
+        self._show_fw_status(None if words is None else self.dev.proto.decode_status(*words))
 
-    # ------------------------------------------------------------------ HDSPe RayDAT
-    def _build_raydat(self, lay):
-        """TotalMix's Settings dialog for the RayDAT, from the driver's ALSA controls: clock mode,
-        preferred sync reference, internal rate, S/PDIF and word clock options, input status.
-        snd-hdspm and snd-hdspe name the controls differently (raydat.DRIVERS); options a driver
-        lacks are hidden."""
+    # ------------------------------------------------------------------ HDSPe cards
+    def _build_hdspe(self, lay):
+        """TotalMix's Settings dialog for an HDSPe card, from the driver's ALSA controls: clock
+        mode, preferred sync reference, internal rate, levels and S/PDIF/AES/word clock options,
+        input status. The drivers and cards name the controls differently (hdspe.DRIVERS);
+        options a card lacks are hidden."""
+        model = self.dev.model
         combos = {}
-        for role in raydat.COMBOS:
+        for role in hdspe.COMBOS:
             combo = QComboBox()
             combo.activated.connect(lambda i, r=role: self._write_role(r, i))
             combos[role] = combo
         self.rd_combos = combos
-        clock = self._build_fw_clock(lay, combos["clock"], raydat.STATUS_INPUTS, "Clock mode")
+        clock = self._build_fw_clock(lay, combos["clock"], model.status_inputs, "Clock mode")
         clock.addWidget(key_label("Prefer"), 2, 0)
         clock.addWidget(combos["pref"], 2, 1)
         clock.addWidget(key_label("Internal rate"), 3, 0)
@@ -607,49 +609,54 @@ class SettingsPanel(QWidget):
 
         opts = Section("OPTIONS")
         ol = QGridLayout(opts)
-        self.rd_spdif_label = key_label("S/PDIF in")
-        ol.addWidget(self.rd_spdif_label, 0, 0)
-        ol.addWidget(combos["spdif_in"], 0, 1)
+        self.rd_combo_labels = {}
+        for r, (role, label) in enumerate(hdspe.OPTION_COMBOS):
+            self.rd_combo_labels[role] = key_label(label)
+            ol.addWidget(self.rd_combo_labels[role], r, 0)
+            ol.addWidget(combos[role], r, 1)
+        r = len(hdspe.OPTION_COMBOS)
         self.rd_toggles = {}
-        for r, (name, label) in enumerate(raydat.TOGGLES, 1):
+        for name, label in hdspe.TOGGLES:
             box = QCheckBox(label)
             box.toggled.connect(lambda on, n=name: self._write(n, "on" if on else "off"))
             ol.addWidget(box, r, 0, 1, 2)
             self.rd_toggles[name] = box
+            r += 1
         self.rd_info = QLabel()
         self.rd_info.setObjectName("hint")
         self.rd_info.setWordWrap(True)
-        ol.addWidget(self.rd_info, len(raydat.TOGGLES) + 1, 0, 1, 2)
+        ol.addWidget(self.rd_info, r, 0, 1, 2)
         lay.addWidget(opts)
         self._rd_ctrls = None
+        self.update_hdspe(None)
 
     def _write_role(self, role, value):
-        name, _c = raydat.control(self._rd_ctrls, role)
+        name, _c = hdspe.control(self._rd_ctrls, role)
         if name:
             self._write(name, value)
 
-    def update_raydat(self, ctrls):
+    def update_hdspe(self, ctrls):
         """ctrls: the card's ALSA controls (Hardware.read()), or None if it is not found."""
-        st = raydat.decode_status(ctrls)
+        st = hdspe.decode_status(ctrls, self.dev.model)
         usable = True
         if st:
             drv = Hardware.card_driver(self.hw.card) or st["driver"]
-            usable = raydat.driver_usable(drv, Hardware.pci_vendor(self.hw.card))
+            usable = hdspe.driver_usable(drv, Hardware.pci_vendor(self.hw.card))
         self._rd_ctrls = ctrls if st else None
         self._updating = True
         try:
             for role, combo in self.rd_combos.items():
-                _name, c = raydat.control(ctrls, role) if st else (None, None)
+                _name, c = hdspe.control(ctrls, role) if st else (None, None)
                 # snd-hdspe can't change the internal rate while audio runs (as in hdspeconf)
                 combo.setEnabled(bool(c) and usable and c["rw"]
                                  and not (role == "internal" and st["running"]
-                                          and st["driver"] == raydat.HDSPE))
-                if role == "spdif_in":
+                                          and st["driver"] == hdspe.HDSPE))
+                if role in self.rd_combo_labels:
                     combo.setVisible(bool(c))
-                    self.rd_spdif_label.setVisible(bool(c))
+                    self.rd_combo_labels[role].setVisible(bool(c))
                 if not c:
                     continue
-                texts = [raydat.display_item(t) for t in c["items"]]
+                texts = [hdspe.display_item(t) for t in c["items"]]
                 if [combo.itemText(i) for i in range(combo.count())] != texts:
                     combo.clear()
                     combo.addItems(texts)
@@ -657,8 +664,7 @@ class SettingsPanel(QWidget):
                     combo.setCurrentIndex(c["value"])
             for name, box in self.rd_toggles.items():
                 c = ctrls.get(name) if st else None
-                # before the card is found, show the snd-hdspm set
-                box.setVisible(bool(c) or (st is None and name in raydat.HDSPM_TOGGLES))
+                box.setVisible(bool(c))
                 box.setEnabled(bool(c) and usable)
                 if c and c["value"] is not None:
                     box.setChecked(bool(c["value"]))
@@ -673,14 +679,14 @@ class SettingsPanel(QWidget):
                 "<span style='color:#ff2a4f'>Settings off: snd-hdspm can't run this card."
                 "</span>")
         else:
-            info = "snd-hdspe driver" if st["driver"] == raydat.HDSPE else "snd-hdspm driver"
+            info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
             self.rd_info.setText(info)
         self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}
-        for (led, rate), (label, *_unused) in zip(self.sync_widgets, raydat.STATUS_INPUTS):
+        for (led, rate), (label, *_unused) in zip(self.sync_widgets, self.dev.model.status_inputs):
             state, r = shown.get(label, (None, None))
             led.set_state(state)
             rate.setText(r.replace(" kHz", "k") if r else "—")

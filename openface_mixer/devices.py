@@ -7,7 +7,7 @@ called, and where its engine, config files and PipeWire nodes are.
 import re
 from pathlib import Path
 
-from . import fireface800, fireface802, raydat
+from . import fireface400, fireface800, fireface802, hdspe, ucx2
 from .hardware import DIGIFACE_CARD, Hardware
 from .model import chan_label as digiface_chan_label, pair_label as digiface_pair_label
 
@@ -17,7 +17,7 @@ RME_OUI = 0x000A35
 
 class Device:
     key = ""
-    family = None            # the protocol module's key when two devices share it (ff802)
+    family = None            # the settings panel's kind: "latter", "former" or "hdspe"
     name = ""
     bus = ""                 # "USB", "FireWire" or "PCIe", for messages
     phones_pairs = ()        # output pairs that are headphones
@@ -132,10 +132,14 @@ class Digiface(Device):
 
 
 class FireWireDevice(Device):
-    """An RME FireWire interface; proto is its protocol module (fireface802 or fireface800)."""
+    """An RME FireWire interface; proto is its protocol module (fireface802, 800 or 400)."""
     bus = "FireWire"
     proto = None
     unit_version = 0
+
+    @property
+    def phones_pairs(self):
+        return self.proto.PHONES_PAIRS
 
     def channels(self, kind, mode):
         return self.proto.channels(kind, mode)
@@ -158,10 +162,9 @@ class FireWireDevice(Device):
 
 class Fireface802(FireWireDevice):
     key = "ff802"
-    family = "ff802"
+    family = "latter"
     name = "RME Fireface 802"
     proto = fireface802
-    phones_pairs = fireface802.PHONES_PAIRS
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
@@ -177,67 +180,111 @@ class Fireface802(FireWireDevice):
         return ""
 
 
-class Fireface802USB(Fireface802):
-    """The Fireface 802 over USB, in Class Compliant mode: the same DSP, driven with SysEx on
-    its second USB MIDI port (engine/fireface_usb.c). Its own mix, files and engine."""
-    key = "ff802usb"
-    name = "RME Fireface 802 (USB)"
+class ClassCompliantUSB:
+    """Mixin for an interface driven over USB in Class Compliant mode: the DSP takes SysEx on
+    its second USB MIDI port (engine/fireface_usb.c)."""
     bus = "USB"
-
-    def channels(self, kind, mode):
-        return fireface802.usb_channels(kind, mode)
+    usb_card = ""
 
     def present(self):
-        card = Hardware.find_card(fireface802.USB_CARD_NAME)
+        card = Hardware.find_card(self.usb_card)
         return card is not None and Hardware.card_driver(card) == "USB-Audio"
 
     def device_words(self, st):
-        return 0, fireface802.usb_commands(st["hw"])
+        return 0, self.proto.usb_commands(st["hw"])
+
+    def missing_hint(self):
+        return (f"Over USB the {self.name.replace('RME ', '').replace(' (USB)', '')} works on "
+                "Linux only in Class Compliant mode. Switch it to Class Compliant mode (see its "
+                "manual), then reconnect the USB cable.")
+
+
+class Fireface802USB(ClassCompliantUSB, Fireface802):
+    """The Fireface 802 over USB, in Class Compliant mode: the same DSP. Its own mix, files and
+    engine."""
+    key = "ff802usb"
+    name = "RME Fireface 802 (USB)"
+    usb_card = fireface802.USB_CARD_NAME
+
+    def channels(self, kind, mode):
+        return fireface802.usb_channels(kind, mode)
 
     def missing_hint(self):
         if find_firewire_unit(RME_OUI, self.unit_version) is not None:
             return ("This 802 is connected over FireWire. Choose “RME Fireface 802” "
                     "under Device.")
-        return ("Over USB the 802 works on Linux only in Class Compliant mode. Switch the 802 to "
-                "Class Compliant mode (see its manual), then reconnect the USB cable.")
+        return super().missing_hint()
 
 
-class Fireface800(FireWireDevice):
+class FirefaceUCX2(ClassCompliantUSB, FireWireDevice):
+    key = "ucx2"
+    family = "latter"
+    name = "RME Fireface UCX II"
+    proto = ucx2
+    usb_card = ucx2.USB_CARD_NAME
+
+    def channel_has_settings(self, kind, c):
+        return ucx2.channel_has_settings(kind, c)
+
+
+class FormerFireface(FireWireDevice):
+    """Fireface 800 and 400: write-only configuration that starts from the device's status."""
+    family = "former"
+
+    def device_words(self, st):
+        return self.proto.device_words(st["hw"])
+
+    def channel_has_settings(self, kind, c):
+        return self.proto.channel_has_settings(kind, c)
+
+
+class Fireface800(FormerFireface):
     key = "ff800"
     name = "RME Fireface 800"
     proto = fireface800
-    phones_pairs = fireface800.PHONES_PAIRS
     unit_version = 0x000001      # SND_FF_UNIT_VERSION_FF800 in the kernel driver
 
-    def device_words(self, st):
-        return fireface800.device_words(st["hw"])
 
-    def channel_has_settings(self, kind, c):
-        return fireface800.channel_has_settings(kind, c)
+class Fireface400(FormerFireface):
+    key = "ff400"
+    name = "RME Fireface 400"
+    proto = fireface400
+    unit_version = 0x000002      # SND_FF_UNIT_VERSION_FF400 in the kernel driver
 
 
-class RayDAT(Device):
-    key = "raydat"
-    name = "RME HDSPe RayDAT"
+class HDSPeCard(Device):
+    """An HDSPe PCIe card (hdspe.MODELS) under snd-hdspm or snd-hdspe."""
+    family = "hdspe"
     bus = "PCIe"
-    alsa_card = raydat.CARD_NAME
-    sink_channels = "A1 1/2"     # the driver's PCM channels start with ADAT 1
+
+    def __init__(self, model, name):
+        self.model = model
+        self.key = model.key
+        self.name = name
+        self.alsa_card = model.card
+        self.sink_channels = model.sink_channels
+        self.phones_pairs = model.phones_pairs
 
     def channels(self, kind, mode):
-        return raydat.channels(kind, mode)
+        return self.model.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
-        return raydat.chan_label(kind, c, mode)
+        return self.model.chan_label(kind, c, mode)
 
     def pair_label(self, kind, c, mode):
-        return raydat.pair_label(kind, c, mode)
+        return self.model.pair_label(kind, c, mode)
 
     def present(self):
         return Hardware.find_card(self.alsa_card) is not None
 
 
-DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface802USB(), Fireface800(),
-                               RayDAT())}
+DEVICES = {d.key: d for d in (
+    Digiface(), Fireface802(), Fireface802USB(), FirefaceUCX2(), Fireface800(), Fireface400(),
+    HDSPeCard(hdspe.MODELS["raydat"], "RME HDSPe RayDAT"),
+    HDSPeCard(hdspe.MODELS["aio"], "RME HDSPe AIO"),
+    HDSPeCard(hdspe.MODELS["aiopro"], "RME HDSPe AIO Pro"),
+    HDSPeCard(hdspe.MODELS["aes"], "RME HDSPe AES"),
+)}
 DEFAULT = DEVICES["digiface"]
 
 

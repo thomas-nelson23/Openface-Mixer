@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fireface800
+from . import arc, control_room
 from .channel_settings import ChannelSettings
 from .config import (
     device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
@@ -973,23 +973,23 @@ class MainWindow(QMainWindow):
                 self.rebuild_all()
         self.status.setText(txt)
         active = s is not None and s["hw"] == "active"
-        if self.dev.family == "ff802":
-            self.settings.update_ff802_status(s["dev_status"] if active else None)
-        elif self.dev.key == "ff800":
+        if self.dev.family == "latter":
+            self.settings.update_latter_status(s["dev_status"] if active else None)
+        elif self.dev.family == "former":
             hw = self.st["hw"]
             if active and not hw["known"]:
-                # the configuration is write only: start from what the 800 reports
-                fireface800.settings_from_status(hw, s["dev_status2"])
+                # the configuration is write only: start from what the device reports
+                self.dev.proto.settings_from_status(hw, s["dev_status2"])
                 self.settings.refresh_ff800_settings()
                 self.push_matrix()
-            self.settings.update_ff800_status((s["dev_status"], s["dev_status2"])
-                                              if active else None)
+            self.settings.update_former_status((s["dev_status"], s["dev_status2"])
+                                               if active else None)
 
     def poll_hw(self):
         if self.dev.key == "digiface":
             self.settings.update_hw(self.hw.read())
-        elif self.dev.key == "raydat":
-            self.settings.update_raydat(self.hw.read())
+        elif self.dev.family == "hdspe":
+            self.settings.update_hdspe(self.hw.read())
 
     def poll_profile(self):
         if self.dev.key == "digiface":

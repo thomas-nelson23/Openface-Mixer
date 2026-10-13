@@ -1,5 +1,5 @@
 /*
- * RME Fireface 802 and Fireface 800 as engine backends: DSP mixer, settings and meters over
+ * RME Fireface 802, 800 and 400 as engine backends: DSP mixer, settings and meters over
  * FireWire. See fireface_fw.h for the protocols.
  */
 #include <dirent.h>
@@ -22,7 +22,6 @@
 
 #define RME_OUI            0x000a35
 #define FF802_UNIT_VERSION 0x000005   /* SND_FF_UNIT_VERSION_802 in the kernel driver */
-#define FF800_UNIT_VERSION 0x000001   /* SND_FF_UNIT_VERSION_FF800 */
 
 #define REG_CONFIG  0xffff00000014ull
 #define REG_DSP     0xffff0000001cull
@@ -456,47 +455,58 @@ const struct ofm_backend ofm_backend_ff802 = {
 	.meters = meters,
 };
 
-/* ---------- Fireface 800 backend ---------- */
+/* ---------- Fireface 800 and 400 backends ---------- */
 
-#define FF800_MIXER   0x000080080000ull
-#define FF800_OUTPUT  0x000080081f80ull
-#define FF800_METER   0x000080100000ull
-#define FF800_STATUS  0x0000801c0000ull
-#define FF800_CONFIG  0x0000fc88f014ull
-#define FF800_LEVEL_MAX 0x7fffff00u
+#define FORMER_MIXER   0x000080080000ull
+#define FORMER_METER   0x000080100000ull
+#define FORMER_STATUS  0x0000801c0000ull
+#define FORMER_LEVEL_MAX 0x7fffff00u
+#define AMP_OUT_CH     4
+#define AMP_OUT_MUTE   0x3f
 
-struct ff800 {
+const struct ff_former_model ff800_model = {
+	.unit_version = 0x000001, .n_ch = 28, .avail = 32,
+	.output = 0x000080081f80ull, .config = 0x0000fc88f014ull,
+};
+const struct ff_former_model ff400_model = {
+	.unit_version = 0x000002, .n_ch = 18, .avail = 18,
+	.output = 0x000080080f80ull, .config = 0x000080100514ull, .amp = 0x0000801c0180ull,
+};
+
+struct former {
+	const struct ff_former_model *m;
 	struct fwdev fw;
 
-	uint32_t sent_mix[FF800_N_OUT][FF800_MIXER_BLOCK];
-	uint32_t sent_vol[FF800_N_OUT];
-	uint32_t sent_config[FF800_N_CONFIG];
+	uint32_t sent_mix[FORMER_MAX_CH][FORMER_MAX_BLOCK];
+	uint32_t sent_vol[FORMER_MAX_CH];
+	uint32_t sent_config[FORMER_N_CONFIG + FORMER_N_AMP_IN];
 	bool sent_valid;
 	int routes;
 };
 
-uint32_t ff800_encode_gain(float lin)
+uint32_t former_encode_gain(float lin)
 {
 	if (!(lin > 0.0f))
 		return 0;
-	long v = lround(lin * (double)FF800_GAIN_ZERO);
-	return (uint32_t)(v > FF800_GAIN_MAX ? FF800_GAIN_MAX : v);
+	long v = lround(lin * (double)FORMER_GAIN_ZERO);
+	return (uint32_t)(v > FORMER_GAIN_MAX ? FORMER_GAIN_MAX : v);
 }
 
-int ff800_mixer_block(const struct ofm_shm *s, int out, uint32_t block[FF800_MIXER_BLOCK])
+int former_mixer_block(const struct ff_former_model *m, const struct ofm_shm *s, int out,
+		       uint32_t *block)
 {
 	int routes = 0;
-	memset(block, 0, sizeof(uint32_t) * FF800_MIXER_BLOCK);
-	for (int k = 0; k < FF800_N_IN; k++)
-		block[k] = ff800_encode_gain(s->gain[out][k]);
-	for (int p = 0; p < FF800_N_PLAY; p++)
-		block[FF800_AVAIL + p] = ff800_encode_gain(s->gain[out][OFM_N_IN + p]);
-	for (int i = 0; i < FF800_MIXER_BLOCK; i++)
+	memset(block, 0, sizeof(uint32_t) * 2 * (size_t)m->avail);
+	for (int k = 0; k < m->n_ch; k++) {
+		block[k] = former_encode_gain(s->gain[out][k]);
+		block[m->avail + k] = former_encode_gain(s->gain[out][OFM_N_IN + k]);
+	}
+	for (int i = 0; i < 2 * m->avail; i++)
 		routes += block[i] != 0;
 	return routes;
 }
 
-uint32_t ff800_status_rate(uint32_t status1)
+uint32_t former_status_rate(uint32_t status1)
 {
 	switch (status1 & 0x1e) {
 	case 0x02: return 32000;
@@ -512,98 +522,141 @@ uint32_t ff800_status_rate(uint32_t status1)
 	return 0;
 }
 
-void ff800_decode_meters(const uint8_t *raw, struct ofm_shm *s)
+size_t former_meter_len(const struct ff_former_model *m)
 {
-	/* skip the per-mixer octuples; then physical inputs, playback, physical outputs */
-	const uint8_t *q = raw + 8 * (FF800_N_IN + 2 * FF800_N_OUT);
-	for (int i = 0; i < FF800_N_IN; i++, q += 4)
-		raise_peak(&s->peak_src[i], (float)(le32(q) & FF800_LEVEL_MAX) / (float)FF800_LEVEL_MAX);
-	for (int i = 0; i < FF800_N_PLAY; i++, q += 4)
-		raise_peak(&s->peak_src[OFM_N_IN + i],
-			   (float)(le32(q) & FF800_LEVEL_MAX) / (float)FF800_LEVEL_MAX);
-	for (int i = 0; i < FF800_N_OUT; i++, q += 4)
-		raise_peak(&s->peak_out[i], (float)(le32(q) & FF800_LEVEL_MAX) / (float)FF800_LEVEL_MAX);
+	return 12 * 3 * (size_t)m->n_ch;
 }
 
-static void *ff800_create(void)
+static float former_level(const uint8_t *q)
 {
-	struct ff800 *f = calloc(1, sizeof(*f));
+	return (float)(le32(q) & FORMER_LEVEL_MAX) / (float)FORMER_LEVEL_MAX;
+}
+
+void former_decode_meters(const struct ff_former_model *m, const uint8_t *raw, struct ofm_shm *s)
+{
+	/* skip the octuples; then physical inputs, playback, physical outputs */
+	const uint8_t *q = raw + 8 * 3 * (size_t)m->n_ch;
+	for (int i = 0; i < m->n_ch; i++, q += 4)
+		raise_peak(&s->peak_src[i], former_level(q));
+	for (int i = 0; i < m->n_ch; i++, q += 4)
+		raise_peak(&s->peak_src[OFM_N_IN + i], former_level(q));
+	for (int i = 0; i < m->n_ch; i++, q += 4)
+		raise_peak(&s->peak_out[i], former_level(q));
+}
+
+uint8_t former_amp_out(uint32_t vol)
+{
+	/* snd-firewire-ctl-services: linear over the volume range, 0x3f at silence */
+	if (vol > FORMER_GAIN_MAX)
+		vol = FORMER_GAIN_MAX;
+	return (uint8_t)((uint64_t)AMP_OUT_MUTE * (FORMER_GAIN_MAX - vol) / FORMER_GAIN_MAX);
+}
+
+static void *former_create(const struct ff_former_model *m)
+{
+	struct former *f = calloc(1, sizeof(*f));
 	if (f == NULL)
 		return NULL;
+	f->m = m;
 	f->fw.fd = -1;
 	return f;
 }
 
-static void ff800_close(void *h)
+static void *ff800_create(void)
 {
-	struct ff800 *f = h;
+	return former_create(&ff800_model);
+}
+
+static void *ff400_create(void)
+{
+	return former_create(&ff400_model);
+}
+
+static void former_close(void *h)
+{
+	struct former *f = h;
 	fw_close(&f->fw);
 	f->sent_valid = false;
 	f->routes = 0;
 }
 
-static void ff800_destroy(void *h)
+static void former_destroy(void *h)
 {
-	ff800_close(h);
+	former_close(h);
 	free(h);
 }
 
-static bool ff800_is_open(void *h)
+static bool former_is_open(void *h)
 {
-	return ((struct ff800 *)h)->fw.fd >= 0;
+	return ((struct former *)h)->fw.fd >= 0;
 }
 
-static int ff800_open(void *h)
+static int former_open(void *h)
 {
-	struct ff800 *f = h;
+	struct former *f = h;
 	if (f->fw.fd < 0)
 		f->sent_valid = false;
-	return fw_open(&f->fw, FF800_UNIT_VERSION);
+	return fw_open(&f->fw, f->m->unit_version);
 }
 
-static int ff800_status(void *h, struct ofm_shm *s, bool *reset)
+static int former_status(void *h, struct ofm_shm *s, bool *reset)
 {
-	struct ff800 *f = h;
+	struct former *f = h;
 	uint8_t raw[8];
-	int r = fw_request(&f->fw, TCODE_READ_BLOCK_REQUEST, FF800_STATUS, raw, sizeof(raw));
+	int r = fw_request(&f->fw, TCODE_READ_BLOCK_REQUEST, FORMER_STATUS, raw, sizeof(raw));
 	if (r < 0)
 		return r;
 	s->dev_status = le32(raw);
 	s->dev_status2 = le32(raw + 4);
-	s->rate = ff800_status_rate(s->dev_status2);
+	s->rate = former_status_rate(s->dev_status2);
 	*reset = false;
 	return 0;
 }
 
-static int ff800_sync(void *h, struct ofm_shm *s, bool full)
+static int former_sync(void *h, struct ofm_shm *s, bool full)
 {
-	struct ff800 *f = h;
+	struct former *f = h;
+	const struct ff_former_model *m = f->m;
 	int r, routes = 0;
 
 	full = full || !f->sent_valid;
 
 	/* configuration: write-only, so it is sent only once the GUI has filled it in */
 	if (s->dev_config &&
-	    (full || memcmp(s->dev_cmd, f->sent_config, sizeof(f->sent_config)) != 0)) {
-		if ((r = write_block(&f->fw, FF800_CONFIG, s->dev_cmd, FF800_N_CONFIG)) < 0)
+	    (full || memcmp(s->dev_cmd, f->sent_config, FORMER_N_CONFIG * sizeof(uint32_t)) != 0)) {
+		if ((r = write_block(&f->fw, m->config, s->dev_cmd, FORMER_N_CONFIG)) < 0)
 			return r;
-		memcpy(f->sent_config, s->dev_cmd, sizeof(f->sent_config));
+		memcpy(f->sent_config, s->dev_cmd, FORMER_N_CONFIG * sizeof(uint32_t));
+	}
+	/* the 400's input gains */
+	for (int i = FORMER_N_CONFIG; m->amp && s->dev_config &&
+	     i < FORMER_N_CONFIG + FORMER_N_AMP_IN; i++) {
+		uint32_t c = s->dev_cmd[i];
+		if (!(c & FORMER_AMP_VALID) || (!full && c == f->sent_config[i]))
+			continue;
+		if ((r = write_quadlet(&f->fw, m->amp, c & ~FORMER_AMP_VALID)) < 0)
+			return r;
+		f->sent_config[i] = c;
 	}
 
-	for (int o = 0; o < FF800_N_OUT; o++) {
-		uint32_t block[FF800_MIXER_BLOCK];
-		routes += ff800_mixer_block(s, o, block);
-		if (full || memcmp(block, f->sent_mix[o], sizeof(block)) != 0) {
-			r = write_block(&f->fw, FF800_MIXER + sizeof(block) * (uint64_t)o, block,
-					FF800_MIXER_BLOCK);
+	for (int o = 0; o < m->n_ch; o++) {
+		uint32_t block[FORMER_MAX_BLOCK];
+		size_t len = sizeof(uint32_t) * 2 * (size_t)m->avail;
+		routes += former_mixer_block(m, s, o, block);
+		if (full || memcmp(block, f->sent_mix[o], len) != 0) {
+			r = write_block(&f->fw, FORMER_MIXER + len * (uint64_t)o, block, 2 * m->avail);
 			if (r < 0)
 				return r;
-			memcpy(f->sent_mix[o], block, sizeof(block));
+			memcpy(f->sent_mix[o], block, len);
 		}
 		/* the output volume goes down to silence, so mute is just volume 0 */
-		uint32_t v = ff800_encode_gain(s->out_gain[o]);
+		uint32_t v = former_encode_gain(s->out_gain[o]);
 		if (full || v != f->sent_vol[o]) {
-			if ((r = write_block(&f->fw, FF800_OUTPUT + 4 * (uint64_t)o, &v, 1)) < 0)
+			if ((r = write_block(&f->fw, m->output + 4 * (uint64_t)o, &v, 1)) < 0)
+				return r;
+			/* the 400 sets its analog output amplifiers to match */
+			if (m->amp && (r = write_quadlet(&f->fw, m->amp,
+						(uint32_t)(AMP_OUT_CH + o) << 16 | former_amp_out(v))) < 0)
 				return r;
 			f->sent_vol[o] = v;
 		}
@@ -613,33 +666,38 @@ static int ff800_sync(void *h, struct ofm_shm *s, bool full)
 	return 0;
 }
 
-static int ff800_routes(void *h)
+static int former_routes(void *h)
 {
-	return ((struct ff800 *)h)->routes;
+	return ((struct former *)h)->routes;
 }
 
-static int ff800_meters(void *h, struct ofm_shm *s)
+static int former_meters(void *h, struct ofm_shm *s)
 {
-	struct ff800 *f = h;
-	uint8_t raw[FF800_METER_LEN];
-	int r = fw_request(&f->fw, TCODE_READ_BLOCK_REQUEST, FF800_METER, raw, sizeof(raw));
+	struct former *f = h;
+	uint8_t raw[12 * 3 * FORMER_MAX_CH];
+	size_t len = former_meter_len(f->m);
+	int r = fw_request(&f->fw, TCODE_READ_BLOCK_REQUEST, FORMER_METER, raw, len);
 	if (r == 0)
-		ff800_decode_meters(raw, s);
+		former_decode_meters(f->m, raw, s);
 	return r;
 }
 
-const struct ofm_backend ofm_backend_ff800 = {
-	.key = "ff800",
-	.name = "Fireface 800",
-	.out_node_prefix = "alsa_output.firewire-0x000a35",
-	.meter_us = 30000,
-	.create = ff800_create,
-	.destroy = ff800_destroy,
-	.open = ff800_open,
-	.close = ff800_close,
-	.is_open = ff800_is_open,
-	.status = ff800_status,
-	.sync = ff800_sync,
-	.routes = ff800_routes,
-	.meters = ff800_meters,
-};
+#define FORMER_BACKEND(k, n, create_fn)				\
+	{							\
+		.key = k,					\
+		.name = n,					\
+		.out_node_prefix = "alsa_output.firewire-0x000a35",	\
+		.meter_us = 30000,				\
+		.create = create_fn,				\
+		.destroy = former_destroy,			\
+		.open = former_open,				\
+		.close = former_close,				\
+		.is_open = former_is_open,			\
+		.status = former_status,			\
+		.sync = former_sync,				\
+		.routes = former_routes,			\
+		.meters = former_meters,			\
+	}
+
+const struct ofm_backend ofm_backend_ff800 = FORMER_BACKEND("ff800", "Fireface 800", ff800_create);
+const struct ofm_backend ofm_backend_ff400 = FORMER_BACKEND("ff400", "Fireface 400", ff400_create);

@@ -6,12 +6,14 @@
 #ifndef OPENFACE_MIXER_BACKEND_H
 #define OPENFACE_MIXER_BACKEND_H
 
+#include <ctype.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "shm_layout.h"
 
 struct ofm_backend {
-	const char *key;              /* --device value: "digiface", "ff802", "ff802usb", "ff800" or "raydat" */
+	const char *key;              /* --device value, e.g. "digiface" (the GUI's device key) */
 	const char *name;             /* for log messages */
 	const char *out_node_prefix;  /* PipeWire node name prefix of its ALSA playback device */
 	const char *out_node_card;    /* or, for PCI cards whose node names carry only the slot,
@@ -43,10 +45,31 @@ static inline void raise_peak(float *dst, float v)
 		*dst = v;
 }
 
+/* True if an ALSA card name starts with prefix as a whole name: "RME AIO" matches "RME AIO" and
+ * "RME AIO_1a2b3c" but not "RME AIO Pro_1a2b3c". A prefix ending in punctuation
+ * ("Fireface 802 (") just has to start the name. */
+static inline bool ofm_card_match(const char *name, const char *prefix)
+{
+	size_t n = strlen(prefix);
+	if (strncmp(name, prefix, n) != 0)
+		return false;
+	if (n == 0 || !isalnum((unsigned char)prefix[n - 1]))
+		return true;
+	const char *p = name + n;
+	if (*p == ' ')
+		p++;
+	return !isalnum((unsigned char)*p);
+}
+
 extern const struct ofm_backend ofm_backend_digiface;
 extern const struct ofm_backend ofm_backend_ff802;
 extern const struct ofm_backend ofm_backend_ff802usb;
+extern const struct ofm_backend ofm_backend_ucx2;
 extern const struct ofm_backend ofm_backend_ff800;
+extern const struct ofm_backend ofm_backend_ff400;
 extern const struct ofm_backend ofm_backend_raydat;
+extern const struct ofm_backend ofm_backend_aio;
+extern const struct ofm_backend ofm_backend_aiopro;
+extern const struct ofm_backend ofm_backend_aes;
 
 #endif

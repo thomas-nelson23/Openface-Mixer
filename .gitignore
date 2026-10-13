@@ -15,4 +15,4 @@ __pycache__/
 tests/test_digiface_usb
 tests/test_fireface_fw
 tests/test_fireface_usb
-tests/test_raydat
+tests/test_hdspe
