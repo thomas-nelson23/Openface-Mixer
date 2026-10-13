@@ -1,4 +1,4 @@
-/* Unit test for the Fireface 802 and 800 encoding and meter decoding (no device needed). */
+/* Unit test for the Fireface 802, 800 and 400 encoding and meter decoding (no device needed). */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,45 +53,69 @@ static void check_meters(void)
 	}
 }
 
-static void check_ff800(void)
+static void check_former(void)
 {
 	static struct ofm_shm s;
-	uint32_t block[FF800_MIXER_BLOCK];
-	uint8_t raw[FF800_METER_LEN] = { 0 };
+	uint32_t block[FORMER_MAX_BLOCK];
+	uint8_t raw[12 * 3 * FORMER_MAX_CH] = { 0 };
 
 	/* gains: linear * 0x8000, +6 dB max (snd-firewire-ctl-services' former range) */
-	check("800 gain 0", ff800_encode_gain(0.0f), 0);
-	check("800 gain unity", ff800_encode_gain(1.0f), 0x8000);
-	check("800 gain -6 dB", ff800_encode_gain(0.5f), 0x4000);
-	check("800 gain +6 dB", ff800_encode_gain(2.0f), 0x10000);
-	check("800 gain clamp", ff800_encode_gain(4.0f), 0x10000);
+	check("former gain 0", former_encode_gain(0.0f), 0);
+	check("former gain unity", former_encode_gain(1.0f), 0x8000);
+	check("former gain -6 dB", former_encode_gain(0.5f), 0x4000);
+	check("former gain +6 dB", former_encode_gain(2.0f), 0x10000);
+	check("former gain clamp", former_encode_gain(4.0f), 0x10000);
 
-	/* mixer block: inputs from quadlet 0, playback from quadlet 32 */
+	/* 800 mixer block: inputs from quadlet 0, playback from quadlet 32 */
 	s.gain[3][0] = 1.0f;                 /* AN 1 -> AN 4 */
 	s.gain[3][OFM_N_IN + 3] = 0.5f;      /* playback 4 -> AN 4 */
 	s.gain[3][29] = 1.0f;                /* not an 800 input: ignored */
-	check("800 routes", ff800_mixer_block(&s, 3, block), 2);
+	check("800 routes", former_mixer_block(&ff800_model, &s, 3, block), 2);
 	check("800 block in", block[0], 0x8000);
 	check("800 block play", block[32 + 3], 0x4000);
 	check("800 block gap", block[29], 0);
-	check("800 meter length", FF800_METER_LEN, 1008);
+	check("800 meter length", former_meter_len(&ff800_model), 1008);
+
+	/* 400 mixer block: playback from quadlet 18, nothing past 36 */
+	s.gain[3][20] = 1.0f;                /* not a 400 input: ignored */
+	block[40] = 0xdead;
+	check("400 routes", former_mixer_block(&ff400_model, &s, 3, block), 2);
+	check("400 block play", block[18 + 3], 0x4000);
+	check("400 block end", block[40], 0xdead);
+	check("400 meter length", former_meter_len(&ff400_model), 648);
 
 	/* status quadlet 1 holds the configured rate */
-	check("800 rate 48k", ff800_status_rate(0x00000007), 48000);
-	check("800 rate 44.1k", ff800_status_rate(0x00000c00), 44100);
-	check("800 rate 96k", ff800_status_rate(0x0000000e), 96000);
+	check("rate 48k", former_status_rate(0x00000007), 48000);
+	check("rate 44.1k", former_status_rate(0x00000c00), 44100);
+	check("rate 96k", former_status_rate(0x0000000e), 96000);
 
-	/* meters: after 84 octuples come inputs, playback and outputs */
+	/* 400 output amplifier: 0 at +6 dB, 0x3f at silence */
+	check("amp +6 dB", former_amp_out(0x10000), 0);
+	check("amp silent", former_amp_out(0), 0x3f);
+	check("amp unity", former_amp_out(0x8000), 0x1f);
+
+	/* 800 meters: after 84 octuples come inputs, playback and outputs */
 	memset(&s, 0, sizeof(s));
 	put32(raw + 672 + 4 * 2, 0x7fffff00 / 2);            /* AN 3 at half scale */
 	put32(raw + 672 + 4 * (28 + 1), 0xffffffff);         /* playback 2: masked to full */
 	put32(raw + 672 + 4 * (56 + 27), 0x7fffff00);        /* A2 8 out at full scale */
 	put32(raw, 0x7fffff00);                              /* the octuples are ignored */
-	ff800_decode_meters(raw, &s);
+	former_decode_meters(&ff800_model, raw, &s);
 	if (fabsf(s.peak_src[2] - 0.5f) > 1e-6f || fabsf(s.peak_src[OFM_N_IN + 1] - 1.0f) > 1e-6f ||
 	    fabsf(s.peak_out[27] - 1.0f) > 1e-6f || s.peak_src[0] != 0.0f) {
 		fprintf(stderr, "800 meters: %g %g %g %g\n", s.peak_src[2], s.peak_src[OFM_N_IN + 1],
 			s.peak_out[27], s.peak_src[0]);
+		failed = 1;
+	}
+
+	/* 400 meters: 54 octuples, then 18 of each */
+	memset(&s, 0, sizeof(s));
+	memset(raw, 0, sizeof(raw));
+	put32(raw + 432 + 4 * (18 + 17), 0x7fffff00);        /* playback 18 */
+	put32(raw + 432 + 4 * (36 + 6), 0x7fffff00);         /* phones L */
+	former_decode_meters(&ff400_model, raw, &s);
+	if (fabsf(s.peak_src[OFM_N_IN + 17] - 1.0f) > 1e-6f || fabsf(s.peak_out[6] - 1.0f) > 1e-6f) {
+		fprintf(stderr, "400 meters: %g %g\n", s.peak_src[OFM_N_IN + 17], s.peak_out[6]);
 		failed = 1;
 	}
 }
@@ -132,7 +156,7 @@ int main(void)
 	check("rate 96k", ff802_status_rate(0x60000e00), 96000);
 
 	check_meters();
-	check_ff800();
+	check_former();
 	if (!failed)
 		printf("test_fireface_fw: ok\n");
 	return failed;

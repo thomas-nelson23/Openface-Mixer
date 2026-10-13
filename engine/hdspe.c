@@ -1,6 +1,6 @@
 /*
- * The RME HDSPe RayDAT as an engine backend: hardware mixer, sample rate and meters through
- * snd-hdspm's ALSA control and hwdep devices. See raydat.h.
+ * RME HDSPe cards (RayDAT, AIO, AIO Pro, AES) as engine backends: hardware mixer, sample rate
+ * and meters through snd-hdspm's or snd-hdspe's ALSA control and hwdep devices. See hdspe.h.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -16,47 +16,53 @@
 
 #include "backend.h"
 #include "digiface_usb.h"   /* DFU_STATE_* */
-#include "raydat.h"
+#include "hdspe.h"
 
-#define N_SRC_RAYDAT (2 * RAYDAT_N_CH)
+#define N_SRC_MAX    (2 * HDSPE_MAX_CH)
 #define MAX_CARDS    32
 
-struct raydat {
+const struct hdspe_model hdspe_raydat = { "RME RayDAT", 36 };
+const struct hdspe_model hdspe_aio = { "RME AIO", 20 };
+const struct hdspe_model hdspe_aio_pro = { "RME AIO Pro", 20 };
+const struct hdspe_model hdspe_aes = { "RME AES32", 16 };
+
+struct hdspe {
+	const struct hdspe_model *model;
 	int ctl;      /* /dev/snd/controlC<n>, -1 while closed */
 	int hwdep;    /* /dev/snd/hwC<n>D0 */
 	unsigned int mixer_numid;
-	uint16_t sent[RAYDAT_N_CH][N_SRC_RAYDAT];
+	uint16_t sent[HDSPE_MAX_CH][N_SRC_MAX];
 	int routes;
 	int check_out;   /* output whose sends the next status call reads back */
 };
 
-uint16_t raydat_encode_gain(float lin)
+uint16_t hdspe_encode_gain(float lin)
 {
 	if (!(lin > 0.0f))
 		return 0;
-	float v = lin * RAYDAT_GAIN_UNITY + 0.5f;
-	return v >= RAYDAT_GAIN_MAX ? RAYDAT_GAIN_MAX : (uint16_t)v;
+	float v = lin * HDSPE_GAIN_UNITY + 0.5f;
+	return v >= HDSPE_GAIN_MAX ? HDSPE_GAIN_MAX : (uint16_t)v;
 }
 
-int raydat_mixer_source(int k)
+int hdspe_mixer_source(int k)
 {
-	return k < OFM_N_IN ? k : RAYDAT_PLAY_SRC + (k - OFM_N_IN);
+	return k < OFM_N_IN ? k : HDSPE_PLAY_SRC + (k - OFM_N_IN);
 }
 
-float raydat_peak(uint32_t word)
+float hdspe_peak(uint32_t word)
 {
-	return (float)((word >> 8) & RAYDAT_PEAK_FULL) / RAYDAT_PEAK_FULL;
+	return (float)((word >> 8) & HDSPE_PEAK_FULL) / HDSPE_PEAK_FULL;
 }
 
-bool raydat_card_match(const char *driver, const char *name)
+bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const char *name)
 {
 	return (strcmp(driver, "HDSPM") == 0 || strcmp(driver, "HDSPe") == 0) &&
-	       strncmp(name, "RME RayDAT", 10) == 0;
+	       ofm_card_match(name, m->card);
 }
 
-bool raydat_driver_usable(const char *driver, unsigned int pci_vendor)
+bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor)
 {
-	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == RAYDAT_VENDOR_RME);
+	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == HDSPE_VENDOR_RME);
 }
 
 /* PCI vendor ID of ALSA card n, or 0 if unknown. */
@@ -74,15 +80,16 @@ static unsigned int card_pci_vendor(int n)
 	return v;
 }
 
-/* shared-memory source of mixer source slot j (0-35 inputs, 36-71 playback) */
-static int shm_source(int j)
+/* shared-memory source of mixer source slot j (inputs, then as many playback channels) */
+static int shm_source(const struct hdspe *r, int j)
 {
-	return j < RAYDAT_N_CH ? j : OFM_N_IN + (j - RAYDAT_N_CH);
+	int n = r->model->n_ch;
+	return j < n ? j : OFM_N_IN + (j - n);
 }
 
 /* ---------- ALSA control and hwdep ---------- */
 
-static int mixer_io(struct raydat *r, unsigned long req, int src, int dst, uint16_t *gain)
+static int mixer_io(struct hdspe *r, unsigned long req, int src, int dst, uint16_t *gain)
 {
 	struct snd_ctl_elem_value v;
 	memset(&v, 0, sizeof(v));
@@ -98,18 +105,18 @@ static int mixer_io(struct raydat *r, unsigned long req, int src, int dst, uint1
 	return 0;
 }
 
-static int write_gain(struct raydat *r, int src, int dst, uint16_t gain)
+static int write_gain(struct hdspe *r, int src, int dst, uint16_t gain)
 {
 	return mixer_io(r, SNDRV_CTL_IOCTL_ELEM_WRITE, src, dst, &gain);
 }
 
-static int read_gain(struct raydat *r, int src, int dst, uint16_t *gain)
+static int read_gain(struct hdspe *r, int src, int dst, uint16_t *gain)
 {
 	return mixer_io(r, SNDRV_CTL_IOCTL_ELEM_READ, src, dst, gain);
 }
 
-/* Opens the control device of the RayDAT's card. Returns its fd, or -1 with *state set. */
-static int find_card(int *card, int *state)
+/* Opens the control device of the model's card. Returns its fd, or -1 with *state set. */
+static int find_card(const struct hdspe_model *m, int *card, int *state)
 {
 	*state = DFU_STATE_NO_DEVICE;
 	for (int n = 0; n < MAX_CARDS; n++) {
@@ -124,8 +131,8 @@ static int find_card(int *card, int *state)
 		struct snd_ctl_card_info info;
 		memset(&info, 0, sizeof(info));
 		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
-		    raydat_card_match((const char *)info.driver, (const char *)info.name)) {
-			if (raydat_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
+		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name)) {
+			if (hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
 				*card = n;
 				return fd;
 			}
@@ -138,18 +145,19 @@ static int find_card(int *card, int *state)
 
 /* ---------- backend ---------- */
 
-static void *create(void)
+static void *create(const struct hdspe_model *m)
 {
-	struct raydat *r = calloc(1, sizeof(*r));
+	struct hdspe *r = calloc(1, sizeof(*r));
 	if (r == NULL)
 		return NULL;
+	r->model = m;
 	r->ctl = r->hwdep = -1;
 	return r;
 }
 
 static void close_dev(void *h)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	if (r->hwdep >= 0)
 		close(r->hwdep);
 	if (r->ctl >= 0)
@@ -166,12 +174,12 @@ static void destroy(void *h)
 
 static int open_dev(void *h)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	int card, state;
 
 	if (r->ctl >= 0)
 		return DFU_STATE_ACTIVE;
-	r->ctl = find_card(&card, &state);
+	r->ctl = find_card(r->model, &card, &state);
 	if (r->ctl < 0)
 		return state;
 
@@ -210,13 +218,13 @@ static int open_dev(void *h)
 
 static bool is_open(void *h)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	return r->ctl >= 0;
 }
 
 static int status(void *h, struct ofm_shm *s, bool *reset)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	struct hdspm_config cfg;
 	memset(&cfg, 0, sizeof(cfg));
 	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_CONFIG, &cfg) < 0)
@@ -227,10 +235,11 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 	/* The mixer can't be read from the card, but the driver's copy tells whether it was
 	 * reloaded (it zeroes the mixer) or someone else changed it. One output per call. */
 	int o = r->check_out;
-	r->check_out = (o + 1) % RAYDAT_N_CH;
-	for (int j = 0; j < N_SRC_RAYDAT; j++) {
+	int n = r->model->n_ch;
+	r->check_out = (o + 1) % n;
+	for (int j = 0; j < 2 * n; j++) {
 		uint16_t g = 0;
-		int e = read_gain(r, raydat_mixer_source(shm_source(j)), o, &g);
+		int e = read_gain(r, hdspe_mixer_source(shm_source(r, j)), o, &g);
 		if (e < 0)
 			return e;
 		if (g != r->sent[o][j]) {
@@ -243,19 +252,19 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 
 static int sync_mix(void *h, struct ofm_shm *s, bool full)
 {
-	struct raydat *r = h;
-	int routes = 0;
+	struct hdspe *r = h;
+	int routes = 0, n = r->model->n_ch;
 
-	for (int o = 0; o < RAYDAT_N_CH; o++) {
+	for (int o = 0; o < n; o++) {
 		float master = s->out_gain[o];
-		for (int j = 0; j < N_SRC_RAYDAT; j++) {
-			int k = shm_source(j);
-			uint16_t g = raydat_encode_gain(s->gain[o][k] * master);
+		for (int j = 0; j < 2 * n; j++) {
+			int k = shm_source(r, j);
+			uint16_t g = hdspe_encode_gain(s->gain[o][k] * master);
 			if (g)
 				routes++;
 			if (!full && g == r->sent[o][j])
 				continue;
-			int e = write_gain(r, raydat_mixer_source(k), o, g);
+			int e = write_gain(r, hdspe_mixer_source(k), o, g);
 			if (e < 0)
 				return e;
 			r->sent[o][j] = g;
@@ -267,36 +276,49 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 
 static int routes(void *h)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	return r->routes;
 }
 
 static int meters(void *h, struct ofm_shm *s)
 {
-	struct raydat *r = h;
+	struct hdspe *r = h;
 	struct hdspm_peak_rms m;
 	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_PEAK_RMS, &m) < 0)
 		return -errno;
-	for (int c = 0; c < RAYDAT_N_CH; c++) {
-		raise_peak(&s->peak_src[c], raydat_peak(m.input_peaks[c]));
-		raise_peak(&s->peak_src[OFM_N_IN + c], raydat_peak(m.playback_peaks[c]));
-		raise_peak(&s->peak_out[c], raydat_peak(m.output_peaks[c]));
+	for (int c = 0; c < r->model->n_ch; c++) {
+		raise_peak(&s->peak_src[c], hdspe_peak(m.input_peaks[c]));
+		raise_peak(&s->peak_src[OFM_N_IN + c], hdspe_peak(m.playback_peaks[c]));
+		raise_peak(&s->peak_out[c], hdspe_peak(m.output_peaks[c]));
 	}
 	return 0;
 }
 
-const struct ofm_backend ofm_backend_raydat = {
-	.key = "raydat",
-	.name = "RayDAT",
-	.out_node_card = "RME RayDAT",
-	.meter_us = 20000,
-	.create = create,
-	.destroy = destroy,
-	.open = open_dev,
-	.close = close_dev,
-	.is_open = is_open,
-	.status = status,
-	.sync = sync_mix,
-	.routes = routes,
-	.meters = meters,
-};
+static void *create_raydat(void) { return create(&hdspe_raydat); }
+static void *create_aio(void) { return create(&hdspe_aio); }
+static void *create_aio_pro(void) { return create(&hdspe_aio_pro); }
+static void *create_aes(void) { return create(&hdspe_aes); }
+
+#define HDSPE_BACKEND(k, n, card_name, create_fn)	\
+	{						\
+		.key = k,				\
+		.name = n,				\
+		.out_node_card = card_name,		\
+		.meter_us = 20000,			\
+		.create = create_fn,			\
+		.destroy = destroy,			\
+		.open = open_dev,			\
+		.close = close_dev,			\
+		.is_open = is_open,			\
+		.status = status,			\
+		.sync = sync_mix,			\
+		.routes = routes,			\
+		.meters = meters,			\
+	}
+
+const struct ofm_backend ofm_backend_raydat = HDSPE_BACKEND("raydat", "RayDAT", "RME RayDAT",
+							    create_raydat);
+const struct ofm_backend ofm_backend_aio = HDSPE_BACKEND("aio", "AIO", "RME AIO", create_aio);
+const struct ofm_backend ofm_backend_aiopro = HDSPE_BACKEND("aiopro", "AIO Pro", "RME AIO Pro",
+							    create_aio_pro);
+const struct ofm_backend ofm_backend_aes = HDSPE_BACKEND("aes", "AES", "RME AES32", create_aes);
