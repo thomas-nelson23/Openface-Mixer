@@ -81,6 +81,7 @@ app.MainWindow
  ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
  ├─ matrix_view.py  grid editor for the same sends
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
+ ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
  └─ config.py       state.json / matrix.bin / presets.json
 ```
 

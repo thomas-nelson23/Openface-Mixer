@@ -5,6 +5,7 @@ import time
 
 from PySide6.QtCore import QProcess, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room
+from . import arc, control_room, osc_remote
 from .channel_settings import ChannelSettings
 from .config import (
     device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
@@ -30,6 +31,7 @@ from .model import (
     strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
+from .remote_link import RemoteLink, RemotePanel, remote_settings
 from .settings_panel import SettingsPanel, Sidebar, ask
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
@@ -39,9 +41,10 @@ from .widgets import Row, Strip
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, dev):
+    def __init__(self, dev, background=False):
         super().__init__()
         self.dev = dev
+        self.background = background       # started at login: closing hides the window
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
@@ -112,6 +115,13 @@ class MainWindow(QMainWindow):
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
         self.settings.add_control_room(self.control)
+        self.remote_panel = RemotePanel(self.st, dev.key)
+        self.settings.add_before_updates(self.remote_panel)
+        self.remote = RemoteLink(self.remote_snapshot, self)
+        self.remote.received.connect(self.remote_message)
+        self.remote.status_changed.connect(self.remote_panel.set_status)
+        self.remote_panel.changed.connect(self.apply_remote_settings)
+        self._hw_active = False
         compact_boxes(self.settings)
         self.arc = ArcLink(self)
         self.arc.key.connect(self.arc_key)
@@ -138,6 +148,7 @@ class MainWindow(QMainWindow):
         self.refresh_slots()
         self.ensure_engine()
         self.push_matrix()
+        self.apply_remote_settings()
 
         QTimer(self, interval=33, timeout=self.update_meters).start()
         QTimer(self, interval=1000, timeout=self.poll_hw).start()
@@ -259,6 +270,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
             ("Escape", lambda: self.store_btn.setChecked(False)),
+            ("Ctrl+Q", QApplication.quit),      # also quits when closing only hides (--background)
         )
         for key, slot in keys:
             sc = QShortcut(QKeySequence(key), self)
@@ -619,6 +631,7 @@ class MainWindow(QMainWindow):
             return
         self.switch_to = key
         self.close()
+        QApplication.quit()             # also ends app.exec() when started with --background
 
     def set_ui_scale(self, scale):
         """Save the scale and reopen the window at it (main() lays everything out again)."""
@@ -626,10 +639,15 @@ class MainWindow(QMainWindow):
         self.reopen_geometry = self.geometry()
         self.switch_to = self.dev.key
         self.close()
+        QApplication.quit()             # also ends app.exec() when started with --background
 
     def restart_app(self):
         self.save()
         self.arc.disconnect_port()      # so the new process can open the ARC USB
+        self.remote.stop()              # and bind the remote's port
+        server = QApplication.instance().findChild(QLocalServer)
+        if server is not None:
+            server.close()              # or the new process would hand over to this one and exit
         launched = QProcess.startDetached(
             sys.executable, ["-m", "openface_mixer", "--device", self.dev.key], os.getcwd())
         if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
@@ -949,6 +967,56 @@ class MainWindow(QMainWindow):
         self.engine.start()
         QTimer.singleShot(600, self.push_matrix)
 
+    # ------------------------------------------------------------------ network remote (OSC)
+    def apply_remote_settings(self):
+        r = remote_settings(self.st)
+        self.remote.levels_on = r["levels"]
+        port = self.remote.sock.localPort() if self.remote.sock else None
+        if not r["enabled"]:
+            self.remote.stop()
+        elif port != r["port"]:
+            self.remote.start(r["port"])
+        self.schedule_save()
+
+    def remote_snapshot(self):
+        filled = {i for i in range(N_SLOTS) if self.presets.slots[i]}
+        return osc_remote.snapshot(self.st, self.dev, self.mode, filled, self._hw_active)
+
+    def remote_message(self, address, args):
+        """A controller on the network changed something (osc_remote.apply says what)."""
+        res = osc_remote.apply(self.st, self.dev, self.mode, address, args)
+        if res.kind == "changed":
+            if res.selected is not None and res.selected != self.submix.currentData():
+                self.select_out(res.selected, by_pair=True)
+            self.sync_strips()
+            self.push_matrix()
+        elif res.kind == "stereo":
+            self.toggle_stereo(*res.value)
+        elif res.kind == "recall":
+            if self.presets.slots[res.value]:
+                self.recall_slot(res.value)
+        elif res.kind == "store":
+            i = res.value
+            self.presets.store(i, self.presets.name(i) or f"Mix {i + 1}", extract_mix(self.st))
+            self.st["active_slot"] = i
+            self.refresh_slots()
+            self.schedule_save()
+
+    def sync_strips(self):
+        """Show the model's faders, mutes and solos on the strips (after a remote change)."""
+        for s in self.strips.values():
+            s.set_fader(get_strip_db(self.st, s.key))
+            if s.kind == "out":
+                mute = self.st["out"][s.pair]["mute"]
+            else:
+                mute = self.st["mute"][s.kind][s.channels[0]]
+                s.solo.blockSignals(True)
+                s.solo.setChecked(self.st["solo"][s.kind][s.channels[0]])
+                s.solo.blockSignals(False)
+            s.mute.blockSignals(True)
+            s.mute.setChecked(mute)
+            s.mute.blockSignals(False)
+
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
@@ -973,6 +1041,7 @@ class MainWindow(QMainWindow):
                 self.rebuild_all()
         self.status.setText(txt)
         active = s is not None and s["hw"] == "active"
+        self._hw_active = active
         if self.dev.family == "latter":
             self.settings.update_latter_status(s["dev_status"] if active else None)
         elif self.dev.family == "former":
@@ -1007,12 +1076,36 @@ class MainWindow(QMainWindow):
             s.meter.push([src[N_IN + c] for c in s.channels], dt)
         for s in self.row_out.strips:
             s.meter.push([out[c] for c in s.channels], dt)
+        self.remote.add_peaks("in", self.channels("in"), src)
+        self.remote.add_peaks("play", self.channels("play"), src[N_IN:])
+        self.remote.add_peaks("out", self.channels("out"), out)
 
     def closeEvent(self, e):
         self.save()
         size = (self.normalGeometry() if self.isMaximized() else self.geometry()).size()
         save_window(size.width(), size.height(), self.sidebar.is_open())
+        if self.background and self.switch_to is None:
+            e.ignore()                  # keep mixing and serving the remote; reopen to show
+            self.hide()
+            return
         super().closeEvent(e)
+
+
+def _single_instance(app):
+    """Make this the only running Openface Mixer of this user. If one is already running, ask it
+    to show its window and return None; otherwise return the server that answers later starts."""
+    name = f"{APP_ID}-{os.getuid()}"
+    probe = QLocalSocket()
+    probe.connectToServer(name)
+    if probe.waitForConnected(300):
+        probe.write(b"show\n")
+        probe.waitForBytesWritten(300)
+        probe.disconnectFromServer()
+        return None
+    QLocalServer.removeServer(name)            # left behind by a crashed instance
+    server = QLocalServer(app)
+    server.listen(name)
+    return server
 
 
 def main():
@@ -1020,6 +1113,22 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
     args = app.arguments()[1:]
+    server = _single_instance(app)
+    if server is None:
+        sys.exit(0)
+    background = "--background" in args
+    app.setQuitOnLastWindowClosed(not background)
+    current = {}
+
+    def show_window():
+        w = current.get("window")
+        if w is not None:
+            w.show()
+            w.raise_()
+            w.activateWindow()
+
+    server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
+                                          show_window()))
     if "--device" in args and args.index("--device") + 1 < len(args):
         dev = DEVICES.get(args[args.index("--device") + 1])
         if dev is None:
@@ -1030,14 +1139,19 @@ def main():
     while True:
         apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
         save_device_choice(dev)
-        w = MainWindow(dev)
+        w = MainWindow(dev, background)
+        current["window"] = w
         if geometry is not None:
             w.setGeometry(geometry)
-        w.show()
+        if not background:
+            w.show()
         code = app.exec()
         if w.switch_to is None:
             sys.exit(code)
+        background = False               # the user switched devices in the window: show the next
+        app.setQuitOnLastWindowClosed(True)
         dev = DEVICES[w.switch_to]
         geometry = w.reopen_geometry
         w.arc.disconnect_port()      # so the next window can open the ARC USB
+        w.remote.stop()              # and the next one can bind the remote's port
         w.deleteLater()

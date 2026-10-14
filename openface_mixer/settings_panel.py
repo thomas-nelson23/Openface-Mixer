@@ -250,6 +250,10 @@ class SettingsPanel(QWidget):
         """The main window's Control Room section, between the device sections and Display."""
         self.layout().insertWidget(self._control_room_at, section)
 
+    def add_before_updates(self, section):
+        """A section of the main window's (the network remote), just above Updates."""
+        self.layout().insertWidget(self.layout().indexOf(self._updates_box), section)
+
     def _build_ui_scale(self, lay, scale):
         self._scale_at_start = scale
         disp = Section("DISPLAY")
@@ -317,6 +321,7 @@ class SettingsPanel(QWidget):
     def _build_updates(self, lay):
         box = Section("UPDATES")
         ul = QVBoxLayout(box)
+        self._updates_box = box
         self.update_label = QLabel("Check GitHub for a newer Openface Mixer.")
         self.update_label.setWordWrap(True)
         ul.addWidget(self.update_label)
