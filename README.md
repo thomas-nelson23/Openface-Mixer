@@ -132,8 +132,41 @@ TotalMix layout printed on it:
 - Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit. Faders
   grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; the window must be open for it to
-work.
+Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
+it to work (its window can be hidden, see below).
+
+### Network remote (OSC)
+
+Openface Mixer can be controlled over the network by anything that speaks TotalMix FX's
+**Global OSC** (TotalMix FX 2.1 and later): a Q-SYS or Crestron plugin, Bitfocus Companion, a
+Stream Deck, TouchOSC. Turn it on in the **Network Remote (OSC)** box in the settings panel and
+point the controller at this computer's IP address and the UDP port shown there (7001, the
+TotalMix default). Replies go back to the address and port each controller sends from.
+
+What a controller can do, with TotalMix's addresses and zero-based channel numbers:
+
+| Address | What it does |
+| --- | --- |
+| `/mix/in/<ch>/<out>/faderlin`, `fader` | Send from an input to an output pair (0..1 TotalMix fader position, or dB) |
+| `/mix/pb/<ch>/<out>/faderlin`, `fader` | The same for a playback channel |
+| `/mix/in/<ch>/<out>/solo`, `/mix/pb/…/solo` | Solo, and select that output pair's submix |
+| `/input/<ch>/mute`, `/playback/<ch>/mute` | Channel mute |
+| `/input/<ch>/stereo`, `/playback/<ch>/stereo` | Link or unlink a pair |
+| `/output/<ch>/faderlin`, `volume`, `mute` | Output pair level and mute |
+| `/controlroom/dim`, `mainmono`, `speakerb`, `talkback`, `externalin` | Control Room switches |
+| `/globalsolo` | Switch all solos off (0), or back on (1) |
+| `/snapshot/load/<1-8>`, `/snapshot/save/<1-8>` | Recall or store a preset |
+| `/sendall`, `/sendstate`, `/sendsubmix/<out>`, `/sendchan/<bus>/<ch>` | Ask for the current state |
+
+Openface Mixer sends names, link state, faders, mutes, solos, the Control Room switches, the lit
+preset and (unless switched off) peak levels in dB to `/level/in|pb|out/<ch>`, whenever they
+change. Writing to either channel of a linked pair changes both. Phase, EQ, dynamics and
+TotalMix's global mute have no equivalent and are ignored.
+
+Anyone who can reach the port can change the mix while the remote is on, so only turn it on in
+a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
+tick **Start at login without a window**, or run `openface-mixer --background`. Opening Openface
+Mixer again shows the window; *Mix → Quit Openface Mixer* stops it.
 
 ### Fireface 802
 
@@ -212,6 +245,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
 | `~/.config/openface-mixer/raydat/` | The same for the HDSPe RayDAT |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
+| `~/.config/autostart/openface-mixer.desktop` | Starts Openface Mixer at login without a window (when ticked) |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
@@ -251,6 +285,9 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
 - Solo has no PFL / live mode or exclusive mode yet.
 - No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
+- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
+  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
+  (before version 2.1) are not supported.
 - ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
   supported (it sent nothing in testing).
 
