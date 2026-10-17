@@ -1,8 +1,9 @@
 """Main window: wires the model, the engine link, the hardware panel and the widgets together."""
+import os
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
     QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
@@ -12,7 +13,8 @@ from . import APP_ID, APP_NAME
 from . import arc, control_room, fireface800
 from .channel_settings import ChannelSettings
 from .config import (
-    device_block, load_device_choice, load_state, presets_file, save_device_choice, save_state,
+    apply_ui_scale, device_block, load_device_choice, load_state, load_ui_scale, presets_file,
+    save_device_choice, save_state, save_ui_scale,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -37,6 +39,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
+        self.ui_scale = load_ui_scale()    # applied at startup by main(), see config.apply_ui_scale
         self.st = load_state(dev)
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
@@ -71,10 +74,12 @@ class MainWindow(QMainWindow):
         self.tabs.addWidget(mscroll)
         self.tabs.currentChanged.connect(self._tab_changed)
         body.addWidget(self.tabs, 1)
-        self.settings = SettingsPanel(self.hw, dev, self.st)
+        self.settings = SettingsPanel(self.hw, dev, self.st, self.ui_scale)
         self.settings.eng_btn.clicked.connect(self.restart_engine)
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
+        self.settings.ui_scale_changed.connect(self.set_ui_scale)
+        self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
         self.settings.layout().insertWidget(self.settings.layout().count() - 2, self.control)
@@ -427,6 +432,23 @@ class MainWindow(QMainWindow):
         self.switch_to = key
         self.close()
 
+    def set_ui_scale(self, scale):
+        """Persist the scale; Qt only reads it when the application starts, see restart_app."""
+        save_ui_scale(scale)
+
+    def restart_app(self):
+        self.save()
+        self.arc.disconnect_port()      # so the new process can open the ARC USB
+        launched = QProcess.startDetached(
+            sys.executable, ["-m", "openface_mixer", *sys.argv[1:]], os.getcwd())
+        if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
+            launched = launched[0]
+        if not launched:
+            QMessageBox.warning(self, "Restart", "Could not restart Openface Mixer. Close it "
+                                                 "and start it again to apply the new scale.")
+            return
+        QApplication.instance().quit()
+
     def _tab_changed(self, i):
         for n, b in enumerate(self.view_btns):
             b.setChecked(n == i)
@@ -708,6 +730,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    apply_ui_scale()                    # before QApplication: Qt reads the factor on startup
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)

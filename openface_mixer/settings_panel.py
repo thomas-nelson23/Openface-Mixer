@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from . import fireface800 as ff800
 from . import fireface802 as ff
 from . import raydat
+from .config import UI_SCALES
 from .devices import DEVICES
 from .hardware import Hardware, set_card_profile
 
@@ -62,8 +63,10 @@ class Led(QLabel):
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
+    ui_scale_changed = Signal(float) # chosen scale, applied when the application restarts
+    restart_requested = Signal()
 
-    def __init__(self, hw, dev, st, parent=None):
+    def __init__(self, hw, dev, st, ui_scale=1.0, parent=None):
         super().__init__(parent)
         self.hw = hw
         self.dev = dev
@@ -106,6 +109,8 @@ class SettingsPanel(QWidget):
         el.addWidget(self.eng_btn)
         lay.addWidget(eng)
 
+        self._build_ui_scale(lay, ui_scale)
+
         note = QLabel(
             f"<span style='color:#6e6e73;font-size:9px'>All mixing happens in the {dev.name}'s "
             "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
@@ -116,6 +121,44 @@ class SettingsPanel(QWidget):
         note.setWordWrap(True)
         lay.addWidget(note)
         lay.addStretch()
+
+    def _build_ui_scale(self, lay, scale):
+        self._scale_at_start = scale
+        disp = QGroupBox("DISPLAY")
+        dl = QGridLayout(disp)
+        dl.addWidget(QLabel("UI scale"), 0, 0)
+        self.scale_combo = QComboBox()
+        for s in UI_SCALES:
+            self.scale_combo.addItem(f"{s * 100:g}%", s)
+        if all(abs(scale - s) > 1e-6 for s in UI_SCALES):
+            self.scale_combo.addItem(f"{scale * 100:g}%", scale)
+        self.scale_combo.setCurrentIndex(self._scale_index(scale))
+        self.scale_combo.activated.connect(self._scale_activated)
+        dl.addWidget(self.scale_combo, 0, 1)
+        self.scale_note = QLabel("Scales the whole window, on top of the desktop's display scale.")
+        self.scale_note.setWordWrap(True)
+        self.scale_note.setStyleSheet("color:#6e6e73;font-size:9px")
+        dl.addWidget(self.scale_note, 1, 0, 1, 2)
+        self.scale_restart = QPushButton("Restart to apply")
+        self.scale_restart.clicked.connect(self.restart_requested.emit)
+        self.scale_restart.setVisible(False)
+        dl.addWidget(self.scale_restart, 2, 0, 1, 2)
+        lay.addWidget(disp)
+
+    def _scale_index(self, scale):
+        for i in range(self.scale_combo.count()):
+            if abs(float(self.scale_combo.itemData(i)) - scale) < 1e-6:
+                return i
+        return 0
+
+    def _scale_activated(self, i):
+        scale = float(self.scale_combo.itemData(i))
+        changed = abs(scale - self._scale_at_start) > 1e-6
+        self.scale_note.setText("Restart Openface Mixer to apply the new scale." if changed
+                                else "Scales the whole window, on top of the desktop's "
+                                     "display scale.")
+        self.scale_restart.setVisible(changed)
+        self.ui_scale_changed.emit(scale)
 
     # ------------------------------------------------------------------ Digiface USB
     def _build_digiface(self, lay):

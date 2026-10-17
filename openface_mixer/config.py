@@ -4,6 +4,7 @@ Each device has its own state, matrix and presets: the Digiface's in the config 
 (where they always were), other devices' in a subdirectory named after the device key.
 """
 import json
+import math
 import os
 import struct
 from pathlib import Path
@@ -20,6 +21,11 @@ MATRIX_MAGIC = 0x344D464F                   # "OFM4", see load_matrix() in the e
 DEVICE_MAGIC = 0x3144464F                   # "OFD1": device settings block after the gains
 N_DEV_CMD = 512                             # OFM_N_DEV_CMD in engine/shm_layout.h
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last
+UI_FILE = CONFIG_DIR / "ui.json"            # window scaling, shared by all devices
+
+UI_SCALE_DEFAULT = 1.0
+UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
+UI_SCALES = (0.8, 1.0, 1.25, 1.5, 1.75, 2.0)
 
 
 def device_dir(dev=DEFAULT):
@@ -87,6 +93,29 @@ def matrix_file_bytes(st, dev=DEFAULT):
 def save_state(st, dev=DEFAULT):
     atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}))
     atomic_write(matrix_file(dev), matrix_file_bytes(st, dev))
+
+
+def load_ui_scale():
+    """The saved UI scale (1.0 = the desktop's own scale)."""
+    try:
+        scale = float(json.loads(UI_FILE.read_text())["scale"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return UI_SCALE_DEFAULT
+    if not math.isfinite(scale):
+        return UI_SCALE_DEFAULT
+    return max(UI_SCALE_MIN, min(UI_SCALE_MAX, scale))
+
+
+def save_ui_scale(scale):
+    scale = max(UI_SCALE_MIN, min(UI_SCALE_MAX, float(scale)))
+    atomic_write(UI_FILE, json.dumps({"scale": scale}))
+
+
+def apply_ui_scale():
+    """Set Qt's global scale factor. Must run before QApplication is created: Qt reads
+    QT_SCALE_FACTOR when it sets up the platform plugin, and it scales the whole UI,
+    including the fixed-pixel mixer widgets."""
+    os.environ["QT_SCALE_FACTOR"] = f"{load_ui_scale():g}"
 
 
 def load_device_choice():
