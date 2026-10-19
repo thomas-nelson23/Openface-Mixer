@@ -23,15 +23,15 @@ class ChannelSettings(QFrame):
         """settings: the device settings dict (st["hw"]), edited in place."""
         super().__init__(parent, Qt.Popup)
         self.setObjectName("chansettings")
-        self.setStyleSheet("QFrame#chansettings{background:#2a2a2d;border:1px solid #111;"
-                           "border-radius:4px}")
+        self.setStyleSheet("QFrame#chansettings{background:#040e16;border:1px solid rgba(255,255,255,0.16);"
+                           "border-radius:8px}")
         self.s = settings
         self.kind = kind
         self.channels = channels
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(6)
-        lay.addWidget(QLabel(f"<b>{title}</b> <span style='color:#8e8e93'>settings</span>"))
+        lay.addWidget(QLabel(f"<b>{title}</b> <span style='color:#7d9299'>settings</span>"))
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(4)

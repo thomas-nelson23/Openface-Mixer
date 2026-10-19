@@ -280,5 +280,6 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Not affiliated with RME (Audio AG). "TotalMix", "Digiface" and
+MIT. See [LICENSE](LICENSE). The bundled fonts (Sora, JetBrains Mono, Michroma, in
+`openface_mixer/fonts/`) are under the SIL Open Font License; see the OFL files next to them. Not affiliated with RME (Audio AG). "TotalMix", "Digiface" and
 "Fireface" are trademarks of their respective owners.

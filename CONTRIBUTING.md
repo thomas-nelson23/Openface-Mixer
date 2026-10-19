@@ -32,7 +32,8 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
-  theme.py              colours and the Qt stylesheet
+  theme.py              colours, bundled fonts and the Qt stylesheet
+  fonts/                Sora, JetBrains Mono, Michroma (SIL OFL)
 packaging/              .desktop file, systemd user units, udev rules
 scripts/                install.sh / uninstall.sh (user install to ~/.local)
 docs/                   ARCHITECTURE.md (how it fits together), HARDWARE.md (device notes)

@@ -93,11 +93,11 @@ class ControlRoomPanel(QGroupBox):
     """Switches and assignments. Emits changed() after editing st["control_room"]."""
     changed = Signal()
     STATUS = {
-        "connected": "<span style='color:#34c759'>●</span> ARC USB connected",
-        "absent": "<span style='color:#5b5b60'>●</span> ARC USB not connected",
-        "no-access": "<span style='color:#ff6b5b'>●</span> No permission to open the ARC USB "
+        "connected": "<span style='color:#2ad4ff'>●</span> ARC USB connected",
+        "absent": "<span style='color:#2a4552'>●</span> ARC USB not connected",
+        "no-access": "<span style='color:#ff2a4f'>●</span> No permission to open the ARC USB "
                      "(add yourself to the <tt>audio</tt> group)",
-        "busy": "<span style='color:#ff6b5b'>●</span> ARC USB is in use by another program",
+        "busy": "<span style='color:#ff2a4f'>●</span> ARC USB is in use by another program",
     }
 
     def __init__(self, st, parent=None):
