@@ -440,7 +440,7 @@ class MainWindow(QMainWindow):
         self.save()
         self.arc.disconnect_port()      # so the new process can open the ARC USB
         launched = QProcess.startDetached(
-            sys.executable, ["-m", "openface_mixer", *sys.argv[1:]], os.getcwd())
+            sys.executable, ["-m", "openface_mixer", "--device", self.dev.key], os.getcwd())
         if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
             launched = launched[0]
         if not launched:
