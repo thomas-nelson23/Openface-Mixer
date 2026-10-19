@@ -445,7 +445,7 @@ class MainWindow(QMainWindow):
             launched = launched[0]
         if not launched:
             QMessageBox.warning(self, "Restart", "Could not restart Openface Mixer. Close it "
-                                                 "and start it again to apply the new scale.")
+                                                 "and start it again to apply the change.")
             return
         QApplication.instance().quit()
 

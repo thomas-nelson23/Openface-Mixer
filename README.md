@@ -85,6 +85,11 @@ make install
 This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enables the
 `openface-mixer-engine` user service. Remove it with `make uninstall`.
 
+To update later, use **Updates** in the settings panel: it checks GitHub for new commits on
+`main` and, on **Update and restart**, backs up `~/.config/openface-mixer`, pulls the checkout
+you installed from, reinstalls and restarts. Keep that checkout where it is; if it has local
+changes or isn't on `main`, update by hand with `git pull && make install`.
+
 ## First run
 
 1. Open **Openface Mixer**.
