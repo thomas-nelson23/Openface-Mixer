@@ -26,6 +26,7 @@ UI_FILE = CONFIG_DIR / "ui.json"            # window scaling, shared by all devi
 UI_SCALE_DEFAULT = 1.0
 UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
 UI_SCALES = (0.8, 1.0, 1.25, 1.5, 1.75, 2.0)
+BASE_SCALE_ENV = "OPENFACE_MIXER_BASE_SCALE"  # QT_SCALE_FACTOR from before apply_ui_scale()
 
 
 def device_dir(dev=DEFAULT):
@@ -114,8 +115,23 @@ def save_ui_scale(scale):
 def apply_ui_scale():
     """Set Qt's global scale factor. Must run before QApplication is created: Qt reads
     QT_SCALE_FACTOR when it sets up the platform plugin, and it scales the whole UI,
-    including the fixed-pixel mixer widgets."""
-    os.environ["QT_SCALE_FACTOR"] = f"{load_ui_scale():g}"
+    including the fixed-pixel mixer widgets.
+
+    The saved scale multiplies any QT_SCALE_FACTOR the user already set. That value is kept in
+    BASE_SCALE_ENV so a restarted GUI, which inherits our environment, doesn't apply it twice."""
+    base = os.environ.setdefault(BASE_SCALE_ENV, os.environ.get("QT_SCALE_FACTOR", ""))
+    try:
+        factor = float(base) if base else 1.0
+    except ValueError:
+        factor = 1.0
+    scale = load_ui_scale()
+    if scale == UI_SCALE_DEFAULT:
+        if base:
+            os.environ["QT_SCALE_FACTOR"] = base
+        else:
+            os.environ.pop("QT_SCALE_FACTOR", None)
+    else:
+        os.environ["QT_SCALE_FACTOR"] = f"{factor * scale:g}"
 
 
 def load_device_choice():
