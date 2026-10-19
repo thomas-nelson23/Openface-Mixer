@@ -4,6 +4,7 @@ import sys
 import time
 
 from PySide6.QtCore import QProcess, Qt, QTimer
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
     QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
@@ -54,6 +55,9 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(12, 10, 12, 10)
         root.setSpacing(10)
         root.addLayout(self._build_top_bar())
+        edge = QFrame()
+        edge.setObjectName("edge")
+        root.addWidget(edge)
 
         body = QHBoxLayout()
         mixer_page = QWidget()
@@ -119,8 +123,9 @@ class MainWindow(QMainWindow):
     def _build_top_bar(self):
         top = QHBoxLayout()
         top.setSpacing(10)
-        top.addWidget(QLabel("<span style='font-size:14px;font-weight:700'>Openface</span>"
-                             "<span style='font-size:14px;font-weight:300;color:#8e8e93'> Mixer</span>"))
+        top.addWidget(QLabel("<span style='font-family:Michroma;font-size:14px;letter-spacing:1.5px;"
+                             "color:white'>OPENFACE</span><span style='font-family:Michroma;"
+                             "font-size:14px;letter-spacing:1.5px;color:#ff2a4f'>MIXER</span>"))
         top.addSpacing(10)
 
         seg = QWidget()
@@ -202,6 +207,9 @@ class MainWindow(QMainWindow):
     def _caption(text):
         lbl = QLabel(text)
         lbl.setObjectName("caption")
+        f = lbl.font()
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 2.4)
+        lbl.setFont(f)
         return lbl
 
     # ------------------------------------------------------------------ building strips
@@ -665,14 +673,14 @@ class MainWindow(QMainWindow):
     def poll_engine(self):
         s = self.engine.status()
         self.settings.update_hw_mixer(s)
-        sep = "<span style='color:#4a4a4e'>&nbsp;│&nbsp;</span>"
+        sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff453a'>●</span>&nbsp; ENGINE STOPPED"
+            txt = "<span style='color:#ff2a4f'>●</span>&nbsp; ENGINE STOPPED"
             self.settings.eng_label.setText("Engine is not running.")
             self.settings.eng_btn.setText("Start engine")
         else:
-            hw_col = ("#34c759" if s["hw"] == "active" else
-                      "#ffd60a" if s["hw"] in ("no-nodes", "starting") else "#ff453a")
+            hw_col = ("#2ad4ff" if s["hw"] == "active" else
+                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")

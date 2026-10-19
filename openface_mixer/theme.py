@@ -1,82 +1,125 @@
-"""Colours, fonts and the application stylesheet (dark, loosely modelled on Logic Pro's mixer)."""
-from PySide6.QtGui import QColor, QFont, QPalette
+"""Colours, fonts and the application stylesheet: the "Deep Ocean" look
+(a deep ocean-blue field, near-black panels with hairline edges, cyan for signal, red for small
+accents, Sora / JetBrains Mono / Michroma)."""
+from pathlib import Path
 
-BG = QColor("#1e1e20")
-PANEL = QColor("#2c2c2f")
-ACCENT = QColor("#f0a43a")   # selection / submix target
-SOLO = QColor("#ffd60a")
-TEXT = QColor("#ececef")
-DIM = QColor("#8e8e93")
-KIND_COLOR = {"in": QColor("#3fae5a"), "play": QColor("#3a86d6"), "out": QColor("#c8873a")}
-GROUP_COLOR = {1: QColor("#ff5f57"), 2: QColor("#ffd60a"), 3: QColor("#64d2ff"), 4: QColor("#bf5af2")}
-MONO = "Noto Sans Mono, DejaVu Sans Mono, monospace"
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
+
+BG = QColor("#021d2e")       # the blue field
+PANEL = QColor("#040e16")    # ink panels and strips
+INK = "rgba(4,12,18,0.62)"
+INK_DEEP = "rgba(4,12,18,0.93)"
+HAIR = "rgba(255,255,255,0.07)"
+HAIR_STRONG = "rgba(255,255,255,0.16)"
+CYAN = QColor("#2ad4ff")
+RED = QColor("#ff2a4f")
+TEAL = QColor("#0090b0")
+WARN = QColor("#ffb020")
+ACCENT = CYAN                # selection / submix target
+SOLO = WARN
+TEXT = QColor("#d9eef2")
+SOFT = QColor("#9cc7cf")
+DIM = QColor("#7d9299")
+KIND_COLOR = {"in": QColor("#2ad4ff"), "play": QColor("#a77bff"), "out": QColor("#ff2a4f")}
+GROUP_COLOR = {1: QColor("#ff2a4f"), 2: QColor("#ffb020"), 3: QColor("#2ad4ff"), 4: QColor("#ff7ad9")}
+SANS = "Sora"
+MONO = "JetBrains Mono, Noto Sans Mono, DejaVu Sans Mono, monospace"
+DISPLAY = "Michroma"
+
+
+def caption_html(text, color=None):
+    """Wide-tracked small caps label, as the dashboard's panel titles."""
+    return (f"<span style='color:{(color or DIM).name()};font-size:8px;font-weight:600;"
+            f"letter-spacing:2.4px'>{text.upper()}</span>")
+
+
+FONT_DIR = Path(__file__).parent / "fonts"
+
+
+def load_fonts():
+    """Registers the bundled fonts (SIL Open Font License, see fonts/OFL-*.txt)."""
+    for f in sorted(FONT_DIR.glob("*.ttf")):
+        QFontDatabase.addApplicationFont(str(f))
 
 
 def apply_theme(app):
+    load_fonts()
     app.setStyle("Fusion")
     pal = QPalette()
     for role, col in [
         (QPalette.Window, BG), (QPalette.WindowText, TEXT),
-        (QPalette.Base, QColor("#16181b")), (QPalette.AlternateBase, PANEL),
-        (QPalette.Text, TEXT), (QPalette.Button, QColor("#3a3a3e")),
-        (QPalette.ButtonText, TEXT), (QPalette.Highlight, ACCENT),
-        (QPalette.HighlightedText, QColor("#111")), (QPalette.ToolTipBase, PANEL),
+        (QPalette.Base, QColor("#030a10")), (QPalette.AlternateBase, PANEL),
+        (QPalette.Text, TEXT), (QPalette.Button, PANEL),
+        (QPalette.ButtonText, TEXT), (QPalette.Highlight, CYAN),
+        (QPalette.HighlightedText, QColor("#021012")), (QPalette.ToolTipBase, PANEL),
         (QPalette.ToolTipText, TEXT),
     ]:
         pal.setColor(role, col)
     app.setPalette(pal)
-    f = QFont("Noto Sans")
+    f = QFont(SANS)
     f.setPointSize(9)
     app.setFont(f)
+    c, r, t, d, s = CYAN.name(), RED.name(), TEXT.name(), DIM.name(), SOFT.name()
     app.setStyleSheet(f"""
         QMainWindow, QStackedWidget > QWidget {{ background:{BG.name()}; }}
         QScrollArea, QScrollArea > QWidget > QWidget {{ background:transparent; }}
-        QToolTip {{ background:#2c2c2f; color:{TEXT.name()}; border:1px solid #111; padding:4px;
-                   border-radius:4px; }}
-        QMenu {{ background:#2c2c2f; border:1px solid #111; border-radius:6px; padding:4px; }}
-        QMenu::item {{ padding:4px 18px; border-radius:4px; }}
-        QMenu::item:selected {{ background:{ACCENT.name()}; color:#111; }}
-        QMenu::separator {{ height:1px; background:#3a3a3e; margin:4px 6px; }}
-        QPushButton {{ background:qlineargradient(y1:0,y2:1,stop:0 #48484c,stop:1 #3a3a3e);
-                      color:{TEXT.name()}; border:1px solid #141415; border-radius:6px;
-                      padding:4px 12px; }}
-        QPushButton:hover {{ background:#505055; }}
-        QPushButton:pressed {{ background:#2f2f33; }}
-        QPushButton:checked {{ background:#5a5a60; }}
+        QFrame#edge {{ background:qlineargradient(x1:0,x2:1,stop:0 transparent,stop:0.25 {c},
+                      stop:0.75 {r},stop:1 transparent); max-height:1px; min-height:1px; }}
+        QToolTip {{ background:#040e16; color:{t}; border:1px solid {HAIR_STRONG}; padding:5px 8px;
+                   border-radius:6px; }}
+        QMenu {{ background:rgba(4,12,18,0.97); border:1px solid {HAIR_STRONG}; border-radius:8px;
+                padding:6px; }}
+        QMenu::item {{ padding:5px 18px; border-radius:4px; color:{s}; }}
+        QMenu::item:selected {{ background:rgba(42,212,255,0.12); color:white; }}
+        QMenu::separator {{ height:1px; background:{HAIR}; margin:4px 6px; }}
+        QPushButton {{ background:transparent; color:{t}; border:1px solid {HAIR_STRONG};
+                      border-radius:12px; padding:4px 14px; }}
+        QPushButton:hover {{ border-color:rgba(42,212,255,0.5); color:white; }}
+        QPushButton:pressed {{ background:rgba(42,212,255,0.08); }}
+        QPushButton:checked {{ background:white; color:#0b0f1c; border-color:white; font-weight:600; }}
+        QPushButton:checked:hover {{ background:{c}; border-color:{c}; color:#0b0f1c; }}
         QPushButton::menu-indicator {{ width:0; }}
-        QWidget#segment {{ background:#141415; border-radius:7px; }}
-        QPushButton#segbtn {{ background:transparent; border:none; border-radius:5px;
-                             padding:4px 16px; color:{DIM.name()}; font-weight:600; }}
-        QPushButton#segbtn:checked {{ background:qlineargradient(y1:0,y2:1,stop:0 #5c5c62,stop:1 #4a4a4f);
-                                     color:white; }}
-        QPushButton#slot {{ background:#141415; border:1px solid #0b0b0c; border-radius:5px;
-                           padding:0; color:#5a5a60; font-weight:700; min-width:24px; max-width:24px;
-                           min-height:22px; max-height:22px; }}
-        QPushButton#slot[filled="true"] {{ color:{TEXT.name()}; background:#2e2e32; }}
-        QPushButton#slot[active="true"] {{ color:#111; background:{ACCENT.name()}; }}
-        QPushButton#slot:hover {{ border-color:{ACCENT.name()}; }}
-        QPushButton#store:checked {{ background:#c0262b; color:white; }}
-        QPushButton#solomaster {{ color:#5a5a60; font-weight:700; padding:4px 10px; }}
-        QPushButton#solomaster[armed="true"] {{ color:{SOLO.name()}; }}
-        QPushButton#solomaster[active="true"] {{ background:{SOLO.name()}; color:#111; }}
-        QLabel#lcd {{ background:qlineargradient(y1:0,y2:1,stop:0 #101418,stop:1 #171c21);
-                     color:#9fd0ff; border:1px solid #070708; border-radius:7px; padding:5px 14px;
-                     font-family:{MONO}; font-size:10px; }}
-        QLabel#caption {{ color:{DIM.name()}; font-size:9px; font-weight:700; letter-spacing:1px; }}
-        QComboBox {{ background:qlineargradient(y1:0,y2:1,stop:0 #48484c,stop:1 #3a3a3e);
-                    border:1px solid #141415; border-radius:6px; padding:3px 8px; color:{TEXT.name()}; }}
+        QWidget#segment {{ background:rgba(4,12,18,0.7); border:1px solid {HAIR}; border-radius:13px; }}
+        QPushButton#segbtn {{ background:transparent; border:none; border-radius:10px;
+                             padding:3px 16px; color:{d}; font-weight:500; }}
+        QPushButton#segbtn:hover {{ color:white; }}
+        QPushButton#segbtn:checked {{ background:white; color:#0b0f1c; font-weight:600; }}
+        QPushButton#slot {{ background:transparent; border:1px solid {HAIR}; border-radius:11px;
+                           padding:0; color:#3c5560; font-family:{MONO}; font-size:9px;
+                           min-width:22px; max-width:22px; min-height:22px; max-height:22px; }}
+        QPushButton#slot[filled="true"] {{ color:{t}; border-color:{HAIR_STRONG}; }}
+        QPushButton#slot[active="true"] {{ color:{r}; border-color:{r}; font-weight:700; }}
+        QPushButton#slot:hover {{ border-color:{c}; }}
+        QPushButton#store:checked {{ background:{r}; border-color:{r}; color:white; }}
+        QPushButton#solomaster {{ color:#3c5560; font-weight:700; padding:4px 12px;
+                                 letter-spacing:2px; }}
+        QPushButton#solomaster[armed="true"] {{ color:{SOLO.name()}; border-color:{SOLO.name()}; }}
+        QPushButton#solomaster[active="true"] {{ background:{SOLO.name()}; color:#0b0f1c; }}
+        QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
+                     border-radius:13px; padding:5px 16px; font-family:{MONO}; font-size:10px; }}
+        QLabel#caption {{ color:{d}; font-size:8px; font-weight:600; }}
+        QComboBox {{ background:#030a10; border:1px solid {HAIR}; border-radius:6px; padding:3px 10px;
+                    color:{t}; }}
+        QComboBox:hover, QComboBox:focus {{ border-color:{c}; }}
         QComboBox::drop-down {{ border:none; width:18px; }}
-        QComboBox QAbstractItemView {{ background:#2c2c2f; border:1px solid #111;
-                                      selection-background-color:{ACCENT.name()}; selection-color:#111; }}
-        QGroupBox {{ background:{PANEL.name()}; border:1px solid #161617; border-radius:10px;
-                    margin-top:20px; padding:12px 10px 10px 10px; }}
-        QGroupBox::title {{ subcontrol-origin:margin; left:6px; top:2px; color:{DIM.name()};
-                           font-size:9px; font-weight:700; }}
-        QScrollBar:horizontal {{ background:transparent; height:8px; margin:2px 0 0 0; }}
-        QScrollBar::handle:horizontal {{ background:#4a4a4f; border-radius:3px; min-width:40px; }}
-        QScrollBar::handle:horizontal:hover {{ background:#6a6a70; }}
-        QScrollBar:vertical {{ background:transparent; width:8px; }}
-        QScrollBar::handle:vertical {{ background:#4a4a4f; border-radius:3px; min-height:40px; }}
+        QComboBox QAbstractItemView {{ background:#040e16; border:1px solid {HAIR_STRONG};
+                                      selection-background-color:rgba(42,212,255,0.15);
+                                      selection-color:white; outline:0; }}
+        QGroupBox {{ background:qlineargradient(y1:0,y2:1,stop:0 {INK},stop:0.7 {INK_DEEP});
+                    border:1px solid {HAIR}; border-radius:8px;
+                    margin-top:22px; padding:14px 12px 12px 12px; }}
+        QGroupBox::title {{ subcontrol-origin:margin; left:4px; top:3px; color:{d};
+                           font-size:8px; font-weight:600; }}
+        QCheckBox::indicator {{ width:13px; height:13px; border:1px solid {HAIR_STRONG};
+                               border-radius:7px; background:transparent; }}
+        QCheckBox::indicator:checked {{ background:{c}; border-color:{c}; }}
+        QScrollBar:horizontal {{ background:transparent; height:6px; margin:2px 0 0 0; }}
+        QScrollBar::handle:horizontal {{ background:rgba(42,212,255,0.25); border-radius:3px;
+                                        min-width:40px; }}
+        QScrollBar::handle:horizontal:hover {{ background:{c}; }}
+        QScrollBar:vertical {{ background:transparent; width:6px; }}
+        QScrollBar::handle:vertical {{ background:rgba(42,212,255,0.25); border-radius:3px;
+                                      min-height:40px; }}
         QScrollBar::add-line, QScrollBar::sub-line {{ width:0; height:0; }}
         QScrollBar::add-page, QScrollBar::sub-page {{ background:none; }}
     """)

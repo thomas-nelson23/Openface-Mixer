@@ -109,7 +109,7 @@ class MatrixView(QWidget):
             y = self.HH + ri * self.CH
             if pair == sel:
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(240, 164, 58, 45))
+                p.setBrush(QColor(42, 212, 255, 30))
                 p.drawRoundedRect(QRectF(0, y + 1, self.LW - 6, self.CH - 2), 4, 4)
             p.setPen(ACCENT if pair == sel else (txt if self.hover and self.hover[1] == ri else dim))
             p.drawText(QRectF(4, y, self.LW - 8, self.CH), Qt.AlignVCenter | Qt.AlignLeft, name)
@@ -119,16 +119,16 @@ class MatrixView(QWidget):
                 p.setPen(Qt.NoPen)
                 if g is None:
                     if pair == sel:
-                        p.setBrush(QColor("#3a3328"))
+                        p.setBrush(QColor("#06202e"))
                     else:
-                        p.setBrush(QColor("#28282b") if (ci + ri) % 2 else QColor("#252528"))
+                        p.setBrush(QColor("#04121b") if (ci + ri) % 2 else QColor("#03101a"))
                     p.drawRoundedRect(r, 3, 3)
                 else:
                     k = 0.45 + 0.55 * min(1.0, db2pos(g) / db2pos(0.0))
                     base = KIND_COLOR[self.cols[ci][0]]
                     p.setBrush(QColor(int(base.red() * k), int(base.green() * k), int(base.blue() * k)))
                     p.drawRoundedRect(r, 3, 3)
-                    p.setPen(QColor("white"))
+                    p.setPen(QColor("#021012"))
                     p.drawText(r, Qt.AlignCenter, fmt_db(g))
                 if self.hover == (ci, ri):
                     p.setPen(QPen(ACCENT, 1.5))

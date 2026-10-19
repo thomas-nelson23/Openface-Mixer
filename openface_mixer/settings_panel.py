@@ -34,7 +34,7 @@ def udev_rule_hint(dev):
 
 def hw_state_text(dev, state):
     short = dev.name.replace("RME ", "")
-    red = "<span style='color:#ff6b5b'>{}</span>"
+    red = "<span style='color:#ff2a4f'>{}</span>"
     hint = dev.missing_hint() if state == "no-device" else ""
     return {
         "starting": f"Connecting to the {short}…",
@@ -45,8 +45,8 @@ def hw_state_text(dev, state):
             f"The {short} driver refuses mixer changes while playback and recording are open in "
             "two different programs. Let one program (PipeWire or JACK) use both."
             if dev.bus == "PCIe" else f"The {short} mixer interface is in use by another program."),
-        "active": "<span style='color:#34c759'>Hardware mixer active</span>",
-        "no-nodes": f"<span style='color:#ffd60a'>Hardware mixer active, but this mix needs "
+        "active": "<span style='color:#2ad4ff'>Hardware mixer active</span>",
+        "no-nodes": f"<span style='color:#ffb020'>Hardware mixer active, but this mix needs "
                     f"more than {dev.max_routes} routes; some sends are missing.</span>",
         "error": red.format(f"{dev.bus} error talking to the {short}; retrying."),
         "wrong-driver": red.format(
@@ -56,10 +56,10 @@ def hw_state_text(dev, state):
 
 
 class Led(QLabel):
-    COLORS = {"No Lock": "#5b5b60", "Lock": "#ffd60a", "Sync": "#34c759"}
+    COLORS = {"No Lock": "#2a4552", "Lock": "#ffb020", "Sync": "#2ad4ff"}
 
     def set_state(self, s):
-        c = self.COLORS.get(s, "#5b616a")
+        c = self.COLORS.get(s, "#2a4552")
         self.setText(f"<span style='color:{c}'>●</span> {s or '—'}")
 
 
@@ -117,7 +117,7 @@ class SettingsPanel(QWidget):
         self._build_updates(lay)
 
         note = QLabel(
-            f"<span style='color:#6e6e73;font-size:9px'>All mixing happens in the {dev.name}'s "
+            f"<span style='color:#58707a;font-size:9px'>All mixing happens in the {dev.name}'s "
             "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
             f"running with the computer idle or the engine stopped.<br><br>Playback "
             f"{dev.sink_channels} = the "
@@ -142,7 +142,7 @@ class SettingsPanel(QWidget):
         dl.addWidget(self.scale_combo, 0, 1)
         self.scale_note = QLabel("Scales the whole window, on top of the desktop's display scale.")
         self.scale_note.setWordWrap(True)
-        self.scale_note.setStyleSheet("color:#6e6e73;font-size:9px")
+        self.scale_note.setStyleSheet("color:#58707a;font-size:9px")
         dl.addWidget(self.scale_note, 1, 0, 1, 2)
         self.scale_restart = QPushButton("Restart to apply")
         self.scale_restart.clicked.connect(self.restart_requested.emit)
@@ -245,7 +245,7 @@ class SettingsPanel(QWidget):
         ports = QGroupBox("OPTICAL PORTS")
         pl = QGridLayout(ports)
         for c, h in enumerate(["", "In format", "In status", "In rate", "Out format"]):
-            lbl = QLabel(f"<span style='color:#8e8e93;font-size:9px'>{h}</span>")
+            lbl = QLabel(f"<span style='color:#7d9299;font-size:9px'>{h}</span>")
             pl.addWidget(lbl, 0, c)
         self.port_widgets = []
         for i in range(4):
@@ -336,7 +336,7 @@ class SettingsPanel(QWidget):
         """st: the device's decode_status() dict, or None while it is not connected."""
         if st is None:
             self.cur_src.setText("—")
-            self.rate.setText(f"<span style='color:#ff6b5b'>{self.dev.name.replace('RME ', '')} "
+            self.rate.setText(f"<span style='color:#ff2a4f'>{self.dev.name.replace('RME ', '')} "
                               "not connected</span>")
             for led, rate in self.sync_widgets:
                 led.set_state(None)
@@ -501,13 +501,13 @@ class SettingsPanel(QWidget):
             return
         if not usable:
             self.rd_info.setText(
-                "<span style='color:#ff6b5b'>Settings off: snd-hdspm can't run this card."
+                "<span style='color:#ff2a4f'>Settings off: snd-hdspm can't run this card."
                 "</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == raydat.HDSPE else "snd-hdspm driver"
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
-            self.rd_info.setText(f"<span style='color:#8e8e93'>{info}</span>")
+            self.rd_info.setText(f"<span style='color:#7d9299'>{info}</span>")
         self.cur_src.setText(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}
@@ -539,7 +539,7 @@ class SettingsPanel(QWidget):
         self._updating = True
         try:
             if ctrls is None:
-                self.rate.setText("<span style='color:#ff6b5b'>Digiface not found</span>")
+                self.rate.setText("<span style='color:#ff2a4f'>Digiface not found</span>")
                 return
             src = ctrls.get("Sync Source")
             if src:
@@ -591,8 +591,8 @@ class SettingsPanel(QWidget):
             self.profile.setText("Digiface not present in PipeWire")
             self.pro_btn.setVisible(False)
             return
-        ok = "<span style='color:#4cd964'>inputs available for recording</span>" if has_in else \
-            "<span style='color:#ffcc00'>no input device — apps can't record the inputs " \
+        ok = "<span style='color:#2ad4ff'>inputs available for recording</span>" if has_in else \
+            "<span style='color:#ffb020'>no input device — apps can't record the inputs " \
             "(monitoring still works)</span>"
         self.profile.setText(f"Active: <b>{profile}</b><br>{ok}")
         self.pro_btn.setVisible(not has_in)
