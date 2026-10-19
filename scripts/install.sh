@@ -27,6 +27,10 @@ rm -rf "$SHARE"
 mkdir -p "$SHARE"
 cp -r openface_mixer "$SHARE/"
 find "$SHARE" -name __pycache__ -prune -exec rm -rf {} +
+# where this was installed from, for the GUI's update button
+if commit=$(git rev-parse HEAD 2>/dev/null); then
+    printf '%s\n%s\n' "$PWD" "$commit" > "$SHARE/install-source"
+fi
 install -Dm644 packaging/openface-mixer.desktop "$PREFIX/share/applications/openface-mixer.desktop"
 install -Dm644 packaging/openface-mixer-engine.service "$UNIT_DIR/openface-mixer-engine.service"
 install -Dm644 packaging/openface-mixer-engine@.service "$UNIT_DIR/openface-mixer-engine@.service"

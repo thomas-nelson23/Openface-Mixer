@@ -1,5 +1,8 @@
 """Right-hand panel: device choice, the device's clock/port settings, card profile and hardware
 mixer status."""
+import html
+import threading
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout,
@@ -8,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from . import fireface800 as ff800
 from . import fireface802 as ff
-from . import raydat
+from . import raydat, updater
 from .config import UI_SCALES
 from .devices import DEVICES
 from .hardware import Hardware, set_card_profile
@@ -65,6 +68,7 @@ class SettingsPanel(QWidget):
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
     ui_scale_changed = Signal(float) # chosen scale, applied when the application restarts
     restart_requested = Signal()
+    _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
 
     def __init__(self, hw, dev, st, ui_scale=1.0, parent=None):
         super().__init__(parent)
@@ -110,6 +114,7 @@ class SettingsPanel(QWidget):
         lay.addWidget(eng)
 
         self._build_ui_scale(lay, ui_scale)
+        self._build_updates(lay)
 
         note = QLabel(
             f"<span style='color:#6e6e73;font-size:9px'>All mixing happens in the {dev.name}'s "
@@ -159,6 +164,67 @@ class SettingsPanel(QWidget):
                                      "display scale.")
         self.scale_restart.setVisible(changed)
         self.ui_scale_changed.emit(scale)
+
+    def _build_updates(self, lay):
+        box = QGroupBox("UPDATES")
+        ul = QVBoxLayout(box)
+        self.update_label = QLabel("Check GitHub for a newer Openface Mixer.")
+        self.update_label.setWordWrap(True)
+        ul.addWidget(self.update_label)
+        self.update_btn = QPushButton("Check for updates")
+        self.update_btn.clicked.connect(self._update_clicked)
+        ul.addWidget(self.update_btn)
+        lay.addWidget(box)
+        self._source = updater.install_source()
+        self._pending = []
+        self._update_result.connect(self._update_finished)
+        if self._source is None:
+            self.update_label.setText(updater.manual_hint())
+            self.update_btn.setVisible(False)
+
+    def _update_clicked(self):
+        src, installed = self._source
+        if self._pending:
+            if QMessageBox.question(
+                    self, "Update Openface Mixer",
+                    f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
+                    "up first, and the engines restart with the new version.") != QMessageBox.Yes:
+                return
+            step, job, text = "update", lambda: updater.update(src), "Updating…"
+        else:
+            step, job, text = "check", lambda: updater.check(src, installed), "Checking…"
+        self.update_btn.setEnabled(False)
+        self.update_label.setText(text)
+
+        def run():
+            try:
+                result = job()
+            except Exception as e:  # noqa: BLE001 - shown to the user
+                result = e if isinstance(e, updater.UpdateError) else updater.UpdateError(str(e))
+            try:
+                self._update_result.emit(step, result)
+            except RuntimeError:    # the panel went away (device switch) while this ran
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_finished(self, step, result):
+        self.update_btn.setEnabled(True)
+        if isinstance(result, updater.UpdateError):
+            self.update_label.setText(str(result).splitlines()[0])
+            if step == "update":
+                QMessageBox.warning(self, "Update Openface Mixer", str(result))
+            return
+        if step == "update":
+            self.restart_requested.emit()
+            return
+        self._pending = result
+        if result:
+            latest = "<br>".join(f"• {html.escape(s)}" for s in result[:5])
+            more = f"<br>…and {len(result) - 5} more" if len(result) > 5 else ""
+            self.update_label.setText(f"{len(result)} update(s) on GitHub:<br>{latest}{more}")
+            self.update_btn.setText("Update and restart")
+        else:
+            self.update_label.setText("Openface Mixer is up to date.")
 
     # ------------------------------------------------------------------ Digiface USB
     def _build_digiface(self, lay):
