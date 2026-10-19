@@ -17,6 +17,8 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
   Pick an output, and the input and playback faders set the submix sent to it.
 - **Matrix view:** route any input or playback channel to any output with a click.
 - **Presets:** 8 snapshot slots, like TotalMix, plus export and import of mixes as files.
+- **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
+  desktop's display scale. Takes effect when Openface Mixer restarts.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
@@ -212,6 +214,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
 | `~/.config/openface-mixer/raydat/` | The same for the HDSPe RayDAT |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale, shared by all devices |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
