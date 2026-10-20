@@ -67,11 +67,11 @@ COMBOS = ("clock", "pref", "internal", "spdif_in")
 TOGGLES = (                               # (control, label); each shows when the driver has it
     ("S/PDIF Out Optical", "S/PDIF out optical (on ADAT 4)"),
     ("S/PDIF Out Professional", "S/PDIF out professional"),
-    ("Single Speed WordClock Out", "Word clock out always single speed"),     # snd-hdspm
-    ("Single Speed WordClk Out", "Word clock out always single speed"),       # snd-hdspe
+    ("Single Speed WordClock Out", "Word clock out: single speed"),  # snd-hdspm
+    ("Single Speed WordClk Out", "Word clock out: single speed"),    # snd-hdspe
     ("Clear TMS", "Clear track marker (TMS) bits"),
-    ("ADAT1 Internal", "ADAT 1 in from internal AEB/TEB board"),
-    ("ADAT2 Internal", "ADAT 2 in from internal AEB/TEB board"),
+    ("ADAT1 Internal", "ADAT 1 from AEB/TEB board"),
+    ("ADAT2 Internal", "ADAT 2 from AEB/TEB board"),
 )
 STATUS_INPUTS = (                         # (label, snd-hdspm sync check, frequency control)
     ("Word Clock", "WC SyncCheck", "WC Frequency"),

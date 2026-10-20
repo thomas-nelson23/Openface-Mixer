@@ -29,7 +29,7 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
-from .theme import ACCENT, apply_theme
+from .theme import ACCENT, apply_theme, compact_boxes
 from .widgets import Row, Strip
 
 
@@ -86,7 +86,8 @@ class MainWindow(QMainWindow):
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
-        self.settings.layout().insertWidget(self.settings.layout().count() - 2, self.control)
+        self.settings.layout().insertWidget(self.settings.layout().count() - 1, self.control)
+        compact_boxes(self.settings)
         self.arc = ArcLink(self)
         self.arc.key.connect(self.arc_key)
         self.arc.encoder.connect(self.arc_encoder)
