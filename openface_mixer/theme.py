@@ -42,6 +42,21 @@ def load_fonts():
         QFontDatabase.addApplicationFont(str(f))
 
 
+def compact_boxes(panel):
+    """Tight margins in the settings panel's boxes (titles sit inside them, see QGroupBox)."""
+    from PySide6.QtWidgets import QGridLayout, QGroupBox
+    for box in panel.findChildren(QGroupBox):
+        lay = box.layout()
+        if lay is None:
+            continue
+        lay.setContentsMargins(10, 2, 10, 8)
+        if isinstance(lay, QGridLayout):
+            lay.setHorizontalSpacing(8)
+            lay.setVerticalSpacing(4)
+        else:
+            lay.setSpacing(4)
+
+
 def apply_theme(app):
     load_fonts()
     app.setStyle("Fusion")
@@ -98,7 +113,7 @@ def apply_theme(app):
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
                      border-radius:13px; padding:5px 16px; font-family:{MONO}; font-size:10px; }}
         QLabel#caption {{ color:{d}; font-size:8px; font-weight:600; }}
-        QComboBox {{ background:#030a10; border:1px solid {HAIR}; border-radius:6px; padding:3px 10px;
+        QComboBox {{ background:#030a10; border:1px solid {HAIR}; border-radius:6px; padding:2px 8px;
                     color:{t}; }}
         QComboBox:hover, QComboBox:focus {{ border-color:{c}; }}
         QComboBox::drop-down {{ border:none; width:18px; }}
@@ -107,9 +122,12 @@ def apply_theme(app):
                                       selection-color:white; outline:0; }}
         QGroupBox {{ background:qlineargradient(y1:0,y2:1,stop:0 {INK},stop:0.7 {INK_DEEP});
                     border:1px solid {HAIR}; border-radius:8px;
-                    margin-top:22px; padding:14px 12px 12px 12px; }}
-        QGroupBox::title {{ subcontrol-origin:margin; left:4px; top:3px; color:{d};
-                           font-size:8px; font-weight:600; }}
+                    margin-top:0; padding-top:20px; }}
+        QGroupBox::title {{ subcontrol-origin:padding; subcontrol-position:top left; left:10px;
+                           top:7px; color:{d}; font-size:8px; font-weight:600; }}
+        QGroupBox QPushButton {{ padding:3px 6px; }}
+        QGroupBox QComboBox {{ padding:2px 4px 2px 8px; }}
+        QGroupBox QComboBox::drop-down {{ width:12px; }}
         QCheckBox::indicator {{ width:13px; height:13px; border:1px solid {HAIR_STRONG};
                                border-radius:7px; background:transparent; }}
         QCheckBox::indicator:checked {{ background:{c}; border-color:{c}; }}

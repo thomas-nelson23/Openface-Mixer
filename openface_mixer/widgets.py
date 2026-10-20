@@ -295,12 +295,13 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
 
 
 def label_style(col, sel):
-    """Channel name tag: bright fill with dark bold text; the selected submix turns white."""
-    base = "border-radius:2px;padding:0 1px;font-size:9px;font-weight:700;border:1px solid #01070b;"
+    """Channel name tag: dark tag, white monospace text, a line in the channel's colour
+    underneath; the selected submix turns white."""
+    base = (f"border:none;border-radius:2px;padding:0 1px;font-family:{MONO};font-size:9px;"
+            f"font-weight:700;border-bottom:2px solid {col.name()};")
     if sel:
         return base + "background:white;color:#021012;"
-    return (base + f"background:qlineargradient(y1:0,y2:1,stop:0 {col.lighter(112).name()},"
-            f"stop:1 {col.darker(115).name()});color:#021012;")
+    return base + "background:#01070b;color:white;"
 
 
 def lcd_style(bg="rgba(1,7,11,0.7)", fg="#9cc7cf"):

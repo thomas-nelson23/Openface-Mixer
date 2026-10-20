@@ -75,10 +75,10 @@ class SettingsPanel(QWidget):
         self.hw = hw
         self.dev = dev
         self.st = st
-        self.setFixedWidth(310)
+        self.setFixedWidth(264)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 0, 0, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(8, 0, 0, 0)
+        lay.setSpacing(6)
 
         box = QGroupBox("DEVICE")
         bl = QVBoxLayout(box)
@@ -116,15 +116,12 @@ class SettingsPanel(QWidget):
         self._build_ui_scale(lay, ui_scale)
         self._build_updates(lay)
 
-        note = QLabel(
-            f"<span style='color:#58707a;font-size:9px'>All mixing happens in the {dev.name}'s "
-            "own DSP, like TotalMix: input monitoring has no added latency and the mix keeps "
-            f"running with the computer idle or the engine stopped.<br><br>Playback "
-            f"{dev.sink_channels} = the "
-            "<i>Openface Mixer Playback</i> sink. Other playback channels: send apps to the "
-            "interface's own output channels (Pro Audio profile) with qpwgraph/Helvum.</span>")
-        note.setWordWrap(True)
-        lay.addWidget(note)
+        eng.setToolTip(
+            f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
+            "has no added latency and the mix keeps running with the computer idle or the "
+            f"engine stopped.\n\nPlayback {dev.sink_channels} = the Openface Mixer Playback "
+            "sink. Other playback channels: send apps to the interface's own output channels "
+            "(Pro Audio profile) with qpwgraph/Helvum.")
         lay.addStretch()
 
     def _build_ui_scale(self, lay, scale):
@@ -140,8 +137,11 @@ class SettingsPanel(QWidget):
         self.scale_combo.setCurrentIndex(self._scale_index(scale))
         self.scale_combo.activated.connect(self._scale_activated)
         dl.addWidget(self.scale_combo, 0, 1)
-        self.scale_note = QLabel("Scales the whole window, on top of the desktop's display scale.")
+        self.scale_combo.setToolTip("Scales the whole window, on top of the desktop's display "
+                                    "scale.")
+        self.scale_note = QLabel("Restart Openface Mixer to apply the new scale.")
         self.scale_note.setWordWrap(True)
+        self.scale_note.setVisible(False)
         self.scale_note.setStyleSheet("color:#58707a;font-size:9px")
         dl.addWidget(self.scale_note, 1, 0, 1, 2)
         self.scale_restart = QPushButton("Restart to apply")
@@ -159,9 +159,7 @@ class SettingsPanel(QWidget):
     def _scale_activated(self, i):
         scale = float(self.scale_combo.itemData(i))
         changed = abs(scale - self._scale_at_start) > 1e-6
-        self.scale_note.setText("Restart Openface Mixer to apply the new scale." if changed
-                                else "Scales the whole window, on top of the desktop's "
-                                     "display scale.")
+        self.scale_note.setVisible(changed)
         self.scale_restart.setVisible(changed)
         self.ui_scale_changed.emit(scale)
 
@@ -295,7 +293,7 @@ class SettingsPanel(QWidget):
             combo.activated.connect(lambda i, c=combo, k=key: self._set_hw(k, c.itemData(i)))
             ol.addWidget(QLabel(label), r, 0)
             ol.addWidget(combo, r, 1)
-        single = QCheckBox("Word clock out always single speed")
+        single = QCheckBox("Word clock out: single speed")
         single.setChecked(hw["word_single"])
         single.toggled.connect(lambda on: self._set_hw("word_single", on))
         ol.addWidget(single, len(rows), 0, 1, 2)
@@ -386,7 +384,7 @@ class SettingsPanel(QWidget):
         r = len(rows)
         for key, label in (("emphasis", "S/PDIF out emphasis"),
                            ("non_audio", "S/PDIF out non-audio"),
-                           ("word_single", "Word clock out always single speed")):
+                           ("word_single", "Word clock out: single speed")):
             box = QCheckBox(label)
             box.toggled.connect(lambda on, k=key: self._set_hw(k, on))
             ol.addWidget(box, r, 0, 1, 2)
