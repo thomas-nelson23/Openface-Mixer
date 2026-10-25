@@ -93,7 +93,7 @@ def compact_boxes(panel):
         lay = box.layout()
         if lay is None:
             continue
-        lay.setContentsMargins(px(11), px(2), px(11), px(9))
+        lay.setContentsMargins(px(16), px(2), px(16), px(12))
         if isinstance(lay, QGridLayout):
             lay.setHorizontalSpacing(px(6))
             lay.setVerticalSpacing(px(4))
@@ -177,11 +177,15 @@ def stylesheet():
         QComboBox QAbstractItemView {{ background:#040e16; border:1px solid {HAIR_STRONG};
                                       selection-background-color:rgba(42,212,255,0.15);
                                       selection-color:white; outline:0; padding:{p(4)}px; }}
-        QGroupBox {{ background:{INK_DEEP}; border:1px solid {HAIR}; border-radius:{p(8)}px;
-                    margin-top:0; padding-top:{p(20)}px; }}
+        QFrame#sidebar {{ background:#040c13; border-left:1px solid {HAIR_STRONG}; }}
+        QToolButton#sidebarclose {{ background:transparent; border:none; color:{MUTED};
+                                   font-size:{p(16)}px; padding:0 {p(6)}px; }}
+        QToolButton#sidebarclose:hover {{ color:white; }}
+        QGroupBox {{ background:transparent; border:none; border-top:1px solid {HAIR};
+                    border-radius:0; margin-top:0; padding-top:{p(22)}px; }}
         QGroupBox::title {{ subcontrol-origin:padding; subcontrol-position:top left;
-                           left:{p(12)}px; top:{p(8)}px; color:{d}; font-size:{p(8)}px;
-                           font-weight:600; }}
+                           left:{p(16)}px; top:{p(9)}px; color:{d}; font-size:{p(8)}px;
+                           font-weight:600; letter-spacing:{p(1.5)}px; }}
         QGroupBox QPushButton {{ padding:{p(3)}px {p(10)}px; border-radius:{p(6)}px; }}
         QGroupBox QPushButton:checked {{ background:{c}; border-color:{c}; color:#021012; }}
         QGroupBox QComboBox {{ padding:{p(2)}px {p(2)}px {p(2)}px {p(7)}px; }}

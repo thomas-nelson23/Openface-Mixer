@@ -3,10 +3,10 @@ mixer status."""
 import html
 import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QGridLayout, QGroupBox, QLabel, QMessageBox, QPushButton, QVBoxLayout,
-    QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import fireface800 as ff800
@@ -15,7 +15,7 @@ from . import raydat, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
-from .theme import key_label, px
+from .theme import MUTED, caption_html, key_label, px
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules"}
@@ -64,6 +64,55 @@ class Led(QLabel):
         self.setText(f"<span style='color:{c}'>●</span> {s or '—'}")
 
 
+class Sidebar(QFrame):
+    """The settings panel docked to the window's right edge: one dark column with the sections
+    stacked and divided by hairlines, slid in and out by the Settings button."""
+    closed = Signal()
+    WIDTH = 268
+
+    def __init__(self, panel, parent=None):
+        super().__init__(parent)
+        self.setObjectName("sidebar")
+        self.full_width = px(self.WIDTH) + px(8)     # room for the scroll bar
+        self.setFixedWidth(self.full_width)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        head = QHBoxLayout()
+        head.setContentsMargins(px(16), px(10), px(8), px(6))
+        title = QLabel(caption_html("Settings"))
+        head.addWidget(title, 1)
+        close = QToolButton()
+        close.setText("×")
+        close.setObjectName("sidebarclose")
+        close.setCursor(Qt.PointingHandCursor)
+        close.setToolTip("Hide the settings (the Settings button brings them back)")
+        close.clicked.connect(self.closed.emit)
+        head.addWidget(close)
+        lay.addLayout(head)
+        # the panel scrolls instead of squashing its sections when the window is short
+        scroll = QScrollArea()
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        lay.addWidget(scroll, 1)
+        self._anim = QPropertyAnimation(self, b"maximumWidth", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._open = True
+
+    def set_open(self, on):
+        if on == self._open:
+            return
+        self._open = on
+        self.setMinimumWidth(0)
+        self._anim.stop()
+        self._anim.setStartValue(self.width())
+        self._anim.setEndValue(self.full_width if on else 0)
+        self._anim.start()
+
+
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
@@ -77,10 +126,10 @@ class SettingsPanel(QWidget):
         self.hw = hw
         self.dev = dev
         self.st = st
-        self.setFixedWidth(px(264))
+        self.setFixedWidth(px(268))
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(px(8), 0, 0, 0)
-        lay.setSpacing(px(6))
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
 
         box = QGroupBox("DEVICE")
         bl = QVBoxLayout(box)

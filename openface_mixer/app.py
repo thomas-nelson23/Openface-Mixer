@@ -28,7 +28,7 @@ from .model import (
     set_strip_color, set_strip_db, speed_mode, strip_channels, strip_color, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .settings_panel import SettingsPanel
+from .settings_panel import SettingsPanel, Sidebar
 from .theme import ACCENT, CHANNEL_COLORS, KIND_COLOR, apply_theme, compact_boxes, px
 from .widgets import Row, Strip
 
@@ -52,7 +52,12 @@ class MainWindow(QMainWindow):
         self._last_meter = time.monotonic()
 
         central = QWidget()
-        root = QVBoxLayout(central)
+        outer = QHBoxLayout(central)          # the mixer, then the settings sidebar
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        main = QWidget()
+        outer.addWidget(main, 1)
+        root = QVBoxLayout(main)
         root.setContentsMargins(px(12), px(10), px(12), px(10))
         root.setSpacing(px(10))
         root.addLayout(self._build_top_bar())
@@ -96,16 +101,11 @@ class MainWindow(QMainWindow):
         self.arc.encoder.connect(self.arc_encoder)
         self.arc.status_changed.connect(self.arc_status)
         self._talkback_pressed = None     # (time, was it switched on by this press)
-        # the panel scrolls instead of squashing its boxes when the window is short
-        self.settings_scroll = QScrollArea()
-        self.settings_scroll.setWidget(self.settings)
-        self.settings_scroll.setWidgetResizable(True)
-        self.settings_scroll.setFrameShape(QFrame.NoFrame)
-        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.settings_scroll.setFixedWidth(self.settings.width() + px(12))
-        self.settings_btn.toggled.connect(self.settings_scroll.setVisible)
-        body.addWidget(self.settings_scroll)
         root.addLayout(body, 1)
+        self.sidebar = Sidebar(self.settings)
+        self.sidebar.closed.connect(lambda: self.settings_btn.setChecked(False))
+        self.settings_btn.toggled.connect(self.sidebar.set_open)
+        outer.addWidget(self.sidebar)
         self.setCentralWidget(central)
 
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         QTimer(self, interval=500, timeout=self.poll_engine).start()
         QTimer(self, interval=3000, timeout=self.poll_profile).start()
         self.poll_profile()
-        self.setMinimumSize(px(1180), px(640))
+        self.setMinimumSize(px(1190), px(640))
         self.resize(px(1600), px(960))
 
     # ------------------------------------------------------------------ top bar

@@ -308,14 +308,13 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
 
 
 def label_style(col, sel):
-    """Channel name tag: dark tag faintly tinted with the channel's colour, white text, a line
-    in the colour underneath; the selected submix turns white."""
+    """Channel name tag: dark tag, white text, a bar in the channel's colour underneath; the
+    selected submix turns white."""
     base = (f"border:none;border-radius:{px(3)}px;padding:0 {px(2)}px;"
             f"border-bottom:{px(2)}px solid {col.name()};")
     if sel:
         return base + "background:#f5f8fa;color:#021012;"
-    tint = f"rgba({col.red()},{col.green()},{col.blue()},0.16)"
-    return base + f"background:{tint};color:#eef6f8;"
+    return base + "background:#01070b;color:#eef6f8;"
 
 
 def lcd_style(bg="rgba(1,7,11,0.7)", fg="#9cc7cf"):
