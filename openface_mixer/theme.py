@@ -110,6 +110,9 @@ def apply_theme(app):
                                  letter-spacing:2px; }}
         QPushButton#solomaster[armed="true"] {{ color:{SOLO.name()}; border-color:{SOLO.name()}; }}
         QPushButton#solomaster[active="true"] {{ background:{SOLO.name()}; color:#0b0f1c; }}
+        QPushButton#namesbtn {{ color:#3c5560; font-weight:700; padding:4px 12px;
+                               letter-spacing:2px; }}
+        QPushButton#namesbtn:checked {{ background:white; color:#0b0f1c; border-color:white; }}
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
                      border-radius:13px; padding:5px 16px; font-family:{MONO}; font-size:10px; }}
         QLabel#caption {{ color:{d}; font-size:8px; font-weight:600; }}

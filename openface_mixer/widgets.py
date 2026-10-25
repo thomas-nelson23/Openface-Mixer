@@ -3,7 +3,7 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
     QWidget,
@@ -332,9 +332,11 @@ class Strip(QFrame):
     settings_requested = Signal(object)  # global QPoint below the settings button
 
     def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
-                 show_solo=False, show_settings=False, parent=None):
+                 show_solo=False, show_settings=False, standard=None, parent=None):
         super().__init__(parent)
         self.key = key
+        self.name = title                    # shown name (custom or standard), unshortened
+        self.standard = standard or title    # the standard name, e.g. "AD1 3/4"
         self.kind = kind
         self.channels = channels
         self.group = 0
@@ -345,9 +347,10 @@ class Strip(QFrame):
         lay.setContentsMargins(3, 4, 3, 4)
         lay.setSpacing(3)
 
-        self.title = QPushButton(title)
+        self.title = QPushButton()
         self.title.setFixedHeight(20)
         self.title.setMinimumWidth(0)
+        self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
         self.title.clicked.connect(self.clicked.emit)
         # channel settings (TotalMix's wrench): phase, level, 48V, ... where the device has them
@@ -365,6 +368,7 @@ class Strip(QFrame):
         title_row.addWidget(self.settings_btn)
         self.settings_btn.setVisible(show_settings)
         lay.addLayout(title_row)
+        self._set_title(show_settings)
 
         # pan knob with its value beside it, as Pro Tools shows "<64" / "64>"
         self.pan = Knob()
@@ -424,6 +428,16 @@ class Strip(QFrame):
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.meter.peak_changed.connect(self._show_peak)
         self.set_selected(False)
+
+    def _set_title(self, with_settings):
+        """Shorten a long (custom) name to fit the tag; the tooltip has it in full."""
+        f = QFont(MONO.split(",")[0])
+        f.setPixelSize(9)
+        f.setBold(True)
+        width = self.WIDTH - 8 - (15 if with_settings else 0)
+        self.title.setText(QFontMetrics(f).elidedText(self.name, Qt.ElideRight, width))
+        self.title.setToolTip(self.name if self.name == self.standard
+                              else f"{self.name} ({self.standard})")
 
     def _show_peak(self, db):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")

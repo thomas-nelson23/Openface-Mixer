@@ -20,9 +20,9 @@ class MatrixView(QWidget):
 
     def rebuild(self):
         w = self.win
-        self.cols = [("in", s.channels, s.title.text()) for s in w.row_in.strips] + \
-                    [("play", s.channels, s.title.text()) for s in w.row_play.strips]
-        self.rows = [(s.pair, s.title.text()) for s in w.row_out.strips]
+        self.cols = [("in", s.channels, s.name) for s in w.row_in.strips] + \
+                    [("play", s.channels, s.name) for s in w.row_play.strips]
+        self.rows = [(s.pair, s.name) for s in w.row_out.strips]
         self.n_in_cols = len(w.row_in.strips)
         self.setFixedSize(self._x(len(self.cols)) + 2, self.HH + len(self.rows) * self.CH + 2)
         self.update()
@@ -104,7 +104,8 @@ class MatrixView(QWidget):
                        "PLAYBACK")
         for ci, (_, _, name) in enumerate(self.cols):
             p.setPen(txt if self.hover and self.hover[0] == ci else dim)
-            p.drawText(QRectF(self._x(ci), 18, self.CW, self.HH - 20), Qt.AlignCenter, name)
+            p.drawText(QRectF(self._x(ci), 18, self.CW, self.HH - 20), Qt.AlignCenter,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.CW - 2))
         for ri, (pair, name) in enumerate(self.rows):
             y = self.HH + ri * self.CH
             if pair == sel:
@@ -112,7 +113,8 @@ class MatrixView(QWidget):
                 p.setBrush(QColor(42, 212, 255, 30))
                 p.drawRoundedRect(QRectF(0, y + 1, self.LW - 6, self.CH - 2), 4, 4)
             p.setPen(ACCENT if pair == sel else (txt if self.hover and self.hover[1] == ri else dim))
-            p.drawText(QRectF(4, y, self.LW - 8, self.CH), Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.drawText(QRectF(4, y, self.LW - 8, self.CH), Qt.AlignVCenter | Qt.AlignLeft,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.LW - 8))
             for ci in range(len(self.cols)):
                 r = QRectF(self._x(ci) + 1, y + 1, self.CW - 2, self.CH - 2)
                 g = self._gain(ci, ri)
