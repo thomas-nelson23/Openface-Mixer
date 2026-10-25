@@ -30,9 +30,16 @@ class CustomNamesTest(unittest.TestCase):
         self.assertEqual(st["icons"], {})
 
     def test_every_listed_icon_is_bundled(self):
-        from openface_mixer.theme import CHANNEL_ICONS, ICON_DIR
-        for name, _label in CHANNEL_ICONS:
-            self.assertTrue((ICON_DIR / f"{name}.svg").is_file(), name)
+        # theme imports Qt, which the test runner may not have: read the list from the source
+        import ast
+        from pathlib import Path
+        pkg = Path(__file__).resolve().parent.parent / "openface_mixer"
+        tree = ast.parse((pkg / "theme.py").read_text())
+        icons = next(ast.literal_eval(node.value) for node in tree.body
+                     if isinstance(node, ast.Assign) and node.targets[0].id == "CHANNEL_ICONS")
+        self.assertGreater(len(icons), 20)
+        for name, _label in icons:
+            self.assertTrue((pkg / "icons" / f"{name}.svg").is_file(), name)
 
     def test_channel_colour(self):
         st = m.default_state()
