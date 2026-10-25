@@ -34,15 +34,30 @@ CHANNEL_COLORS = (
     ("Green", "#56e39f"), ("Teal", "#2ad4ff"), ("Blue", "#4d8dff"), ("Violet", "#a77bff"),
     ("Pink", "#ff7ad9"), ("Grey", "#9cb0b8"),
 )
-# channel icons: (file name in icons/, menu label), in menu order
+# channel icons: (menu section, ((file name in icons/, menu label), ...)), in menu order
 CHANNEL_ICONS = (
-    ("guitar", "Guitar"), ("bass", "Bass"), ("drum", "Drums"), ("mic-vocal", "Vocal"),
-    ("mic", "Microphone"), ("piano", "Keyboard"), ("keyboard-music", "Synth"),
-    ("audio-waveform", "Waveform"), ("laptop", "Computer"), ("monitor", "Desktop"),
-    ("headphones", "Headphones"), ("speaker", "Speakers"), ("volume-2", "Monitor"),
-    ("megaphone", "Talkback"), ("radio", "Radio"), ("phone", "Phone"), ("tv", "TV"),
-    ("video", "Video"), ("film", "Film"), ("gamepad-2", "Game"), ("disc-3", "Disc"),
-    ("audio-lines", "Audio"), ("cable", "Line"), ("usb", "USB"), ("zap", "FX"), ("star", "Star"),
+    ("Instruments", (
+        ("guitar", "Guitar"), ("bass", "Bass"), ("upright-bass", "Upright bass"),
+        ("ukulele", "Ukulele"), ("violin", "Violin"), ("harp", "Harp"), ("piano", "Keyboard"),
+        ("keyboard-music", "Synth"), ("accordion", "Accordion"), ("drum", "Drums"),
+        ("bongos", "Percussion"), ("trumpet", "Trumpet"), ("saxophone", "Sax"),
+        ("flute", "Flute"), ("harmonica", "Harmonica"), ("mic-vocal", "Vocal"),
+        ("mic", "Microphone"), ("music", "Music"),
+    )),
+    ("Studio", (
+        ("circle-dot", "Record"), ("sliders-horizontal", "DAW"), ("amp", "Amp"),
+        ("monitor-speaker", "Monitors"), ("headphones", "Headphones"),
+        ("speaker", "Speakers"), ("volume-2", "Level"), ("megaphone", "Talkback"),
+        ("metronome", "Click"), ("microphone-2", "Podcast"), ("broadcast", "Stream"),
+        ("webcam", "Webcam"), ("vinyl", "Turntable"), ("cassette-tape", "Tape"),
+        ("audio-waveform", "Waveform"), ("audio-lines", "Audio"), ("cable", "Line"),
+        ("usb", "USB"), ("zap", "FX"),
+    )),
+    ("Devices", (
+        ("laptop", "Computer"), ("monitor", "Desktop"), ("phone", "Phone"), ("tv", "TV"),
+        ("radio", "Radio"), ("video", "Video"), ("film", "Film"), ("gamepad-2", "Game"),
+        ("disc-3", "Disc"), ("star", "Star"),
+    )),
 )
 ICON_DIR = Path(__file__).parent / "icons"
 SANS = "Sora"

@@ -550,12 +550,14 @@ class MainWindow(QMainWindow):
         default.triggered.connect(lambda: self.set_color(strip, None))
         icons = menu.addMenu("Icon")
         cur_icon = strip_icon(self.st, strip.key)
-        for name, label in CHANNEL_ICONS:
-            pm = icon_pixmap(name, "#d9eef2", px(16))
-            a = icons.addAction(QIcon(pm) if pm else QIcon(), label)
-            a.setCheckable(True)
-            a.setChecked(cur_icon == name)
-            a.triggered.connect(lambda _=False, n=name: self.set_icon(strip, n))
+        for section, entries in CHANNEL_ICONS:
+            sub = icons.addMenu(section)
+            for name, label in entries:
+                pm = icon_pixmap(name, "#d9eef2", px(16))
+                a = sub.addAction(QIcon(pm) if pm else QIcon(), label)
+                a.setCheckable(True)
+                a.setChecked(cur_icon == name)
+                a.triggered.connect(lambda _=False, n=name: self.set_icon(strip, n))
         icons.addSeparator()
         none = icons.addAction("None")
         none.setCheckable(True)

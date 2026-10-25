@@ -25,8 +25,8 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
 - **Channel names, colours and icons like TotalMix:** right-click a strip → *Rename…* to give
-  it your own name, *Color* to pick a colour for its name tag, and *Icon* for a guitar, bass,
-  drums, vocal, keyboard, synth, computer, headphones, … on the tag (all saved per device). The
+  it your own name, *Color* to pick a colour for its name tag, and *Icon* for one of some fifty
+  instrument, studio and device icons on the tag (all saved per device). The
   **NAMES** button in the top bar switches between your names and the standard ones.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden

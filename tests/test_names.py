@@ -37,8 +37,10 @@ class CustomNamesTest(unittest.TestCase):
         tree = ast.parse((pkg / "theme.py").read_text())
         icons = next(ast.literal_eval(node.value) for node in tree.body
                      if isinstance(node, ast.Assign) and node.targets[0].id == "CHANNEL_ICONS")
-        self.assertGreater(len(icons), 20)
-        for name, _label in icons:
+        names = [name for _section, entries in icons for name, _label in entries]
+        self.assertGreater(len(names), 40)
+        self.assertEqual(len(names), len(set(names)))
+        for name in names:
             self.assertTrue((pkg / "icons" / f"{name}.svg").is_file(), name)
 
     def test_channel_colour(self):
