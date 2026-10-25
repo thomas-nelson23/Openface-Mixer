@@ -15,6 +15,7 @@ from . import raydat, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
+from .theme import key_label, px
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules"}
@@ -67,7 +68,7 @@ class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
-    ui_scale_changed = Signal(float) # chosen scale, applied when the application restarts
+    ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
 
@@ -76,10 +77,10 @@ class SettingsPanel(QWidget):
         self.hw = hw
         self.dev = dev
         self.st = st
-        self.setFixedWidth(264)
+        self.setFixedWidth(px(264))
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setContentsMargins(px(8), 0, 0, 0)
+        lay.setSpacing(px(6))
 
         box = QGroupBox("DEVICE")
         bl = QVBoxLayout(box)
@@ -129,7 +130,7 @@ class SettingsPanel(QWidget):
         self._scale_at_start = scale
         disp = QGroupBox("DISPLAY")
         dl = QGridLayout(disp)
-        dl.addWidget(QLabel("UI scale"), 0, 0)
+        dl.addWidget(key_label("UI scale"), 0, 0)
         self.scale_combo = QComboBox()
         for s in UI_SCALES:
             self.scale_combo.addItem(f"{s * 100:g}%", s)
@@ -138,28 +139,19 @@ class SettingsPanel(QWidget):
         self.scale_combo.setCurrentIndex(self._scale_index(scale))
         self.scale_combo.activated.connect(self._scale_activated)
         dl.addWidget(self.scale_combo, 0, 1)
-        self.scale_combo.setToolTip("Scales the whole window, on top of the desktop's display "
-                                    "scale.")
-        self.scale_note = QLabel("Restart Openface Mixer to apply the new scale.")
-        self.scale_note.setWordWrap(True)
-        self.scale_note.setVisible(False)
-        self.scale_note.setStyleSheet("color:#58707a;font-size:9px")
-        dl.addWidget(self.scale_note, 1, 0, 1, 2)
-        self.scale_restart = QPushButton("Restart to apply")
-        self.scale_restart.clicked.connect(self.restart_requested.emit)
-        self.scale_restart.setVisible(False)
-        dl.addWidget(self.scale_restart, 2, 0, 1, 2)
+        self.scale_combo.setToolTip("Lays the whole window out larger or smaller, on top of the "
+                                    "desktop's display scale. Applies right away.")
         # SHOW: hide whole channel groups (an unused ADAT port, ...) from the mixer and matrix
-        dl.addWidget(QLabel("Show"), 3, 0, 1, 2)
+        dl.addWidget(key_label("Show"), 1, 0, 1, 2)
         show = QGridLayout()
-        show.setHorizontalSpacing(8)
-        show.setVerticalSpacing(2)
+        show.setHorizontalSpacing(px(8))
+        show.setVerticalSpacing(px(3))
         for i, g in enumerate(self.dev.channel_groups()):
             cb = QCheckBox(group_title(g))
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
-        dl.addLayout(show, 4, 0, 1, 2)
+        dl.addLayout(show, 2, 0, 1, 2)
         lay.addWidget(disp)
 
     def _show_toggled(self, group, on):
@@ -175,10 +167,8 @@ class SettingsPanel(QWidget):
 
     def _scale_activated(self, i):
         scale = float(self.scale_combo.itemData(i))
-        changed = abs(scale - self._scale_at_start) > 1e-6
-        self.scale_note.setVisible(changed)
-        self.scale_restart.setVisible(changed)
-        self.ui_scale_changed.emit(scale)
+        if abs(scale - self._scale_at_start) > 1e-6:
+            self.ui_scale_changed.emit(scale)
 
     def _build_updates(self, lay):
         box = QGroupBox("UPDATES")
@@ -245,14 +235,14 @@ class SettingsPanel(QWidget):
     def _build_digiface(self, lay):
         clock = QGroupBox("CLOCK")
         cl = QGridLayout(clock)
-        cl.addWidget(QLabel("Clock source"), 0, 0)
+        cl.addWidget(key_label("Clock source"), 0, 0)
         self.sync_src = QComboBox()
         self.sync_src.activated.connect(lambda i: self._write("Sync Source", i))
         cl.addWidget(self.sync_src, 0, 1)
-        cl.addWidget(QLabel("Current source"), 1, 0)
+        cl.addWidget(key_label("Current source"), 1, 0)
         self.cur_src = QLabel("—")
         cl.addWidget(self.cur_src, 1, 1)
-        cl.addWidget(QLabel("Sample rate"), 2, 0)
+        cl.addWidget(key_label("Sample rate"), 2, 0)
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 2, 1)
         lay.addWidget(clock)
@@ -260,14 +250,15 @@ class SettingsPanel(QWidget):
         ports = QGroupBox("OPTICAL PORTS")
         pl = QGridLayout(ports)
         for c, h in enumerate(["", "In format", "In status", "In rate", "Out format"]):
-            lbl = QLabel(f"<span style='color:#7d9299;font-size:9px'>{h}</span>")
+            lbl = QLabel(h)
+            lbl.setObjectName("hint")
             pl.addWidget(lbl, 0, c)
         self.port_widgets = []
         for i in range(4):
             fmt, led, rate, out = QLabel("—"), Led(), QLabel("—"), QComboBox()
             out.addItems(["ADAT", "S/PDIF"])
             out.activated.connect(lambda v, n=i + 1: self._write(f"Output {n} Format", v))
-            for c, w in enumerate([QLabel(f"{i + 1}"), fmt, led, rate, out]):
+            for c, w in enumerate([key_label(f"{i + 1}"), fmt, led, rate, out]):
                 pl.addWidget(w, i + 1, c)
             self.port_widgets.append((fmt, led, rate, out))
         lay.addWidget(ports)
@@ -308,7 +299,7 @@ class SettingsPanel(QWidget):
                 combo.addItem(text, value)
             combo.setCurrentIndex(max(0, combo.findData(hw[key])))
             combo.activated.connect(lambda i, c=combo, k=key: self._set_hw(k, c.itemData(i)))
-            ol.addWidget(QLabel(label), r, 0)
+            ol.addWidget(key_label(label), r, 0)
             ol.addWidget(combo, r, 1)
         single = QCheckBox("Word clock out: single speed")
         single.setChecked(hw["word_single"])
@@ -321,12 +312,12 @@ class SettingsPanel(QWidget):
         CLOCK box's grid."""
         clock = QGroupBox("CLOCK")
         cl = QGridLayout(clock)
-        cl.addWidget(QLabel(clock_label), 0, 0)
+        cl.addWidget(key_label(clock_label), 0, 0)
         cl.addWidget(clock_combo, 0, 1)
-        cl.addWidget(QLabel("Current source"), 1, 0)
+        cl.addWidget(key_label("Current source"), 1, 0)
         self.cur_src = QLabel("—")
         cl.addWidget(self.cur_src, 1, 1)
-        cl.addWidget(QLabel("Sample rate"), 2, 0)
+        cl.addWidget(key_label("Sample rate"), 2, 0)
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 2, 1)
         lay.addWidget(clock)
@@ -337,7 +328,7 @@ class SettingsPanel(QWidget):
         self._sync_labels = {}
         for r, (label, *_unused) in enumerate(status_inputs):
             led, rate = Led(), QLabel("—")
-            self._sync_labels[label] = QLabel(label)
+            self._sync_labels[label] = key_label(label)
             sl.addWidget(self._sync_labels[label], r, 0)
             sl.addWidget(led, r, 1)
             sl.addWidget(rate, r, 2)
@@ -383,9 +374,9 @@ class SettingsPanel(QWidget):
 
         levels = QGroupBox("LEVELS")
         ll = QGridLayout(levels)
-        ll.addWidget(QLabel("Line inputs"), 0, 0)
+        ll.addWidget(key_label("Line inputs"), 0, 0)
         ll.addWidget(self._ff800_combo("in_level", [(l, k) for k, l, *_ in ff800.IN_LEVELS]), 0, 1)
-        ll.addWidget(QLabel("Line outputs"), 1, 0)
+        ll.addWidget(key_label("Line outputs"), 1, 0)
         ll.addWidget(self._ff800_combo("out_level", [(l, k) for k, l, *_ in ff800.OUT_LEVELS]),
                      1, 1)
         lay.addWidget(levels)
@@ -396,7 +387,7 @@ class SettingsPanel(QWidget):
                 ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
                 ("S/PDIF out", "spdif_pro", (("Consumer", False), ("Professional", True))))
         for r, (label, key, items) in enumerate(rows):
-            ol.addWidget(QLabel(label), r, 0)
+            ol.addWidget(key_label(label), r, 0)
             ol.addWidget(self._ff800_combo(key, items), r, 1)
         r = len(rows)
         for key, label in (("emphasis", "S/PDIF out emphasis"),
@@ -447,14 +438,14 @@ class SettingsPanel(QWidget):
             combos[role] = combo
         self.rd_combos = combos
         clock = self._build_fw_clock(lay, combos["clock"], raydat.STATUS_INPUTS, "Clock mode")
-        clock.addWidget(QLabel("Prefer"), 3, 0)
+        clock.addWidget(key_label("Prefer"), 3, 0)
         clock.addWidget(combos["pref"], 3, 1)
-        clock.addWidget(QLabel("Internal rate"), 4, 0)
+        clock.addWidget(key_label("Internal rate"), 4, 0)
         clock.addWidget(combos["internal"], 4, 1)
 
         opts = QGroupBox("OPTIONS")
         ol = QGridLayout(opts)
-        self.rd_spdif_label = QLabel("S/PDIF in")
+        self.rd_spdif_label = key_label("S/PDIF in")
         ol.addWidget(self.rd_spdif_label, 0, 0)
         ol.addWidget(combos["spdif_in"], 0, 1)
         self.rd_toggles = {}
@@ -464,6 +455,7 @@ class SettingsPanel(QWidget):
             ol.addWidget(box, r, 0, 1, 2)
             self.rd_toggles[name] = box
         self.rd_info = QLabel()
+        self.rd_info.setObjectName("hint")
         self.rd_info.setWordWrap(True)
         ol.addWidget(self.rd_info, len(raydat.TOGGLES) + 1, 0, 1, 2)
         lay.addWidget(opts)
@@ -522,7 +514,7 @@ class SettingsPanel(QWidget):
             info = "snd-hdspe driver" if st["driver"] == raydat.HDSPE else "snd-hdspm driver"
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
-            self.rd_info.setText(f"<span style='color:#7d9299'>{info}</span>")
+            self.rd_info.setText(info)
         self.cur_src.setText(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}

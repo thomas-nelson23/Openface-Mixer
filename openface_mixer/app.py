@@ -4,18 +4,18 @@ import sys
 import time
 
 from PySide6.QtCore import QProcess, Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from . import APP_ID, APP_NAME
 from . import arc, control_room, fireface800
 from .channel_settings import ChannelSettings
 from .config import (
-    apply_ui_scale, device_block, load_device_choice, load_state, load_ui_scale, presets_file,
-    save_device_choice, save_state, save_ui_scale,
+    device_block, load_device_choice, load_state, load_ui_scale, presets_file, save_device_choice,
+    save_state, save_ui_scale,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -25,11 +25,11 @@ from .matrix_view import MatrixView
 from .model import (
     N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
     compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
-    set_strip_db, speed_mode, strip_channels, strip_key,
+    set_strip_color, set_strip_db, speed_mode, strip_channels, strip_color, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
-from .theme import ACCENT, apply_theme, compact_boxes
+from .theme import ACCENT, CHANNEL_COLORS, KIND_COLOR, apply_theme, compact_boxes, px
 from .widgets import Row, Strip
 
 
@@ -40,10 +40,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
-        self.ui_scale = load_ui_scale()    # applied at startup by main(), see config.apply_ui_scale
+        self.ui_scale = load_ui_scale()    # applied by main() through theme.apply_theme
         self.st = load_state(dev)
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
+        self.reopen_geometry = None        # where main() puts the window it reopens
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
@@ -52,8 +53,8 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(12, 10, 12, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(px(12), px(10), px(12), px(10))
+        root.setSpacing(px(10))
         root.addLayout(self._build_top_bar())
         edge = QFrame()
         edge.setObjectName("edge")
@@ -63,10 +64,11 @@ class MainWindow(QMainWindow):
         mixer_page = QWidget()
         rows = QVBoxLayout(mixer_page)
         rows.setContentsMargins(0, 0, 0, 0)
-        rows.setSpacing(10)
-        self.row_in = Row("Hardware Inputs", "")
-        self.row_play = Row("Playback", "")
-        self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix")
+        rows.setSpacing(px(10))
+        self.row_in = Row("Hardware Inputs", "", KIND_COLOR["in"])
+        self.row_play = Row("Playback", "", KIND_COLOR["play"])
+        self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix",
+                           KIND_COLOR["out"])
         for r in (self.row_in, self.row_play, self.row_out):
             rows.addWidget(r, 1)
         self.matrix = MatrixView(self)
@@ -100,7 +102,7 @@ class MainWindow(QMainWindow):
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setFrameShape(QFrame.NoFrame)
         self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.settings_scroll.setFixedWidth(self.settings.width() + 12)
+        self.settings_scroll.setFixedWidth(self.settings.width() + px(12))
         self.settings_btn.toggled.connect(self.settings_scroll.setVisible)
         body.addWidget(self.settings_scroll)
         root.addLayout(body, 1)
@@ -119,21 +121,23 @@ class MainWindow(QMainWindow):
         QTimer(self, interval=500, timeout=self.poll_engine).start()
         QTimer(self, interval=3000, timeout=self.poll_profile).start()
         self.poll_profile()
-        self.resize(1600, 960)
+        self.setMinimumSize(px(1180), px(640))
+        self.resize(px(1600), px(960))
 
     # ------------------------------------------------------------------ top bar
     def _build_top_bar(self):
         top = QHBoxLayout()
-        top.setSpacing(10)
-        top.addWidget(QLabel("<span style='font-family:Michroma;font-size:14px;letter-spacing:1.5px;"
-                             "color:white'>OPENFACE</span><span style='font-family:Michroma;"
-                             "font-size:14px;letter-spacing:1.5px;color:#ff2a4f'>MIXER</span>"))
-        top.addSpacing(10)
+        top.setSpacing(px(8))
+        top.addWidget(QLabel(
+            f"<span style='font-family:Michroma;font-size:{px(14)}px;letter-spacing:{px(1.5)}px;"
+            "color:white'>OPENFACE</span><span style='font-family:Michroma;"
+            f"font-size:{px(14)}px;letter-spacing:{px(1.5)}px;color:#ff2a4f'>MIXER</span>"))
+        top.addSpacing(px(8))
 
         seg = QWidget()
         seg.setObjectName("segment")
         sl = QHBoxLayout(seg)
-        sl.setContentsMargins(2, 2, 2, 2)
+        sl.setContentsMargins(px(2), px(2), px(2), px(2))
         sl.setSpacing(0)
         self.view_btns = []
         for i, name in enumerate(("Mixer", "Matrix")):
@@ -144,14 +148,14 @@ class MainWindow(QMainWindow):
             sl.addWidget(b)
             self.view_btns.append(b)
         top.addWidget(seg)
-        top.addSpacing(10)
+        top.addSpacing(px(8))
 
         top.addWidget(self._caption("SUBMIX"))
         self.submix = QComboBox()
-        self.submix.setMinimumWidth(110)
+        self.submix.setMinimumWidth(px(104))
         self.submix.activated.connect(self.select_out)
         top.addWidget(self.submix)
-        top.addSpacing(6)
+        top.addSpacing(px(4))
         self.solo_master = QPushButton("SOLO")
         self.solo_master.setObjectName("solomaster")
         self.solo_master.setCursor(Qt.PointingHandCursor)
@@ -174,13 +178,13 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         self.status.setObjectName("lcd")
         self.status.setAlignment(Qt.AlignCenter)
-        self.status.setMinimumWidth(160)
+        self.status.setMinimumWidth(px(120))
         top.addWidget(self.status)
         top.addStretch(1)
 
         top.addWidget(self._caption("PRESETS"))
         slots = QHBoxLayout()
-        slots.setSpacing(3)
+        slots.setSpacing(px(3))
         self.slot_btns = []
         for i in range(N_SLOTS):
             b = QPushButton(str(i + 1))
@@ -206,7 +210,7 @@ class MainWindow(QMainWindow):
         mix_btn = QPushButton("Mix ▾")
         mix_btn.setMenu(mix_menu)
         top.addWidget(mix_btn)
-        top.addSpacing(6)
+        top.addSpacing(px(4))
 
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.setCheckable(True)
@@ -219,7 +223,7 @@ class MainWindow(QMainWindow):
         lbl = QLabel(text)
         lbl.setObjectName("caption")
         f = lbl.font()
-        f.setLetterSpacing(QFont.AbsoluteSpacing, 2.4)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, px(2.4))
         lbl.setFont(f)
         return lbl
 
@@ -276,7 +280,8 @@ class MainWindow(QMainWindow):
             title = self.label(kind, c, pair=stereo)
             key = strip_key(kind, c)
             s = Strip(key, title, chans, kind, standard=self.standard_label(kind, c, stereo),
-                      show_pan=True, show_stereo=has_pair, show_solo=True, show_settings=kind == "in" and any(
+                      color=strip_color(self.st, key), show_pan=True, show_stereo=has_pair,
+                      show_solo=True, show_settings=kind == "in" and any(
                           self.dev.channel_has_settings(kind, ch) for ch in chans))
             s.stereo.setChecked(stereo)
             s.solo.setChecked(self.st["solo"][kind][c])
@@ -306,6 +311,7 @@ class MainWindow(QMainWindow):
             key = strip_key("out", pair)
             s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
                       standard=self.standard_label("out", 2 * pair, True),
+                      color=strip_color(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
                                         for ch in (2 * pair, 2 * pair + 1)))
             s.pair = pair
@@ -467,8 +473,11 @@ class MainWindow(QMainWindow):
         self.close()
 
     def set_ui_scale(self, scale):
-        """Persist the scale; Qt only reads it when the application starts, see restart_app."""
+        """Save the scale and reopen the window at it (main() lays everything out again)."""
         save_ui_scale(scale)
+        self.reopen_geometry = self.geometry()
+        self.switch_to = self.dev.key
+        self.close()
 
     def restart_app(self):
         self.save()
@@ -521,6 +530,19 @@ class MainWindow(QMainWindow):
     def strip_menu(self, strip, pos):
         menu = QMenu(self)
         menu.addAction("Rename…", lambda: self.rename_strip(strip))
+        colors = menu.addMenu("Color")
+        current = strip_color(self.st, strip.key)
+        for name, hexcol in CHANNEL_COLORS:
+            a = colors.addAction(self._swatch(hexcol), name)
+            a.setCheckable(True)
+            a.setChecked(current == hexcol)
+            a.triggered.connect(lambda _=False, c=hexcol: self.set_color(strip, c))
+        colors.addSeparator()
+        colors.addAction("Custom…", lambda: self.pick_color(strip))
+        default = colors.addAction("Default")
+        default.setCheckable(True)
+        default.setChecked(current is None)
+        default.triggered.connect(lambda: self.set_color(strip, None))
         menu.addSeparator()
         grp = menu.addMenu("Fader group")
         for g in range(N_GROUPS + 1):
@@ -531,6 +553,30 @@ class MainWindow(QMainWindow):
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         menu.exec(pos)
+
+    @staticmethod
+    def _swatch(hexcol):
+        pm = QPixmap(px(14), px(14))
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(hexcol))
+        p.drawRoundedRect(pm.rect(), px(4), px(4))
+        p.end()
+        return QIcon(pm)
+
+    def pick_color(self, strip):
+        start = QColor(strip_color(self.st, strip.key) or strip.tag_color())
+        col = QColorDialog.getColor(start, self, f"Color for {strip.name}")
+        if col.isValid():
+            self.set_color(strip, col.name())
+
+    def set_color(self, strip, color):
+        set_strip_color(self.st, strip.key, color)
+        strip.set_color(color)
+        self.matrix.rebuild()
+        self.schedule_save()
 
     def move_fader(self, strip, db):
         strip.set_fader(db)
@@ -794,11 +840,9 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    apply_ui_scale()                    # before QApplication: Qt reads the factor on startup
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
-    apply_theme(app)
     args = app.arguments()[1:]
     if "--device" in args and args.index("--device") + 1 < len(args):
         dev = DEVICES.get(args[args.index("--device") + 1])
@@ -806,13 +850,18 @@ def main():
             sys.exit(f"--device: one of {', '.join(DEVICES)}")
     else:
         dev = detect(load_device_choice())
+    geometry = None
     while True:
+        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
         save_device_choice(dev)
         w = MainWindow(dev)
+        if geometry is not None:
+            w.setGeometry(geometry)
         w.show()
         code = app.exec()
         if w.switch_to is None:
             sys.exit(code)
         dev = DEVICES[w.switch_to]
+        geometry = w.reopen_geometry
         w.arc.disconnect_port()      # so the next window can open the ARC USB
         w.deleteLater()

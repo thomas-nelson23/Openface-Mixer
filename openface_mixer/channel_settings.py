@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from . import fireface800 as ff800
 from . import fireface802 as ff
+from .theme import key_label, px
 
 
 class ChannelSettings(QFrame):
@@ -23,18 +24,18 @@ class ChannelSettings(QFrame):
         """settings: the device settings dict (st["hw"]), edited in place."""
         super().__init__(parent, Qt.Popup)
         self.setObjectName("chansettings")
-        self.setStyleSheet("QFrame#chansettings{background:#040e16;border:1px solid rgba(255,255,255,0.16);"
-                           "border-radius:8px}")
+        self.setStyleSheet("QFrame#chansettings{background:#040e16;border:1px solid "
+                           f"rgba(255,255,255,0.16);border-radius:{px(8)}px}}")
         self.s = settings
         self.kind = kind
         self.channels = channels
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(6)
+        lay.setContentsMargins(px(12), px(10), px(12), px(12))
+        lay.setSpacing(px(8))
         lay.addWidget(QLabel(f"<b>{title}</b> <span style='color:#7d9299'>settings</span>"))
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(4)
+        grid.setHorizontalSpacing(px(10))
+        grid.setVerticalSpacing(px(5))
         lay.addLayout(grid)
         if dev.key == "ff800":
             self._build_ff800(grid)
@@ -57,14 +58,14 @@ class ChannelSettings(QFrame):
         line = [c for c in channels if c < ff.N_LINE_IN]
         mic = [c - ff.N_LINE_IN for c in channels if ff.N_LINE_IN <= c < ff.N_LINE_IN + ff.N_MIC_IN]
         if kind == "in" and line:
-            grid.addWidget(QLabel("Level"), row, 0)
+            grid.addWidget(key_label("Level"), row, 0)
             level = QComboBox()
             level.addItems(ff.IN_LEVELS)
             level.setCurrentIndex(part["level"][c0])
             level.currentIndexChanged.connect(lambda i: self._set(part["level"], line, i))
             grid.addWidget(level, row, 1)
             row += 1
-            grid.addWidget(QLabel("Gain"), row, 0)
+            grid.addWidget(key_label("Gain"), row, 0)
             gain = QDoubleSpinBox()
             gain.setRange(0.0, ff.LINE_GAIN_MAX_DB)
             gain.setSingleStep(0.5)
@@ -85,7 +86,7 @@ class ChannelSettings(QFrame):
             grid.addWidget(inst, row + 1, 0, 1, 2)
             row += 2
         if kind == "out" and line:
-            grid.addWidget(QLabel("Level"), row, 0)
+            grid.addWidget(key_label("Level"), row, 0)
             level = QComboBox()
             level.addItems(ff.OUT_LEVELS)
             level.setCurrentIndex(part["level"][c0])
@@ -99,7 +100,7 @@ class ChannelSettings(QFrame):
             name = ff800.chan_label("in", c)
             if c in ff800.JACK_INPUTS:
                 j = ff800.JACK_INPUTS.index(c)
-                grid.addWidget(QLabel(f"{name} input"), row, 0)
+                grid.addWidget(key_label(f"{name} input"), row, 0)
                 jack = QComboBox()
                 for key, label in ff800.JACKS:
                     jack.addItem(label + (" (Inst)" if c == ff800.INST_IN and key == "front"

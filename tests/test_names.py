@@ -15,17 +15,27 @@ class CustomNamesTest(unittest.TestCase):
 
     def test_old_state_gets_names_and_hidden(self):
         st = m.default_state()
-        for k in ("names", "custom_names", "hidden"):
+        for k in ("names", "custom_names", "hidden", "colors"):
             del st[k]
         st = m.upgrade_state(st)
-        self.assertEqual((st["names"], st["custom_names"], st["hidden"]), ({}, True, []))
+        self.assertEqual((st["names"], st["custom_names"], st["hidden"], st["colors"]),
+                         ({}, True, [], {}))
+
+    def test_channel_colour(self):
+        st = m.default_state()
+        self.assertIsNone(m.strip_color(st, "in:0"))
+        m.set_strip_color(st, "in:0", "#ff2a4f")
+        self.assertEqual(m.strip_color(st, "in:0"), "#ff2a4f")
+        m.set_strip_color(st, "in:0", None)
+        self.assertEqual(st["colors"], {})
 
     def test_names_are_not_part_of_a_mix(self):
         st = m.default_state()
         st["names"]["out:0"] = "Mains"
         st["hidden"] = ["AD4"]
-        self.assertNotIn("names", m.extract_mix(st))
-        self.assertNotIn("hidden", m.extract_mix(st))
+        st["colors"]["out:0"] = "#56e39f"
+        for k in ("names", "hidden", "colors"):
+            self.assertNotIn(k, m.extract_mix(st))
 
 
 class ChannelGroupsTest(unittest.TestCase):
