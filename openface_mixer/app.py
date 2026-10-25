@@ -25,11 +25,15 @@ from .matrix_view import MatrixView
 from .model import (
     N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
     compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
-    set_strip_color, set_strip_db, speed_mode, strip_channels, strip_color, strip_key,
+    set_strip_color, set_strip_db, set_strip_icon, speed_mode, strip_channels, strip_color,
+    strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel, Sidebar
-from .theme import ACCENT, CHANNEL_COLORS, KIND_COLOR, apply_theme, compact_boxes, px
+from .theme import (
+    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, KIND_COLOR, apply_theme, compact_boxes, icon_pixmap,
+    px,
+)
 from .widgets import Row, Strip
 
 
@@ -280,7 +284,8 @@ class MainWindow(QMainWindow):
             title = self.label(kind, c, pair=stereo)
             key = strip_key(kind, c)
             s = Strip(key, title, chans, kind, standard=self.standard_label(kind, c, stereo),
-                      color=strip_color(self.st, key), show_pan=True, show_stereo=has_pair,
+                      color=strip_color(self.st, key), icon=strip_icon(self.st, key),
+                      show_pan=True, show_stereo=has_pair,
                       show_solo=True, show_settings=kind == "in" and any(
                           self.dev.channel_has_settings(kind, ch) for ch in chans))
             s.stereo.setChecked(stereo)
@@ -311,7 +316,7 @@ class MainWindow(QMainWindow):
             key = strip_key("out", pair)
             s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
                       standard=self.standard_label("out", 2 * pair, True),
-                      color=strip_color(self.st, key),
+                      color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
                                         for ch in (2 * pair, 2 * pair + 1)))
             s.pair = pair
@@ -543,6 +548,19 @@ class MainWindow(QMainWindow):
         default.setCheckable(True)
         default.setChecked(current is None)
         default.triggered.connect(lambda: self.set_color(strip, None))
+        icons = menu.addMenu("Icon")
+        cur_icon = strip_icon(self.st, strip.key)
+        for name, label in CHANNEL_ICONS:
+            pm = icon_pixmap(name, "#d9eef2", px(16))
+            a = icons.addAction(QIcon(pm) if pm else QIcon(), label)
+            a.setCheckable(True)
+            a.setChecked(cur_icon == name)
+            a.triggered.connect(lambda _=False, n=name: self.set_icon(strip, n))
+        icons.addSeparator()
+        none = icons.addAction("None")
+        none.setCheckable(True)
+        none.setChecked(cur_icon is None)
+        none.triggered.connect(lambda: self.set_icon(strip, None))
         menu.addSeparator()
         grp = menu.addMenu("Fader group")
         for g in range(N_GROUPS + 1):
@@ -576,6 +594,11 @@ class MainWindow(QMainWindow):
         set_strip_color(self.st, strip.key, color)
         strip.set_color(color)
         self.matrix.rebuild()
+        self.schedule_save()
+
+    def set_icon(self, strip, icon):
+        set_strip_icon(self.st, strip.key, icon)
+        strip.set_icon(icon)
         self.schedule_save()
 
     def move_fader(self, strip, db):

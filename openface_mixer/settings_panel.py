@@ -4,8 +4,9 @@ import html
 import threading
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -15,7 +16,7 @@ from . import raydat, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
-from .theme import MUTED, caption_html, key_label, px
+from .theme import Section, caption_html, key_label, px
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules"}
@@ -79,8 +80,8 @@ class Sidebar(QFrame):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         head = QHBoxLayout()
-        head.setContentsMargins(px(16), px(10), px(8), px(6))
-        title = QLabel(caption_html("Settings"))
+        head.setContentsMargins(px(14), px(12), px(8), px(10))
+        title = QLabel(caption_html("Settings", QColor("white")))
         head.addWidget(title, 1)
         close = QToolButton()
         close.setText("×")
@@ -131,7 +132,7 @@ class SettingsPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        box = QGroupBox("DEVICE")
+        box = Section("DEVICE")
         bl = QVBoxLayout(box)
         self.device = QComboBox()
         for d in DEVICES.values():
@@ -152,7 +153,7 @@ class SettingsPanel(QWidget):
         else:
             self._build_digiface(lay)
 
-        eng = QGroupBox("HARDWARE MIXER")
+        eng = Section("HARDWARE MIXER")
         el = QVBoxLayout(eng)
         self.hw_label = QLabel("—")
         self.hw_label.setWordWrap(True)
@@ -177,7 +178,7 @@ class SettingsPanel(QWidget):
 
     def _build_ui_scale(self, lay, scale):
         self._scale_at_start = scale
-        disp = QGroupBox("DISPLAY")
+        disp = Section("DISPLAY")
         dl = QGridLayout(disp)
         dl.addWidget(key_label("UI scale"), 0, 0)
         self.scale_combo = QComboBox()
@@ -220,7 +221,7 @@ class SettingsPanel(QWidget):
             self.ui_scale_changed.emit(scale)
 
     def _build_updates(self, lay):
-        box = QGroupBox("UPDATES")
+        box = Section("UPDATES")
         ul = QVBoxLayout(box)
         self.update_label = QLabel("Check GitHub for a newer Openface Mixer.")
         self.update_label.setWordWrap(True)
@@ -282,7 +283,7 @@ class SettingsPanel(QWidget):
 
     # ------------------------------------------------------------------ Digiface USB
     def _build_digiface(self, lay):
-        clock = QGroupBox("CLOCK")
+        clock = Section("CLOCK")
         cl = QGridLayout(clock)
         cl.addWidget(key_label("Clock source"), 0, 0)
         self.sync_src = QComboBox()
@@ -296,7 +297,7 @@ class SettingsPanel(QWidget):
         cl.addWidget(self.rate, 2, 1)
         lay.addWidget(clock)
 
-        ports = QGroupBox("OPTICAL PORTS")
+        ports = Section("OPTICAL PORTS")
         pl = QGridLayout(ports)
         for c, h in enumerate(["", "In format", "In status", "In rate", "Out format"]):
             lbl = QLabel(h)
@@ -312,7 +313,7 @@ class SettingsPanel(QWidget):
             self.port_widgets.append((fmt, led, rate, out))
         lay.addWidget(ports)
 
-        prof = QGroupBox("CARD PROFILE")
+        prof = Section("CARD PROFILE")
         vl = QVBoxLayout(prof)
         self.profile = QLabel("—")
         self.profile.setWordWrap(True)
@@ -337,7 +338,7 @@ class SettingsPanel(QWidget):
         self._build_fw_clock(lay, self.ff_clock,
                              () if self.dev.bus == "USB" else ff.STATUS_INPUTS)
 
-        opts = QGroupBox("OPTIONS")
+        opts = Section("OPTIONS")
         ol = QGridLayout(opts)
         rows = (("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
                 ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
@@ -359,7 +360,7 @@ class SettingsPanel(QWidget):
     def _build_fw_clock(self, lay, clock_combo, status_inputs, clock_label="Clock source"):
         """The CLOCK and INPUT STATUS boxes of a FireWire Fireface (and the RayDAT). Returns the
         CLOCK box's grid."""
-        clock = QGroupBox("CLOCK")
+        clock = Section("CLOCK")
         cl = QGridLayout(clock)
         cl.addWidget(key_label(clock_label), 0, 0)
         cl.addWidget(clock_combo, 0, 1)
@@ -371,7 +372,7 @@ class SettingsPanel(QWidget):
         cl.addWidget(self.rate, 2, 1)
         lay.addWidget(clock)
 
-        sync = QGroupBox("INPUT STATUS")
+        sync = Section("INPUT STATUS")
         sl = QGridLayout(sync)
         self.sync_widgets = []
         self._sync_labels = {}
@@ -421,7 +422,7 @@ class SettingsPanel(QWidget):
                                                                ff800.CLOCK_SOURCES]),
                              ff800.STATUS_INPUTS)
 
-        levels = QGroupBox("LEVELS")
+        levels = Section("LEVELS")
         ll = QGridLayout(levels)
         ll.addWidget(key_label("Line inputs"), 0, 0)
         ll.addWidget(self._ff800_combo("in_level", [(l, k) for k, l, *_ in ff800.IN_LEVELS]), 0, 1)
@@ -430,7 +431,7 @@ class SettingsPanel(QWidget):
                      1, 1)
         lay.addWidget(levels)
 
-        opts = QGroupBox("OPTIONS")
+        opts = Section("OPTIONS")
         ol = QGridLayout(opts)
         rows = (("S/PDIF in", "spdif_in", (("Coaxial", "coax"), ("Optical", "optical"))),
                 ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
@@ -492,7 +493,7 @@ class SettingsPanel(QWidget):
         clock.addWidget(key_label("Internal rate"), 4, 0)
         clock.addWidget(combos["internal"], 4, 1)
 
-        opts = QGroupBox("OPTIONS")
+        opts = Section("OPTIONS")
         ol = QGridLayout(opts)
         self.rd_spdif_label = key_label("S/PDIF in")
         ol.addWidget(self.rd_spdif_label, 0, 0)

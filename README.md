@@ -24,9 +24,10 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
-- **Channel names and colours like TotalMix:** right-click a strip → *Rename…* to give it your
-  own name, and *Color* to pick a colour for its name tag (both saved per device). The **NAMES**
-  button in the top bar switches between your names and the standard ones.
+- **Channel names, colours and icons like TotalMix:** right-click a strip → *Rename…* to give
+  it your own name, *Color* to pick a colour for its name tag, and *Icon* for a guitar, bass,
+  drums, vocal, keyboard, synth, computer, headphones, … on the tag (all saved per device). The
+  **NAMES** button in the top bar switches between your names and the standard ones.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing.
@@ -78,7 +79,7 @@ sudo pacman -S --needed pyside6 libpipewire libusb alsa-utils libpulse gcc pkgco
 On Debian / Ubuntu:
 
 ```sh
-sudo apt install python3-pyside6.qtwidgets libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
+sudo apt install python3-pyside6.qtwidgets python3-pyside6.qtsvg libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
 ```
 
 ## Install

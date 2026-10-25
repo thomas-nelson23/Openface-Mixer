@@ -4,11 +4,11 @@ ArcLink finds the ARC USB, reads its keys and encoder, and lights its LEDs; Main
 what each key does. ControlRoomPanel is the settings-panel box with the same switches on screen.
 """
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
-from PySide6.QtWidgets import QComboBox, QGridLayout, QGroupBox, QLabel, QPushButton
+from PySide6.QtWidgets import QComboBox, QGridLayout, QLabel, QPushButton
 
 from . import arc
 from .control_room import NO_PAIR, control_room, has_speaker_b
-from .theme import key_label
+from .theme import Section, key_label
 
 SWITCHES = (("dim", "Dim"), ("mono", "Mono"), ("speaker_b", "Speaker B"),
             ("talkback", "Talkback"), ("ext_in", "Ext In"))
@@ -89,7 +89,7 @@ class ArcLink(QObject):
                 self.port.write(arc.led_message(i, on))
 
 
-class ControlRoomPanel(QGroupBox):
+class ControlRoomPanel(Section):
     """Switches and assignments. Emits changed() after editing st["control_room"]."""
     changed = Signal()
     STATUS = {

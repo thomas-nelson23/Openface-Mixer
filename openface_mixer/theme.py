@@ -34,6 +34,17 @@ CHANNEL_COLORS = (
     ("Green", "#56e39f"), ("Teal", "#2ad4ff"), ("Blue", "#4d8dff"), ("Violet", "#a77bff"),
     ("Pink", "#ff7ad9"), ("Grey", "#9cb0b8"),
 )
+# channel icons: (file name in icons/, menu label), in menu order
+CHANNEL_ICONS = (
+    ("guitar", "Guitar"), ("bass", "Bass"), ("drum", "Drums"), ("mic-vocal", "Vocal"),
+    ("mic", "Microphone"), ("piano", "Keyboard"), ("keyboard-music", "Synth"),
+    ("audio-waveform", "Waveform"), ("laptop", "Computer"), ("monitor", "Desktop"),
+    ("headphones", "Headphones"), ("speaker", "Speakers"), ("volume-2", "Monitor"),
+    ("megaphone", "Talkback"), ("radio", "Radio"), ("phone", "Phone"), ("tv", "TV"),
+    ("video", "Video"), ("film", "Film"), ("gamepad-2", "Game"), ("disc-3", "Disc"),
+    ("audio-lines", "Audio"), ("cable", "Line"), ("usb", "USB"), ("zap", "FX"), ("star", "Star"),
+)
+ICON_DIR = Path(__file__).parent / "icons"
 SANS = "Sora"
 MONO = "JetBrains Mono"
 MONO_STACK = "'JetBrains Mono', 'Noto Sans Mono', 'DejaVu Sans Mono', monospace"
@@ -77,6 +88,65 @@ def key_label(text):
     return lbl
 
 
+from PySide6.QtWidgets import QGroupBox  # noqa: E402
+
+
+class Section(QGroupBox):
+    """A sidebar section: a box whose title is painted as a wide-tracked cyan caption, so it
+    reads as a heading over the section's grey labels (QSS can't track letters)."""
+
+    def __init__(self, title="", parent=None):
+        super().__init__("", parent)
+        self._title = title.upper()
+
+    def title_text(self):
+        return self._title
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self._title:
+            return
+        from PySide6.QtGui import QPainter
+        from PySide6.QtCore import QRectF, Qt
+        p = QPainter(self)
+        f = font(SANS, 9, QFont.Bold)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, px(2.2))
+        p.setFont(f)
+        p.setPen(CYAN)
+        p.drawText(QRectF(px(14), px(9), self.width() - px(28), px(14)),
+                   Qt.AlignLeft | Qt.AlignVCenter, self._title)
+
+
+_icon_cache = {}
+
+
+def icon_pixmap(name, color, size):
+    """The channel icon `name` (see CHANNEL_ICONS) drawn in `color` at size x size pixels, or
+    None if it is unknown or SVG support is missing (python3-pyside6.qtsvg on Debian)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPainter, QPixmap
+    try:
+        from PySide6.QtSvg import QSvgRenderer
+    except ImportError:
+        return None
+    color = QColor(color).name()
+    key = (name, color, size)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    try:
+        svg = (ICON_DIR / f"{name}.svg").read_text()
+    except OSError:
+        return None
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    QSvgRenderer(svg.replace("currentColor", color).encode()).render(p)
+    p.end()
+    _icon_cache[key] = pm
+    return pm
+
+
 FONT_DIR = Path(__file__).parent / "fonts"
 
 
@@ -93,7 +163,7 @@ def compact_boxes(panel):
         lay = box.layout()
         if lay is None:
             continue
-        lay.setContentsMargins(px(16), px(2), px(16), px(12))
+        lay.setContentsMargins(px(14), px(2), px(14), px(14))
         if isinstance(lay, QGridLayout):
             lay.setHorizontalSpacing(px(6))
             lay.setVerticalSpacing(px(4))
@@ -182,10 +252,12 @@ def stylesheet():
                                    font-size:{p(16)}px; padding:0 {p(6)}px; }}
         QToolButton#sidebarclose:hover {{ color:white; }}
         QGroupBox {{ background:transparent; border:none; border-top:1px solid {HAIR};
-                    border-radius:0; margin-top:0; padding-top:{p(22)}px; }}
-        QGroupBox::title {{ subcontrol-origin:padding; subcontrol-position:top left;
-                           left:{p(16)}px; top:{p(9)}px; color:{d}; font-size:{p(8)}px;
-                           font-weight:600; letter-spacing:{p(1.5)}px; }}
+                    border-radius:0; margin-top:0; padding-top:{p(28)}px; }}
+        QGroupBox::title {{ height:0; }}
+        QFrame#sidebar QLabel {{ font-size:{p(11)}px; }}
+        QFrame#sidebar QComboBox, QFrame#sidebar QCheckBox, QFrame#sidebar QPushButton {{
+            font-size:{p(11)}px; }}
+        QFrame#sidebar QLabel#head {{ color:white; }}
         QGroupBox QPushButton {{ padding:{p(3)}px {p(10)}px; border-radius:{p(6)}px; }}
         QGroupBox QPushButton:checked {{ background:{c}; border-color:{c}; color:#021012; }}
         QGroupBox QComboBox {{ padding:{p(2)}px {p(2)}px {p(2)}px {p(7)}px; }}

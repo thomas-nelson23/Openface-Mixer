@@ -14,8 +14,9 @@ from PySide6.QtWidgets import (
 from .model import FADER_MAX_DB, FADER_MIN_DB, NEG_INF, db2pos, fmt_db, lin2db, pos2db
 from .theme import (
     CYAN, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, caption_html,
-    font, px,
+    font, icon_pixmap, px,
 )
+from PySide6.QtGui import QIcon
 from PySide6.QtGui import QFont
 
 
@@ -345,7 +346,8 @@ class Strip(QFrame):
     settings_requested = Signal(object)  # global QPoint below the settings button
 
     def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
-                 show_solo=False, show_settings=False, standard=None, color=None, parent=None):
+                 show_solo=False, show_settings=False, standard=None, color=None, icon=None,
+                 parent=None):
         super().__init__(parent)
         self.key = key
         self.name = title                    # shown name (custom or standard), unshortened
@@ -354,6 +356,8 @@ class Strip(QFrame):
         self.channels = channels
         self.group = 0
         self.color = QColor(color) if color else None   # the channel's own colour, if given
+        self.icon = icon                                # icon name (theme.CHANNEL_ICONS) or None
+        self._with_settings = show_settings
         self._selected = False
         self.width_px = px(self.WIDTH)
         self.setFixedWidth(self.width_px)
@@ -447,8 +451,11 @@ class Strip(QFrame):
         self.set_selected(False)
 
     def _set_title(self, with_settings):
-        """Shorten a long (custom) name to fit the tag; the tooltip has it in full."""
+        """Shorten a long (custom) name to fit the tag beside its icon; the tooltip has it in
+        full."""
         width = self.width_px - px(10) - (px(15) if with_settings else 0)
+        if self.icon:
+            width -= px(16)
         self.title.setText(QFontMetrics(self.title.font()).elidedText(self.name, Qt.ElideRight,
                                                                       width))
         self.title.setToolTip(self.name if self.name == self.standard
@@ -485,6 +492,18 @@ class Strip(QFrame):
         self.color = QColor(color) if color else None
         self.set_selected(self._selected)
 
+    def set_icon(self, icon):
+        """icon: a name from theme.CHANNEL_ICONS, or None."""
+        self.icon = icon
+        self._set_title(self._with_settings)
+        self.set_selected(self._selected)
+
+    def _apply_icon(self, sel):
+        size = px(13)
+        pm = icon_pixmap(self.icon, "#021012" if sel else "#eef6f8", size) if self.icon else None
+        self.title.setIcon(QIcon(pm) if pm else QIcon())
+        self.title.setIconSize(QSize(size, size))
+
     def tag_color(self):
         return self.color or KIND_COLOR[self.kind]
 
@@ -496,6 +515,7 @@ class Strip(QFrame):
         top_border = (f"border-top:{px(2)}px solid {GROUP_COLOR[self.group].name()};"
                       if self.group else "")
         tag = label_style(col, sel)
+        self._apply_icon(sel)
         self.setStyleSheet(
             f"QFrame#strip{{background:qlineargradient(y1:0,y2:1,stop:0 rgba(4,12,18,0.62),"
             f"stop:0.7 rgba(4,12,18,0.93));border:1px solid {border};{top_border}"

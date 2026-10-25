@@ -15,11 +15,24 @@ class CustomNamesTest(unittest.TestCase):
 
     def test_old_state_gets_names_and_hidden(self):
         st = m.default_state()
-        for k in ("names", "custom_names", "hidden", "colors"):
+        for k in ("names", "custom_names", "hidden", "colors", "icons"):
             del st[k]
         st = m.upgrade_state(st)
-        self.assertEqual((st["names"], st["custom_names"], st["hidden"], st["colors"]),
-                         ({}, True, [], {}))
+        self.assertEqual((st["names"], st["custom_names"], st["hidden"], st["colors"],
+                          st["icons"]), ({}, True, [], {}, {}))
+
+    def test_channel_icon(self):
+        st = m.default_state()
+        self.assertIsNone(m.strip_icon(st, "in:0"))
+        m.set_strip_icon(st, "in:0", "guitar")
+        self.assertEqual(m.strip_icon(st, "in:0"), "guitar")
+        m.set_strip_icon(st, "in:0", None)
+        self.assertEqual(st["icons"], {})
+
+    def test_every_listed_icon_is_bundled(self):
+        from openface_mixer.theme import CHANNEL_ICONS, ICON_DIR
+        for name, _label in CHANNEL_ICONS:
+            self.assertTrue((ICON_DIR / f"{name}.svg").is_file(), name)
 
     def test_channel_colour(self):
         st = m.default_state()
@@ -34,7 +47,8 @@ class CustomNamesTest(unittest.TestCase):
         st["names"]["out:0"] = "Mains"
         st["hidden"] = ["AD4"]
         st["colors"]["out:0"] = "#56e39f"
-        for k in ("names", "hidden", "colors"):
+        st["icons"]["out:0"] = "speaker"
+        for k in ("names", "hidden", "colors", "icons"):
             self.assertNotIn(k, m.extract_mix(st))
 
 
