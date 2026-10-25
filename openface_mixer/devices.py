@@ -47,6 +47,19 @@ class Device:
     def pair_label(self, kind, c, mode):
         raise NotImplementedError
 
+    def channel_group(self, kind, c, mode):
+        """The group channel c belongs to, for the SHOW options: the standard name's prefix
+        ("AD3" for "AD3 5", "AES", "AN")."""
+        return self.chan_label(kind, c, mode).split()[0]
+
+    def channel_groups(self):
+        """All of the device's channel groups, in channel order."""
+        groups = {}
+        for kind in ("in", "out"):
+            for c in self.channels(kind, 1):
+                groups.setdefault(self.channel_group(kind, c, 1), None)
+        return list(groups)
+
     def phones_pair(self, mode):
         """The pair the mixer opens on and the control room's phones; the first pair on
         interfaces without headphones."""
@@ -97,6 +110,19 @@ class Digiface(Device):
 
     def pair_label(self, kind, c, mode):
         return digiface_pair_label(c, self._n_adat(mode), kind != "in")
+
+    def channel_group(self, kind, c, mode):
+        """The group channel c belongs to, for the SHOW options: the standard name's prefix
+        ("AD3" for "AD3 5", "AES", "AN")."""
+        return self.chan_label(kind, c, mode).split()[0]
+
+    def channel_groups(self):
+        """All of the device's channel groups, in channel order."""
+        groups = {}
+        for kind in ("in", "out"):
+            for c in self.channels(kind, 1):
+                groups.setdefault(self.channel_group(kind, c, 1), None)
+        return list(groups)
 
     def phones_pair(self, mode):
         return self._n_adat(mode) // 2
@@ -213,6 +239,16 @@ class RayDAT(Device):
 DEVICES = {d.key: d for d in (Digiface(), Fireface802(), Fireface802USB(), Fireface800(),
                                RayDAT())}
 DEFAULT = DEVICES["digiface"]
+
+
+def group_title(group):
+    """'ADAT 3' for "AD3" or "A3", 'ADAT A' for the 802's "A", ..."""
+    if group in ("A", "B"):
+        return f"ADAT {group}"
+    m = re.fullmatch(r"AD?(\d)", group)
+    if m:
+        return f"ADAT {m[1]}"
+    return {"AN": "Analog", "PH": "Phones", "Ph": "Phones", "SPDIF": "S/PDIF"}.get(group, group)
 
 
 def _read_hex(path):

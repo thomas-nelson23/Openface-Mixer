@@ -24,8 +24,8 @@ from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
     N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
-    compute_out_gains, default_state, extract_mix, get_strip_db, group_follow, set_strip_db,
-    speed_mode, strip_channels, strip_key,
+    compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
+    set_strip_db, speed_mode, strip_channels, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.settings.eng_btn.clicked.connect(self.restart_engine)
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
+        self.settings.shown_changed.connect(self.channels_shown)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
@@ -159,6 +160,15 @@ class MainWindow(QMainWindow):
         self.solo_master.clicked.connect(self.toggle_solo_master)
         self._solo_memory = None          # solos switched off by the master, for recall
         top.addWidget(self.solo_master)
+        self.names_btn = QPushButton("NAMES")
+        self.names_btn.setObjectName("namesbtn")
+        self.names_btn.setCheckable(True)
+        self.names_btn.setChecked(self.st["custom_names"])
+        self.names_btn.setCursor(Qt.PointingHandCursor)
+        self.names_btn.setToolTip("Show custom channel names (lit) or the standard ones. "
+                                  "Right-click a strip to rename it.")
+        self.names_btn.toggled.connect(self.set_custom_names)
+        top.addWidget(self.names_btn)
         top.addStretch(1)
 
         self.status = QLabel("")
@@ -218,13 +228,24 @@ class MainWindow(QMainWindow):
         """The device's channels of this kind ("in", "play", "out") at the current speed."""
         return self.dev.channels(kind, self.mode)
 
-    def label(self, kind, c, pair=False):
+    def standard_label(self, kind, c, pair=False):
         # playback channel n is meant for output n, so it is named like the output
         k = "out" if kind == "play" else kind
         return self.dev.pair_label(k, c, self.mode) if pair else self.dev.chan_label(k, c, self.mode)
 
-    def out_pairs(self):
-        return [c // 2 for c in self.channels("out") if c % 2 == 0]
+    def label(self, kind, c, pair=False):
+        """The strip's name: its custom name (while NAMES is on) or the standard one."""
+        key = strip_key("out", c // 2) if kind == "out" else strip_key(kind, c)
+        return display_name(self.st, key, self.standard_label(kind, c, pair))
+
+    def shown(self, kind, c):
+        """False if channel c is in a group hidden with the SHOW options."""
+        k = "out" if kind == "play" else kind
+        return self.dev.channel_group(k, c, self.mode) not in self.st["hidden"]
+
+    def out_pairs(self, all_pairs=False):
+        return [c // 2 for c in self.channels("out")
+                if c % 2 == 0 and (all_pairs or self.shown("out", c))]
 
     def rebuild_all(self):
         self.rebuild_sources("in")
@@ -234,7 +255,7 @@ class MainWindow(QMainWindow):
 
     def refresh_control_channels(self):
         ins = self.channels("in")
-        pairs = [(self.label("out", 2 * p, True), p) for p in self.out_pairs()]
+        pairs = [(self.label("out", 2 * p, True), p) for p in self.out_pairs(all_pairs=True)]
         inputs = [(self.label("in", c), c) for c in ins]
         input_pairs = [(self.label("in", c, True), c) for c in ins if c % 2 == 0 and c + 1 in ins]
         self.control.set_channels(pairs, inputs, input_pairs)
@@ -247,13 +268,15 @@ class MainWindow(QMainWindow):
         for c in chans_all:
             if c % 2 == 1 and c - 1 in present and self.st["stereo"][kind][c // 2]:
                 continue                     # right channel of a linked pair: shares its strip
+            if not self.shown(kind, c):
+                continue
             has_pair = c % 2 == 0 and c + 1 in present
             chans = strip_channels(self.st, kind, c) if has_pair else [c]
             stereo = len(chans) == 2
             title = self.label(kind, c, pair=stereo)
             key = strip_key(kind, c)
-            s = Strip(key, title, chans, kind, show_pan=True, show_stereo=has_pair,
-                      show_solo=True, show_settings=kind == "in" and any(
+            s = Strip(key, title, chans, kind, standard=self.standard_label(kind, c, stereo),
+                      show_pan=True, show_stereo=has_pair, show_solo=True, show_settings=kind == "in" and any(
                           self.dev.channel_has_settings(kind, ch) for ch in chans))
             s.stereo.setChecked(stereo)
             s.solo.setChecked(self.st["solo"][kind][c])
@@ -282,6 +305,7 @@ class MainWindow(QMainWindow):
             title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
             s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
+                      standard=self.standard_label("out", 2 * pair, True),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
                                         for ch in (2 * pair, 2 * pair + 1)))
             s.pair = pair
@@ -301,7 +325,7 @@ class MainWindow(QMainWindow):
         self.refresh_settings_buttons()
         self.matrix.rebuild()
         sel = self.st["selected"]
-        if sel not in [s.pair for s in strips]:
+        if strips and sel not in [s.pair for s in strips]:
             sel = strips[-1].pair
         self.select_out(sel, by_pair=True)
 
@@ -415,6 +439,7 @@ class MainWindow(QMainWindow):
         st["mute"][kind][c + 1] = st["mute"][kind][c]
         st["solo"][kind][c + 1] = st["solo"][kind][c]
         st["groups"].pop(strip_key(kind, c + 1), None)   # the right channel no longer has a strip
+        st["names"].pop(strip_key(kind, c + 1), None)
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
 
@@ -422,7 +447,7 @@ class MainWindow(QMainWindow):
     def channel_settings(self, strip, pos):
         """TotalMix's channel settings for a hardware input or output strip (Fireface 802)."""
         popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
-                                strip.title.text(), self)
+                                strip.name, self)
         popup.setAttribute(Qt.WA_DeleteOnClose)
         popup.changed.connect(self.push_matrix)
         popup.changed.connect(self.refresh_settings_buttons)
@@ -464,9 +489,39 @@ class MainWindow(QMainWindow):
         self.st["tab"] = i
         self.schedule_save()
 
+    # ------------------------------------------------------------------ names and SHOW
+    def rename_strip(self, strip):
+        old = self.st["names"].get(strip.key, "")
+        name, ok = QInputDialog.getText(self, "Rename channel",
+                                        f"Name for {strip.standard} (empty = standard name):",
+                                        text=old)
+        if not ok:
+            return
+        name = name.strip()
+        if name:
+            self.st["names"][strip.key] = name
+        else:
+            self.st["names"].pop(strip.key, None)
+        if name and not self.st["custom_names"]:
+            self.names_btn.setChecked(True)      # show the name just given (rebuilds)
+        else:
+            self.rebuild_all()
+        self.schedule_save()
+
+    def set_custom_names(self, on):
+        self.st["custom_names"] = on
+        self.rebuild_all()
+        self.schedule_save()
+
+    def channels_shown(self):
+        self.rebuild_all()
+        self.schedule_save()
+
     # ------------------------------------------------------------------ fader groups
     def strip_menu(self, strip, pos):
         menu = QMenu(self)
+        menu.addAction("Rename…", lambda: self.rename_strip(strip))
+        menu.addSeparator()
         grp = menu.addMenu("Fader group")
         for g in range(N_GROUPS + 1):
             a = grp.addAction("None" if g == 0 else f"● Group {g}")

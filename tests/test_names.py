@@ -1,0 +1,49 @@
+import unittest
+
+from openface_mixer import model as m
+from openface_mixer.devices import DEVICES, group_title
+
+
+class CustomNamesTest(unittest.TestCase):
+    def test_custom_name_follows_names_button(self):
+        st = m.default_state()
+        st["names"]["in:0"] = "Kick"
+        self.assertEqual(m.display_name(st, "in:0", "AD1 1"), "Kick")
+        self.assertEqual(m.display_name(st, "in:1", "AD1 2"), "AD1 2")
+        st["custom_names"] = False
+        self.assertEqual(m.display_name(st, "in:0", "AD1 1"), "AD1 1")
+
+    def test_old_state_gets_names_and_hidden(self):
+        st = m.default_state()
+        for k in ("names", "custom_names", "hidden"):
+            del st[k]
+        st = m.upgrade_state(st)
+        self.assertEqual((st["names"], st["custom_names"], st["hidden"]), ({}, True, []))
+
+    def test_names_are_not_part_of_a_mix(self):
+        st = m.default_state()
+        st["names"]["out:0"] = "Mains"
+        st["hidden"] = ["AD4"]
+        self.assertNotIn("names", m.extract_mix(st))
+        self.assertNotIn("hidden", m.extract_mix(st))
+
+
+class ChannelGroupsTest(unittest.TestCase):
+    def titles(self, key):
+        return [group_title(g) for g in DEVICES[key].channel_groups()]
+
+    def test_groups_per_device(self):
+        self.assertEqual(self.titles("digiface"), ["ADAT 1", "ADAT 2", "ADAT 3", "ADAT 4", "Phones"])
+        self.assertEqual(self.titles("ff802"), ["Analog", "AES", "ADAT A", "ADAT B", "Phones"])
+        self.assertEqual(self.titles("ff800"), ["Analog", "S/PDIF", "ADAT 1", "ADAT 2", "Phones"])
+        self.assertEqual(self.titles("raydat"),
+                         ["AES", "S/PDIF", "ADAT 1", "ADAT 2", "ADAT 3", "ADAT 4"])
+
+    def test_group_keeps_its_port_at_double_speed(self):
+        dev = DEVICES["digiface"]
+        self.assertEqual(dev.channel_group("in", 15, 2), "AD4")    # 16 ADAT channels at 2x
+        self.assertEqual(dev.channel_group("out", 16, 2), "Ph")
+
+
+if __name__ == "__main__":
+    unittest.main()

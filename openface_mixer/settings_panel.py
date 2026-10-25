@@ -13,7 +13,7 @@ from . import fireface800 as ff800
 from . import fireface802 as ff
 from . import raydat, updater
 from .config import UI_SCALES
-from .devices import DEVICES
+from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
@@ -66,6 +66,7 @@ class Led(QLabel):
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
+    shown_changed = Signal()         # a SHOW option changed st["hidden"]
     ui_scale_changed = Signal(float) # chosen scale, applied when the application restarts
     restart_requested = Signal()
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
@@ -148,7 +149,23 @@ class SettingsPanel(QWidget):
         self.scale_restart.clicked.connect(self.restart_requested.emit)
         self.scale_restart.setVisible(False)
         dl.addWidget(self.scale_restart, 2, 0, 1, 2)
+        # SHOW: hide whole channel groups (an unused ADAT port, ...) from the mixer and matrix
+        dl.addWidget(QLabel("Show"), 3, 0, 1, 2)
+        show = QGridLayout()
+        show.setHorizontalSpacing(8)
+        show.setVerticalSpacing(2)
+        for i, g in enumerate(self.dev.channel_groups()):
+            cb = QCheckBox(group_title(g))
+            cb.setChecked(g not in self.st["hidden"])
+            cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
+            show.addWidget(cb, i // 3, i % 3)
+        dl.addLayout(show, 4, 0, 1, 2)
         lay.addWidget(disp)
+
+    def _show_toggled(self, group, on):
+        hidden = [g for g in self.st["hidden"] if g != group]
+        self.st["hidden"] = hidden if on else hidden + [group]
+        self.shown_changed.emit()
 
     def _scale_index(self, scale):
         for i in range(self.scale_combo.count()):

@@ -23,6 +23,12 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
+- **Channel names like TotalMix:** right-click a strip → *Rename…* to give it your own name
+  (saved per device). The **NAMES** button in the top bar switches between your names and the
+  standard ones.
+- **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
+  AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
+  channels keep their routing.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only. The **SOLO**
   button in the top bar lights while anything is soloed and switches all solos off and back on.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
@@ -115,6 +121,8 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Store a preset | Click **Store**, then a slot (or right-click a slot) |
 | Recall a preset | Click a lit slot |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
+| Rename a channel | Right-click a strip → *Rename…* (empty = standard name). **NAMES** toggles custom / standard names |
+| Hide channels | Settings panel → Display → *Show*: untick a channel group |
 | Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
 
 ### Control room and ARC USB
