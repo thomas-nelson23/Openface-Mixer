@@ -1,28 +1,27 @@
 """Routing matrix view: columns = inputs/playback strips, rows = output pairs (TotalMix "Matrix")."""
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from .model import FADER_MAX_DB, db2pos, fmt_db
-from .theme import ACCENT, DIM, KIND_COLOR, TEXT
+from .theme import ACCENT, DIM, KIND_COLOR, SANS, TEXT, font, px
 
 
 class MatrixView(QWidget):
     """TotalMix-style routing grid: columns = inputs/playback, rows = output pairs."""
-    CW, CH, LW, HH, GAP = 48, 24, 84, 44, 10
-
     def __init__(self, win):
         super().__init__()
         self.win = win
+        self.CW, self.CH, self.LW, self.HH, self.GAP = px(48), px(24), px(84), px(44), px(10)
         self.cols, self.rows, self.n_in_cols = [], [], 0
         self.hover = None
         self.setMouseTracking(True)
 
     def rebuild(self):
         w = self.win
-        self.cols = [("in", s.channels, s.name) for s in w.row_in.strips] + \
-                    [("play", s.channels, s.name) for s in w.row_play.strips]
-        self.rows = [(s.pair, s.name) for s in w.row_out.strips]
+        self.cols = [("in", s.channels, s.name, s.color) for s in w.row_in.strips] + \
+                    [("play", s.channels, s.name, s.color) for s in w.row_play.strips]
+        self.rows = [(s.pair, s.name, s.color) for s in w.row_out.strips]
         self.n_in_cols = len(w.row_in.strips)
         self.setFixedSize(self._x(len(self.cols)) + 2, self.HH + len(self.rows) * self.CH + 2)
         self.update()
@@ -41,11 +40,11 @@ class MatrixView(QWidget):
         return None
 
     def _gain(self, ci, ri):
-        kind, chans, _ = self.cols[ci]
+        kind, chans, _, _ = self.cols[ci]
         return self.win.st["sends"][kind][chans[0]][self.rows[ri][0]][0]
 
     def _set(self, ci, ri, db):
-        kind, chans, _ = self.cols[ci]
+        kind, chans, _, _ = self.cols[ci]
         self.win.set_send_at(kind, chans, self.rows[ri][0], db)
 
     def mousePressEvent(self, e):
@@ -87,34 +86,37 @@ class MatrixView(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        f = p.font()
-        f.setPointSize(8)
-        p.setFont(f)
+        p.setFont(font(SANS, 11))
         p.setRenderHint(QPainter.Antialiasing)
         sel = self.win.st["selected"]
         dim, txt = DIM, TEXT
         # group headers
+        head_h = px(18)
+        p.setFont(font(SANS, 8, QFont.DemiBold))
         if self.n_in_cols:
             p.setPen(KIND_COLOR["in"].lighter(130))
-            p.drawText(QRectF(self._x(0), 0, self.n_in_cols * self.CW, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                       "HARDWARE INPUTS")
+            p.drawText(QRectF(self._x(0), 0, self.n_in_cols * self.CW, head_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, "HARDWARE INPUTS")
         if len(self.cols) > self.n_in_cols:
             p.setPen(KIND_COLOR["play"].lighter(130))
-            p.drawText(QRectF(self._x(self.n_in_cols), 0, 400, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                       "PLAYBACK")
-        for ci, (_, _, name) in enumerate(self.cols):
-            p.setPen(txt if self.hover and self.hover[0] == ci else dim)
-            p.drawText(QRectF(self._x(ci), 18, self.CW, self.HH - 20), Qt.AlignCenter,
-                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.CW - 2))
-        for ri, (pair, name) in enumerate(self.rows):
+            p.drawText(QRectF(self._x(self.n_in_cols), 0, px(400), head_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, "PLAYBACK")
+        p.setFont(font(SANS, 11))
+        for ci, (_, _, name, color) in enumerate(self.cols):
+            lit = self.hover and self.hover[0] == ci
+            p.setPen(txt if lit else (color or dim))
+            p.drawText(QRectF(self._x(ci), head_h, self.CW, self.HH - head_h - px(2)), Qt.AlignCenter,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.CW - px(2)))
+        for ri, (pair, name, color) in enumerate(self.rows):
             y = self.HH + ri * self.CH
             if pair == sel:
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(42, 212, 255, 30))
-                p.drawRoundedRect(QRectF(0, y + 1, self.LW - 6, self.CH - 2), 4, 4)
-            p.setPen(ACCENT if pair == sel else (txt if self.hover and self.hover[1] == ri else dim))
-            p.drawText(QRectF(4, y, self.LW - 8, self.CH), Qt.AlignVCenter | Qt.AlignLeft,
-                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.LW - 8))
+                p.drawRoundedRect(QRectF(0, y + 1, self.LW - px(6), self.CH - 2), px(4), px(4))
+            lit = self.hover and self.hover[1] == ri
+            p.setPen(ACCENT if pair == sel else (txt if lit else (color or dim)))
+            p.drawText(QRectF(px(4), y, self.LW - px(8), self.CH), Qt.AlignVCenter | Qt.AlignLeft,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, self.LW - px(8)))
             for ci in range(len(self.cols)):
                 r = QRectF(self._x(ci) + 1, y + 1, self.CW - 2, self.CH - 2)
                 g = self._gain(ci, ri)
@@ -124,15 +126,15 @@ class MatrixView(QWidget):
                         p.setBrush(QColor("#06202e"))
                     else:
                         p.setBrush(QColor("#04121b") if (ci + ri) % 2 else QColor("#03101a"))
-                    p.drawRoundedRect(r, 3, 3)
+                    p.drawRoundedRect(r, px(3), px(3))
                 else:
                     k = 0.45 + 0.55 * min(1.0, db2pos(g) / db2pos(0.0))
-                    base = KIND_COLOR[self.cols[ci][0]]
+                    base = self.cols[ci][3] or KIND_COLOR[self.cols[ci][0]]
                     p.setBrush(QColor(int(base.red() * k), int(base.green() * k), int(base.blue() * k)))
-                    p.drawRoundedRect(r, 3, 3)
+                    p.drawRoundedRect(r, px(3), px(3))
                     p.setPen(QColor("#021012"))
                     p.drawText(r, Qt.AlignCenter, fmt_db(g))
                 if self.hover == (ci, ri):
-                    p.setPen(QPen(ACCENT, 1.5))
+                    p.setPen(QPen(ACCENT, max(1.0, px(1.5))))
                     p.setBrush(Qt.NoBrush)
-                    p.drawRoundedRect(r, 3, 3)
+                    p.drawRoundedRect(r, px(3), px(3))

@@ -63,26 +63,6 @@ class UiScaleTest(unittest.TestCase):
         config.save_ui_scale(0.1)
         self.assertEqual(config.load_ui_scale(), config.UI_SCALE_MIN)
 
-    def apply(self, env):
-        """Run apply_ui_scale() in an environment of just `env` and return QT_SCALE_FACTOR."""
-        with mock.patch.dict(os.environ, env, clear=True):
-            config.apply_ui_scale()
-            return os.environ.get("QT_SCALE_FACTOR")
-
-    def test_apply_sets_qt_scale_factor(self):
-        config.save_ui_scale(1.25)
-        self.assertEqual(self.apply({}), "1.25")
-
-    def test_default_scale_leaves_user_factor_alone(self):
-        self.assertIsNone(self.apply({}))
-        self.assertEqual(self.apply({"QT_SCALE_FACTOR": "1.5"}), "1.5")
-
-    def test_scale_multiplies_user_factor_once(self):
-        config.save_ui_scale(2.0)
-        self.assertEqual(self.apply({"QT_SCALE_FACTOR": "1.5"}), "3")
-        # a restarted GUI inherits the environment we set: the base stays 1.5
-        self.assertEqual(self.apply({"QT_SCALE_FACTOR": "3",
-                                     config.BASE_SCALE_ENV: "1.5"}), "3")
 
 
 if __name__ == "__main__":

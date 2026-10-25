@@ -4,11 +4,11 @@ ArcLink finds the ARC USB, reads its keys and encoder, and lights its LEDs; Main
 what each key does. ControlRoomPanel is the settings-panel box with the same switches on screen.
 """
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
-from PySide6.QtWidgets import QComboBox, QGridLayout, QGroupBox, QLabel, QPushButton
+from PySide6.QtWidgets import QComboBox, QGridLayout, QLabel, QPushButton
 
 from . import arc
 from .control_room import NO_PAIR, control_room, has_speaker_b
-from .theme import ACCENT
+from .theme import Section, key_label
 
 SWITCHES = (("dim", "Dim"), ("mono", "Mono"), ("speaker_b", "Speaker B"),
             ("talkback", "Talkback"), ("ext_in", "Ext In"))
@@ -89,7 +89,7 @@ class ArcLink(QObject):
                 self.port.write(arc.led_message(i, on))
 
 
-class ControlRoomPanel(QGroupBox):
+class ControlRoomPanel(Section):
     """Switches and assignments. Emits changed() after editing st["control_room"]."""
     changed = Signal()
     STATUS = {
@@ -109,7 +109,6 @@ class ControlRoomPanel(QGroupBox):
         for i, (key, text) in enumerate(SWITCHES):
             b = QPushButton(text)
             b.setCheckable(True)
-            b.setStyleSheet(f"QPushButton:checked {{ background:{ACCENT.name()}; color:#111; }}")
             b.clicked.connect(lambda on, k=key: self._switch(k, on))
             g.addWidget(b, i // 3, i % 3)
             self.buttons[key] = b
@@ -117,12 +116,13 @@ class ControlRoomPanel(QGroupBox):
         rows = (("main", "Main Out"), ("main_b", "Speaker B"), ("phones", "Phones"),
                 ("talkback_src", "Talkback mic"), ("ext_src", "External In"))
         for r, (key, text) in enumerate(rows, start=2):
-            g.addWidget(QLabel(text), r, 0)
+            g.addWidget(key_label(text), r, 0)
             c = QComboBox()
             c.activated.connect(lambda _i, k=key: self._assign(k))
             g.addWidget(c, r, 1, 1, 2)
             self.combos[key] = c
         self.arc_label = QLabel(self.STATUS["absent"])
+        self.arc_label.setObjectName("hint")
         self.arc_label.setWordWrap(True)
         g.addWidget(self.arc_label, r + 1, 0, 1, 3)
 
