@@ -632,6 +632,7 @@ class SettingsPanel(QWidget):
         self.rd_info.setWordWrap(True)
         ol.addWidget(self.rd_info, r, 0, 1, 2)
         lay.addWidget(opts)
+        self.rd_opts = opts             # hidden until the card is found: its options vary
         self._rd_ctrls = None
         self.update_hdspe(None)
 
@@ -675,6 +676,7 @@ class SettingsPanel(QWidget):
                     box.setChecked(bool(c["value"]))
         finally:
             self._updating = False
+        self.rd_opts.setVisible(st is not None)
         if st is None:
             self.rd_info.setText("")
             self._show_fw_status(None)

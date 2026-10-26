@@ -12,7 +12,7 @@ engine/                 C engine that drives the interface's DSP mixer. Builds t
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
   fireface_fw.c         Fireface 802 and 800 backends: FireWire transactions for mixer, settings, meters
   fireface_usb.c        Fireface 802 over USB (Class Compliant): SysEx through the ALSA sequencer
-  raydat.c              HDSPe RayDAT backend: snd-hdspm/snd-hdspe Mixer control and hwdep meters
+  hdspe.c               HDSPe RayDAT/AIO/AIO Pro/AES backend: snd-hdspm/snd-hdspe Mixer control and meters
   shm_layout.h          shared-memory contract between engine and GUI. Keep in sync with engine.py
 openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`)
   app.py                MainWindow: builds the UI and wires model ⇄ widgets ⇄ engine
@@ -25,10 +25,14 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   devices.py            supported devices: channel layout, names, engine and service names
   fireface802.py        Fireface 802 channel layout, settings and DSP command words (no Qt)
   fireface800.py        Fireface 800 channel layout, configuration and status words (no Qt)
-  raydat.py             HDSPe RayDAT channel layout and its ALSA settings controls (no Qt)
+  fireface400.py        Fireface 400 differences from the 800 (no Qt)
+  ucx2.py               Fireface UCX II differences from the 802 over USB (no Qt)
+  hdspe.py              HDSPe card models and their ALSA settings controls (no Qt)
+  osc_remote.py         TotalMix Global OSC: codec, fader curve, state ⇄ addresses (no Qt)
+  remote_link.py        the OSC remote's UDP socket, sidebar section and autostart entry
   channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain, jacks)
   engine.py             shared-memory client + starting/stopping the engine
-  hardware.py           Digiface and RayDAT ALSA controls via amixer, PipeWire card profile via pactl
+  hardware.py           Digiface and HDSPe ALSA controls via amixer, PipeWire card profile via pactl
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
