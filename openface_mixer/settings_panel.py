@@ -278,13 +278,11 @@ class SettingsPanel(QWidget):
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
-        self.show_boxes = {}
         for i, g in enumerate(self.dev.channel_groups()):
             cb = QCheckBox(group_title(g))
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
-            self.show_boxes[g] = cb
         dl.addLayout(show, 3, 0, 1, 2)
         lay.addWidget(disp)
 
@@ -296,20 +294,11 @@ class SettingsPanel(QWidget):
         self.export_btn = QPushButton("Export mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
-        self.reset_btn = QPushButton("Reset mix to default")
-        self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups. "
-                                  "Ctrl+Z undoes it.")
+        self.reset_btn = QPushButton("Reset mix to default…")
+        self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
         for b in (self.export_btn, self.import_btn, self.reset_btn):
             ml.addWidget(b)
         lay.addWidget(box)
-
-    def sync_display(self, st):
-        """Show st's names and SHOW options after an undo or redo changed them."""
-        for box, on in [(self.names_box, st["custom_names"])] + [
-                (cb, g not in st["hidden"]) for g, cb in self.show_boxes.items()]:
-            box.blockSignals(True)
-            box.setChecked(on)
-            box.blockSignals(False)
 
     def _show_toggled(self, group, on):
         hidden = [g for g in self.st["hidden"] if g != group]

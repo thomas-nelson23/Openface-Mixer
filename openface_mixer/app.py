@@ -22,7 +22,6 @@ from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
 from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
-from .history import History
 from .matrix_view import MatrixView
 from .model import (
     N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
@@ -31,7 +30,7 @@ from .model import (
     strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .settings_panel import SettingsPanel, Sidebar
+from .settings_panel import SettingsPanel, Sidebar, ask
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
     icon_pixmap, px,
@@ -55,10 +54,6 @@ class MainWindow(QMainWindow):
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
-        self.history = History(self.st)
-        # edits within half a second of each other (one fader drag) make one undo step
-        self._commit_timer = QTimer(self, singleShot=True, interval=500,
-                                    timeout=self.history.commit)
         self.engine_error = None           # why the engine could not be started, shown in Status
         self._last_meter = time.monotonic()
 
@@ -130,7 +125,7 @@ class MainWindow(QMainWindow):
         self.settings_btn.toggled.connect(lambda _on: self.fit_top_bar())
         outer.addWidget(self.sidebar)
         self.setCentralWidget(central)
-        self.toast = QLabel(central)      # short feedback ("Undo: Mute"), see notify()
+        self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
         self.toast.setObjectName("toast")
         self.toast.hide()
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
@@ -258,10 +253,8 @@ class MainWindow(QMainWindow):
         return top
 
     def _build_shortcuts(self):
-        """The standard keys (undo, redo, settings) and a few for what people do most."""
+        """The standard settings key and a few for what people do most."""
         keys = (
-            (QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo),
-            ("Ctrl+Shift+Z", self.redo),
             ("Ctrl+,", self.settings_btn.toggle),
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
@@ -290,30 +283,6 @@ class MainWindow(QMainWindow):
         self.toast.raise_()
         self.toast.show()
         self._toast_timer.start()
-
-    # ------------------------------------------------------------------ undo
-    def undo(self):
-        label = self.history.undo()
-        if label is None:
-            self.notify("Nothing to undo")
-            return
-        self._restored()
-        self.notify(f"Undo: {label}")
-
-    def redo(self):
-        label = self.history.redo()
-        if label is None:
-            self.notify("Nothing to redo")
-            return
-        self._restored()
-        self.notify(f"Redo: {label}")
-
-    def _restored(self):
-        """The model was put back to an earlier (or later) step: show and send it."""
-        self.settings.sync_display(self.st)
-        self.rebuild_all()
-        self.refresh_slots()
-        self.push_matrix()
 
     @staticmethod
     def _caption(text):
@@ -431,7 +400,7 @@ class MainWindow(QMainWindow):
     def hide_strip(self, strip):
         set_strip_hidden(self.st, strip.key, True)
         self.channels_shown()
-        self.notify(f"{strip.name} hidden · right-click empty space to show it · Ctrl+Z undoes")
+        self.notify(f"{strip.name} hidden · right-click empty space to show it")
 
     def unhide_strip(self, key):
         set_strip_hidden(self.st, key, False)
@@ -827,15 +796,13 @@ class MainWindow(QMainWindow):
         self.notify(f"Saved “{name}” in slot {i + 1}")
 
     def recall_slot(self, i):
-        self.history.commit()
         apply_mix(self.st, self.presets.slots[i]["mix"])
         self.st["active_slot"] = i
         name = self.presets.name(i)
-        self.history.commit(f"Recall {name}")
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Recalled “{name}” · Ctrl+Z goes back")
+        self.notify(f"Recalled “{name}”")
 
     def slot_menu(self, i):
         menu = QMenu(self)
@@ -870,26 +837,23 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{e}")
             return
-        self.history.commit()
         apply_mix(self.st, mix)
         self.st["active_slot"] = None
-        self.history.commit("Import mix")
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Imported “{name}” · Ctrl+Z goes back")
+        self.notify(f"Imported “{name}”")
 
     def reset_mix(self):
-        """No confirmation: the reset is one undo step away from being taken back (HIG: no
-        alerts for undoable actions)."""
-        self.history.commit()
+        if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
+                   "no input monitoring, no groups)? This can't be undone.", "Reset mix"):
+            return
         apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
         self.st["active_slot"] = None
-        self.history.commit("Reset mix")
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify("Mix reset to default · Ctrl+Z brings it back")
+        self.notify("Mix reset to default")
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
@@ -957,7 +921,6 @@ class MainWindow(QMainWindow):
 
     def schedule_save(self):
         self._save_timer.start()
-        self._commit_timer.start()
 
     def save(self):
         save_state(self.st, self.dev)
