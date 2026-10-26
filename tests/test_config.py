@@ -63,6 +63,17 @@ class UiScaleTest(unittest.TestCase):
         config.save_ui_scale(0.1)
         self.assertEqual(config.load_ui_scale(), config.UI_SCALE_MIN)
 
+    def test_window_kept_beside_scale(self):
+        self.assertEqual(config.load_window(), (None, True))
+        config.save_ui_scale(1.25)
+        config.save_window(1400, 900, False)
+        self.assertEqual(config.load_window(), ([1400, 900], False))
+        self.assertEqual(config.load_ui_scale(), 1.25)
+        config.save_ui_scale(1.5)
+        self.assertEqual(config.load_window(), ([1400, 900], False))
+        config.UI_FILE.write_text(json.dumps({"window": "big"}))
+        self.assertEqual(config.load_window(), (None, True))
+
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ class ControlRoomPanel(Section):
     changed = Signal()
     STATUS = {
         "connected": "<span style='color:#2ad4ff'>●</span> ARC USB connected",
-        "absent": "<span style='color:#2a4552'>●</span> ARC USB not connected",
+        "absent": "<span style='color:#6f8a94'>○</span> ARC USB not connected",
         "no-access": "<span style='color:#ff2a4f'>●</span> No permission to open the ARC USB "
                      "(add yourself to the <tt>audio</tt> group)",
         "busy": "<span style='color:#ff2a4f'>●</span> ARC USB is in use by another program",

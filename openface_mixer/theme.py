@@ -25,7 +25,7 @@ SOLO = WARN
 TEXT = QColor("#d9eef2")
 SOFT = QColor("#9cc7cf")
 DIM = QColor("#7d9299")
-MUTED = "#58707a"            # hints and scale marks
+MUTED = "#6f8a94"            # hints and scale marks (4.7:1 on the blue field, readable text)
 KIND_COLOR = {"in": QColor("#2ad4ff"), "play": QColor("#a77bff"), "out": QColor("#ff2a4f")}
 GROUP_COLOR = {1: QColor("#ff2a4f"), 2: QColor("#ffb020"), 3: QColor("#2ad4ff"), 4: QColor("#ff7ad9")}
 # the channel colour palette offered in the strip menu (TotalMix has a similar set)
@@ -80,7 +80,7 @@ def px(n):
 
 def caption_html(text, color=None):
     """Wide-tracked small caps label, as the dashboard's panel titles."""
-    return (f"<span style='color:{(color or DIM).name()};font-size:{px(8)}px;font-weight:600;"
+    return (f"<span style='color:{(color or DIM).name()};font-size:{px(9)}px;font-weight:600;"
             f"letter-spacing:{px(2.4)}px'>{text.upper()}</span>")
 
 
@@ -229,6 +229,8 @@ def stylesheet():
                       border-radius:{p(11)}px; padding:{p(3)}px {p(12)}px; }}
         QPushButton:hover {{ border-color:rgba(42,212,255,0.5); color:white; }}
         QPushButton:pressed {{ background:rgba(42,212,255,0.08); }}
+        /* keyboard focus (buttons only take focus from Tab, see MainWindow.tab_focus_only) */
+        QPushButton:focus, QToolButton:focus {{ border-color:rgba(42,212,255,0.8); }}
         QPushButton:disabled {{ color:{MUTED}; border-color:{HAIR}; }}
         QPushButton:checked {{ background:white; color:#0b0f1c; border-color:white; font-weight:600; }}
         QPushButton:checked:hover {{ background:{c}; border-color:{c}; color:#0b0f1c; }}
@@ -249,20 +251,27 @@ def stylesheet():
         QPushButton#segbtn:checked {{ background:rgba(255,255,255,0.09); color:white;
                                      font-weight:500; }}
         QPushButton#segbtn:checked:hover {{ background:rgba(255,255,255,0.12); color:white; }}
+        QPushButton#segbtn:pressed {{ background:rgba(255,255,255,0.14); }}
         QPushButton#slot {{ background:transparent; border:1px solid {HAIR}; border-radius:{p(11)}px;
-                           padding:0; color:#3c5560; font-family:{MONO_STACK}; font-size:{p(9)}px;
+                           padding:0; color:{MUTED}; font-family:{MONO_STACK}; font-size:{p(9)}px;
                            min-width:{p(22)}px; max-width:{p(22)}px; min-height:{p(22)}px;
                            max-height:{p(22)}px; }}
         QPushButton#slot[filled="true"] {{ color:{t}; border-color:{HAIR_STRONG}; }}
         QPushButton#slot[active="true"] {{ color:{r}; border-color:{r}; font-weight:700; }}
         QPushButton#slot:hover {{ border-color:{c}; }}
+        QPushButton#slot:pressed {{ background:rgba(42,212,255,0.16); }}
         QPushButton#store:checked {{ background:{r}; border-color:{r}; color:white; }}
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
                      border-radius:{p(11)}px; padding:{p(4)}px {p(14)}px; font-family:{MONO_STACK};
                      font-size:{p(10)}px; }}
-        QLabel#caption {{ color:{d}; font-size:{p(8)}px; font-weight:600; }}
+        QLabel#caption {{ color:{d}; font-size:{p(9)}px; font-weight:600; }}
+        QLabel#toast {{ background:rgba(4,14,22,0.96); color:{t}; border:1px solid {HAIR_STRONG};
+                       border-radius:{p(14)}px; padding:{p(6)}px {p(16)}px; font-size:{p(12)}px; }}
+        QLabel#empty {{ color:{d}; font-size:{p(12)}px; }}
         QLabel#key {{ color:{d}; }}
         QLabel#hint {{ color:{MUTED}; font-size:{p(10)}px; }}
+        QLabel#note {{ color:{s}; background:rgba(255,42,79,0.07); border-left:{p(2)}px solid {r};
+                      border-radius:{p(3)}px; padding:{p(6)}px {p(8)}px; }}
         QComboBox {{ background:rgba(255,255,255,0.035); border:1px solid {HAIR};
                     border-radius:{p(6)}px; padding:{p(3)}px {p(8)}px; color:{t}; }}
         QComboBox:hover, QComboBox:focus {{ border-color:rgba(42,212,255,0.5); }}
@@ -272,8 +281,10 @@ def stylesheet():
                                       selection-background-color:rgba(42,212,255,0.15);
                                       selection-color:white; outline:0; padding:{p(4)}px; }}
         QFrame#sidebar {{ background:#040c13; border-left:1px solid {HAIR_STRONG}; }}
-        QToolButton#sidebarclose {{ background:transparent; border:none; color:{MUTED};
-                                   font-size:{p(16)}px; padding:0 {p(6)}px; }}
+        QToolButton#sidebarclose {{ background:transparent; border:none; color:{d};
+                                   font-size:{p(16)}px; padding:0; border-radius:{p(12)}px;
+                                   min-width:{p(24)}px; min-height:{p(24)}px; }}
+        QToolButton#sidebarclose:pressed {{ background:rgba(255,255,255,0.08); }}
         QToolButton#sidebarclose:hover {{ color:white; }}
         QGroupBox {{ background:transparent; border:none; border-top:1px solid {HAIR};
                     border-radius:0; margin-top:0; padding-top:{p(28)}px; }}

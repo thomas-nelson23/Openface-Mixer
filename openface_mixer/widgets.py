@@ -114,7 +114,9 @@ class Fader(QWidget):
         self.setFixedWidth(px(34))
         self._drag = None
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Drag or scroll · Ctrl = fine · Double-click or Alt-click = 0 dB")
+        self.setFocusPolicy(Qt.StrongFocus)    # arrow keys move the fader that was clicked
+        self.setToolTip("Drag, scroll or use the arrow keys · Ctrl = fine\n"
+                        "Double-click, Alt-click or Home = 0 dB · End = -∞")
 
     def db(self):
         return pos2db(self.pos)
@@ -154,9 +156,33 @@ class Fader(QWidget):
         self._set_pos(db2pos(0.0))
 
     def wheelEvent(self, e):
-        db = self.db()
         step = 0.5 if e.modifiers() & Qt.ControlModifier else 1.0
-        step *= 1 if e.angleDelta().y() > 0 else -1
+        self.step(step if e.angleDelta().y() > 0 else -step)
+
+    def keyPressEvent(self, e):
+        fine = e.modifiers() & Qt.ControlModifier
+        steps = {Qt.Key_Up: 0.5 if fine else 1.0, Qt.Key_Down: -0.5 if fine else -1.0,
+                 Qt.Key_PageUp: 6.0, Qt.Key_PageDown: -6.0}
+        if e.key() in steps:
+            self.step(steps[e.key()])
+        elif e.key() == Qt.Key_Home:
+            self._set_pos(db2pos(0.0))
+        elif e.key() == Qt.Key_End:
+            self._set_pos(db2pos(NEG_INF))
+        else:
+            super().keyPressEvent(e)
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self.update()
+
+    def step(self, step):
+        """Move by step dB (from -∞, a step up lands on the bottom of the scale)."""
+        db = self.db()
         if db == NEG_INF:
             db = FADER_MIN_DB if step > 0 else NEG_INF
         else:
@@ -171,11 +197,11 @@ class Fader(QWidget):
         top, bot = self._track()
         tx = px(9)   # track centre
         # printed scale between fader and meter, as in Pro Tools
-        p.setFont(font(SANS, 7, QFont.Medium))
+        p.setFont(font(SANS, 8, QFont.Medium))
         last = None
         for db in self.SCALE:
             y = bot - db2pos(db) * (bot - top)
-            if last is not None and y - last < px(9) and db != 0:
+            if last is not None and y - last < px(10) and db != 0:
                 continue   # short fader: drop marks that would overlap
             last = y
             p.setPen(QColor("#e6f3f6") if db == 0 else QColor(MUTED))
@@ -211,6 +237,10 @@ class Fader(QWidget):
             p.drawLine(QPointF(cap.left() + px(4), y + dy), QPointF(cap.right() - px(4), y + dy))
         p.setPen(QPen(CYAN, max(1.0, px(1.5))))
         p.drawLine(QPointF(cap.left() + px(2), y), QPointF(cap.right() - px(2), y))
+        if self.hasFocus():       # the keys act on this fader
+            p.setPen(QPen(QColor(42, 212, 255, 200), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(cap.adjusted(-px(2), -px(2), px(2), px(2)), px(4), px(4))
 
 
 class Knob(QWidget):
@@ -224,11 +254,13 @@ class Knob(QWidget):
         self.setFixedSize(px(26), px(26))
         self._drag = None
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.set_value(0.0)
 
     def set_value(self, v):
         self.value = v
-        self.setToolTip(f"Pan {self.text()} — drag, double-click to centre")
+        self.setToolTip(f"Pan {self.text()} · drag, scroll or Left/Right · double-click "
+                        "or Home to centre")
         self.text_changed.emit(self.text())
         self.update()
 
@@ -262,7 +294,28 @@ class Knob(QWidget):
         self.changed.emit(0.0)
 
     def wheelEvent(self, e):
-        v = max(-1.0, min(1.0, self.value + (1 if e.angleDelta().y() > 0 else -1) / 32))
+        self.nudge(1 if e.angleDelta().y() > 0 else -1)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Right, Qt.Key_Up):
+            self.nudge(1)
+        elif e.key() in (Qt.Key_Left, Qt.Key_Down):
+            self.nudge(-1)
+        elif e.key() == Qt.Key_Home:
+            self.mouseDoubleClickEvent(e)
+        else:
+            super().keyPressEvent(e)
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self.update()
+
+    def nudge(self, n):
+        v = max(-1.0, min(1.0, self.value + n / 32))
         self.set_value(v)
         self.changed.emit(v)
 
@@ -283,7 +336,8 @@ class Knob(QWidget):
         g.setColorAt(0, QColor("#0f2838"))
         g.setColorAt(1, QColor("#040e16"))
         p.setBrush(g)
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        p.setPen(QPen(QColor(42, 212, 255, 200) if self.hasFocus() else QColor(255, 255, 255, 40),
+                      1))
         p.drawEllipse(body)
         a = math.radians(90 - self.value * 135)
         p.setPen(QPen(QColor("#f5f5f7"), px(2), Qt.SolidLine, Qt.RoundCap))
@@ -296,7 +350,7 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
     b = QToolButton()
     b.setText(text)
     b.setCheckable(True)
-    b.setFixedSize(QSize(px(width), px(17)))
+    b.setFixedSize(QSize(px(width), px(20)))
     b.setToolTip(tip)
     b.setCursor(Qt.PointingHandCursor)
     b.setFont(font(SANS, 9, QFont.DemiBold))
@@ -304,7 +358,10 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
         f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid rgba(255,255,255,0.09);"
         f"border-radius:{px(3)}px}}"
         "QToolButton:hover{background:#12293a;color:white;border-color:rgba(255,255,255,0.18)}"
-        f"QToolButton:checked{{background:{color};color:{fg};border-color:{color}}}")
+        "QToolButton:pressed{background:#1a3b4c}"
+        "QToolButton:focus{border-color:rgba(42,212,255,0.8)}"
+        f"QToolButton:checked{{background:{color};color:{fg};border-color:{color}}}"
+        "QToolButton:checked:pressed{background:#d9eef2}")
     return b
 
 
@@ -333,6 +390,17 @@ def lcd_label(text=""):
     return l
 
 
+class NameTag(QPushButton):
+    """The strip's name tag; double-click renames the channel."""
+    double_clicked = Signal()
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.double_clicked.emit()
+        else:
+            super().mouseDoubleClickEvent(e)
+
+
 class Strip(QFrame):
     """One mixer channel strip (mono or stereo), compact like a Pro Tools mix window strip:
     name tag, pan, solo/mute/stereo, fader with the scale beside its meter, and the level and
@@ -342,6 +410,7 @@ class Strip(QFrame):
     """
     WIDTH = 62
     clicked = Signal()
+    rename_requested = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
     settings_requested = Signal(object)  # global QPoint below the settings button
 
@@ -366,13 +435,14 @@ class Strip(QFrame):
         lay.setContentsMargins(px(3), px(4), px(3), px(4))
         lay.setSpacing(px(3))
 
-        self.title = QPushButton()
+        self.title = NameTag()
         self.title.setFixedHeight(px(20))
         self.title.setMinimumWidth(0)
         self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.title.setFont(font(SANS, 10, QFont.DemiBold))
         self.title.setCursor(Qt.PointingHandCursor if kind == "out" else Qt.ArrowCursor)
         self.title.clicked.connect(self.clicked.emit)
+        self.title.double_clicked.connect(self.rename_requested.emit)
         # channel settings (TotalMix's wrench): phase, level, 48V, ... where the device has them
         self.settings_btn = QToolButton()
         self.settings_btn.setText("⚙")
@@ -388,7 +458,6 @@ class Strip(QFrame):
         title_row.addWidget(self.settings_btn)
         self.settings_btn.setVisible(show_settings)
         lay.addLayout(title_row)
-        self._set_title(show_settings)
 
         # pan knob with its value beside it, as Pro Tools shows "<64" / "64>"
         self.pan = Knob()
@@ -448,6 +517,7 @@ class Strip(QFrame):
 
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.meter.peak_changed.connect(self._show_peak)
+        self._set_title(show_settings)
         self.set_selected(False)
 
     def _set_title(self, with_settings):
@@ -458,8 +528,16 @@ class Strip(QFrame):
             width -= px(16)
         self.title.setText(QFontMetrics(self.title.font()).elidedText(self.name, Qt.ElideRight,
                                                                       width))
-        self.title.setToolTip(self.name if self.name == self.standard
-                              else f"{self.name} ({self.standard})")
+        name = self.name if self.name == self.standard else f"{self.name} ({self.standard})"
+        action = ("Click to edit this output's submix · " if self.kind == "out" else "")
+        self.title.setToolTip(f"{name}\n{action}Double-click to rename · right-click for more")
+        # names for screen readers (Orca reads these through AT-SPI)
+        self.title.setAccessibleName(self.name)
+        self.fader.setAccessibleName(f"{self.name} fader")
+        self.pan.setAccessibleName(f"{self.name} pan")
+        self.solo.setAccessibleName(f"Solo {self.name}")
+        self.mute.setAccessibleName(f"Mute {self.name}")
+        self.stereo.setAccessibleName(f"Stereo-link {self.name}")
 
     def _show_peak(self, db):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")
@@ -562,6 +640,13 @@ class Row(QWidget):
         hl.setSpacing(px(4))
         for s in strips:
             hl.addWidget(s)
+        if not strips:      # every channel of the row is hidden: say how to get them back
+            empty = QLabel(f"No {self.title.lower()} shown. Right-click here to show hidden "
+                           "channels, or turn groups back on under Settings > Display.")
+            empty.setObjectName("empty")
+            empty.setAttribute(Qt.WA_TransparentForMouseEvents)   # right-click reaches the page
+            hl.addSpacing(px(14))
+            hl.addWidget(empty)
         hl.addStretch()
         old = self.scroll.takeWidget()
         if old:

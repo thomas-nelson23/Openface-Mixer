@@ -4,18 +4,19 @@ import sys
 import time
 
 from PySide6.QtCore import QProcess, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from . import APP_ID, APP_NAME
 from . import arc, control_room, fireface800
 from .channel_settings import ChannelSettings
 from .config import (
-    device_block, load_device_choice, load_state, load_ui_scale, presets_file, save_device_choice,
-    save_state, save_ui_scale,
+    device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
+    save_device_choice, save_state, save_ui_scale, save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -29,10 +30,10 @@ from .model import (
     strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .settings_panel import SettingsPanel, Sidebar
+from .settings_panel import SettingsPanel, Sidebar, ask
 from .theme import (
-    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, KIND_COLOR, apply_theme, compact_boxes, icon_pixmap,
-    px,
+    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
+    icon_pixmap, px,
 )
 from .widgets import Row, Strip
 
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
+        self.engine_error = None           # why the engine could not be started, shown in Status
         self._last_meter = time.monotonic()
 
         central = QWidget()
@@ -123,6 +125,11 @@ class MainWindow(QMainWindow):
         self.settings_btn.toggled.connect(lambda _on: self.fit_top_bar())
         outer.addWidget(self.sidebar)
         self.setCentralWidget(central)
+        self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
+        self.toast.setObjectName("toast")
+        self.toast.hide()
+        self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
+        self._build_shortcuts()
 
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
@@ -138,8 +145,15 @@ class MainWindow(QMainWindow):
         QTimer(self, interval=3000, timeout=self.poll_profile).start()
         self.poll_profile()
         self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
-        self.fit_top_bar(px(1600))       # sets the bar's compact minimum before the first resize
-        self.resize(px(1600), px(960))
+        # reopen as it was left: window size and the settings sidebar
+        size, sidebar_open = load_window()
+        if not sidebar_open:
+            self.settings_btn.setChecked(False)
+            self.sidebar.set_open(False, animate=False)
+        width, height = size or (px(1600), px(960))
+        self.fit_top_bar(width)          # sets the bar's compact minimum before the first resize
+        self.resize(width, height)
+        self.tab_focus_only()
 
     # ------------------------------------------------------------------ top bar
     def _build_top_bar(self):
@@ -164,6 +178,7 @@ class MainWindow(QMainWindow):
             b = QPushButton(name)
             b.setCheckable(True)
             b.setObjectName("segbtn")
+            b.setToolTip(f"{name} view (Ctrl+{i + 1})")
             b.clicked.connect(lambda _=False, n=i: self.tabs.setCurrentIndex(n))
             sl.addWidget(b)
             self.view_btns.append(b)
@@ -182,6 +197,8 @@ class MainWindow(QMainWindow):
         self.status.setObjectName("lcd")
         self.status.setAlignment(Qt.AlignCenter)
         self.status.setMinimumWidth(px(120))
+        self.status.setCursor(Qt.PointingHandCursor)     # opens the Status section
+        self.status.mousePressEvent = lambda _e: self.settings_btn.setChecked(True)
         self._status_short = False        # narrow window: just the light and "HW DSP"
         top.addWidget(self.status)
         top.addStretch(1)
@@ -206,7 +223,8 @@ class MainWindow(QMainWindow):
         self.store_btn = QPushButton("Store")
         self.store_btn.setObjectName("store")
         self.store_btn.setCheckable(True)
-        self.store_btn.setToolTip("Arm, then click a slot to save the current mix into it")
+        self.store_btn.setToolTip("Click, then click a slot to save the current mix into it "
+                                  "(Esc cancels). An empty slot saves with one click.")
         top.addWidget(self.store_btn)
         self.presets_menu = QMenu(self)
         self.presets_menu.aboutToShow.connect(self._fill_presets_menu)
@@ -221,7 +239,7 @@ class MainWindow(QMainWindow):
         self.settings_btn.setObjectName("gear")
         self.settings_btn.setCheckable(True)
         self.settings_btn.setChecked(True)
-        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.setToolTip("Show or hide settings (Ctrl+,)")
         self.settings_btn.setCursor(Qt.PointingHandCursor)
         gear = QIcon()
         size = px(14)
@@ -233,6 +251,38 @@ class MainWindow(QMainWindow):
         self.settings_btn.setIconSize(QSize(size, size))
         top.addWidget(self.settings_btn)
         return top
+
+    def _build_shortcuts(self):
+        """The standard settings key and a few for what people do most."""
+        keys = (
+            ("Ctrl+,", self.settings_btn.toggle),
+            ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
+            ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
+            ("Escape", lambda: self.store_btn.setChecked(False)),
+        )
+        for key, slot in keys:
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(slot)
+
+    def tab_focus_only(self):
+        """Buttons take the keyboard focus from Tab, not from a click, so the focus ring only
+        shows for people who use the keyboard."""
+        for b in self.findChildren(QAbstractButton):
+            if b.focusPolicy() != Qt.NoFocus:
+                b.setFocusPolicy(Qt.TabFocus)
+
+    def notify(self, text):
+        """Brief feedback over the bottom of the mixer, gone after a few seconds. Only for
+        things that are also visible elsewhere (nothing has to be read in time)."""
+        self.toast.setText(text)
+        self.toast.adjustSize()
+        area = self.centralWidget().width() - (self.sidebar.width() if self.sidebar.is_open()
+                                                 else 0)
+        self.toast.move((area - self.toast.width()) // 2,
+                        self.centralWidget().height() - self.toast.height() - px(24))
+        self.toast.raise_()
+        self.toast.show()
+        self._toast_timer.start()
 
     @staticmethod
     def _caption(text):
@@ -350,6 +400,7 @@ class MainWindow(QMainWindow):
     def hide_strip(self, strip):
         set_strip_hidden(self.st, strip.key, True)
         self.channels_shown()
+        self.notify(f"{strip.name} hidden · right-click empty space to show it")
 
     def unhide_strip(self, key):
         set_strip_hidden(self.st, key, False)
@@ -362,14 +413,13 @@ class MainWindow(QMainWindow):
     def workspace_menu(self, pos):
         menu = QMenu(self)
         hidden = self.hidden_strips()
-        sub = menu.addMenu("Unhide channel")
-        for key, name in hidden:
-            sub.addAction(name, lambda _=False, k=key: self.unhide_strip(k))
-        sub.setEnabled(bool(hidden))
-        if not hidden:
-            sub.setTitle("No hidden channels")
-        a = menu.addAction("Show all hidden channels", self.unhide_all)
-        a.setEnabled(bool(hidden))
+        if hidden:
+            sub = menu.addMenu("Unhide channel")
+            for key, name in hidden:
+                sub.addAction(name, lambda _=False, k=key: self.unhide_strip(k))
+            menu.addAction("Show all hidden channels", self.unhide_all)
+        else:       # a context menu shows only what can be done (HIG: hide, don't dim)
+            menu.addAction("No hidden channels").setEnabled(False)
         menu.exec(pos)
 
     def out_pairs(self, all_pairs=False):
@@ -418,6 +468,7 @@ class MainWindow(QMainWindow):
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.pan.changed.connect(lambda v, k=kind, ch=chans: self.set_pan(k, ch, v))
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
+            s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
@@ -447,6 +498,7 @@ class MainWindow(QMainWindow):
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.mute.toggled.connect(lambda on, pr=pair: self.set_out_mute(pr, on))
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
+            s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
@@ -657,15 +709,15 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         grp = menu.addMenu("Fader group")
         for g in range(N_GROUPS + 1):
-            a = grp.addAction("None" if g == 0 else f"● Group {g}")
+            a = (grp.addAction("None") if g == 0 else
+                 grp.addAction(self._swatch(GROUP_COLOR[g].name()), f"Group {g}"))
             a.setCheckable(True)
             a.setChecked(strip.group == g)
             a.triggered.connect(lambda _=False, n=g: self.set_group(strip, n))
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         menu.addSeparator()
-        hide = menu.addAction("Hide channel", lambda: self.hide_strip(strip))
-        hide.setToolTip("Right-click the empty workspace to bring it back")
+        menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
 
     @staticmethod
@@ -729,24 +781,28 @@ class MainWindow(QMainWindow):
         elif self.presets.slots[i]:
             self.recall_slot(i)
         else:
-            self.statusBar().showMessage(f"Slot {i + 1} is empty — click Store, then the slot.", 4000)
+            self.store_slot(i)      # nothing to overwrite: no need to arm Store first
 
     def store_slot(self, i):
         name, ok = QInputDialog.getText(self, "Store preset", f"Name for slot {i + 1}:",
                                         text=self.presets.name(i) or f"Mix {i + 1}")
         if not ok:
             return
-        self.presets.store(i, name.strip() or f"Mix {i + 1}", extract_mix(self.st))
+        name = name.strip() or f"Mix {i + 1}"
+        self.presets.store(i, name, extract_mix(self.st))
         self.st["active_slot"] = i
         self.refresh_slots()
         self.schedule_save()
+        self.notify(f"Saved “{name}” in slot {i + 1}")
 
     def recall_slot(self, i):
         apply_mix(self.st, self.presets.slots[i]["mix"])
         self.st["active_slot"] = i
+        name = self.presets.name(i)
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
+        self.notify(f"Recalled “{name}”")
 
     def slot_menu(self, i):
         menu = QMenu(self)
@@ -786,17 +842,18 @@ class MainWindow(QMainWindow):
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.statusBar().showMessage(f"Imported “{name}”", 4000)
+        self.notify(f"Imported “{name}”")
 
     def reset_mix(self):
-        if QMessageBox.question(self, "Reset mix",
-                                "Reset all routing to the default (playback n → output n, "
-                                "no input monitoring, no groups)?") == QMessageBox.Yes:
-            apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
-            self.st["active_slot"] = None
-            self.rebuild_all()
-            self.refresh_slots()
-            self.push_matrix()
+        if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
+                   "no input monitoring, no groups)? This can't be undone.", "Reset mix"):
+            return
+        apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
+        self.st["active_slot"] = None
+        self.rebuild_all()
+        self.refresh_slots()
+        self.push_matrix()
+        self.notify("Mix reset to default")
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
@@ -876,7 +933,8 @@ class MainWindow(QMainWindow):
             self.save()   # so a freshly started engine loads our matrix
             ok, msg = self.engine.start()
             if not ok:
-                QMessageBox.warning(self, "Engine", msg)
+                # shown in the Status section instead of an alert at launch
+                self.engine_error = msg
                 return
             for _ in range(30):
                 time.sleep(0.05)
@@ -884,6 +942,7 @@ class MainWindow(QMainWindow):
                     break
 
     def restart_engine(self):
+        self.engine_error = None
         self.save()
         self.engine.stop()
         time.sleep(0.3)
@@ -893,12 +952,11 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
-        self.settings.update_hw_mixer(s)
+        self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff2a4f'>●</span>&nbsp; ENGINE STOPPED"
-            self.settings.eng_label.setText("Engine is not running.")
-            self.settings.eng_btn.setText("Start engine")
+            txt = "<span style='color:#ff2a4f'>○</span>&nbsp; ENGINE STOPPED"
+            self.status.setToolTip("The engine is not running · click for details")
         else:
             hw_col = ("#2ad4ff" if s["hw"] == "active" else
                       "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
@@ -906,15 +964,10 @@ class MainWindow(QMainWindow):
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
                       else "offline")
-            txt = (f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP" +
+            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
+            txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
-            self.status.setToolTip(f"Hardware DSP: {rate}, {routes}")
-            self.settings.eng_label.setText(
-                ("Running" if s["processing"] else "Running (not responding)") +
-                "<br>Playback sink: " +
-                (f"linked to playback {self.dev.sink_channels}" if s["sink_linked"] else
-                 f"not linked to the {self.dev.name.replace('RME ', '')}"))
-            self.settings.eng_btn.setText("Restart engine")
+            self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
                 self.rate, self.mode = s["rate"], speed_mode(s["rate"])
                 self.rebuild_all()
@@ -957,6 +1010,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.save()
+        size = (self.normalGeometry() if self.isMaximized() else self.geometry()).size()
+        save_window(size.width(), size.height(), self.sidebar.is_open())
         super().closeEvent(e)
 
 
