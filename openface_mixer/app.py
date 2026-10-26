@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(px(12), px(10), px(12), px(10))
         root.setSpacing(px(10))
         self.topbar = QWidget()
+        self.topbar.setObjectName("topbar")
         self.topbar.setLayout(self._build_top_bar())
         root.addWidget(self.topbar)
         edge = QFrame()
@@ -104,7 +105,7 @@ class MainWindow(QMainWindow):
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
-        self.settings.layout().insertWidget(self.settings.layout().count() - 1, self.control)
+        self.settings.add_control_room(self.control)
         compact_boxes(self.settings)
         self.arc = ArcLink(self)
         self.arc.key.connect(self.arc_key)
@@ -219,8 +220,8 @@ class MainWindow(QMainWindow):
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setCursor(Qt.PointingHandCursor)
         gear = QIcon()
-        size = px(16)
-        for color, state in (("#d9eef2", QIcon.Off), ("#0b0f1c", QIcon.On)):
+        size = px(14)
+        for color, state in (("#d9eef2", QIcon.Off), ("#2ad4ff", QIcon.On)):
             pm = icon_pixmap("settings", color, size)
             if pm:
                 gear.addPixmap(pm, QIcon.Normal, state)

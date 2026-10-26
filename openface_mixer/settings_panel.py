@@ -147,15 +147,8 @@ class SettingsPanel(QWidget):
         lay.addWidget(box)
         self._card_name = None
         self._updating = False
-
-        if dev.family == "ff802":
-            self._build_ff802(lay)
-        elif dev.key == "ff800":
-            self._build_ff800(lay)
-        elif dev.key == "raydat":
-            self._build_raydat(lay)
-        else:
-            self._build_digiface(lay)
+        if dev.key == "digiface":
+            self._build_card_profile(lay)
 
         eng = Section("HARDWARE MIXER")
         el = QVBoxLayout(eng)
@@ -169,6 +162,16 @@ class SettingsPanel(QWidget):
         el.addWidget(self.eng_btn)
         lay.addWidget(eng)
 
+        if dev.family == "ff802":
+            self._build_ff802(lay)
+        elif dev.key == "ff800":
+            self._build_ff800(lay)
+        elif dev.key == "raydat":
+            self._build_raydat(lay)
+        else:
+            self._build_digiface(lay)
+        self._control_room_at = lay.count()   # add_control_room() slots its section here
+
         self._build_ui_scale(lay, ui_scale)
         self._build_mix(lay)
         self._build_updates(lay)
@@ -180,6 +183,10 @@ class SettingsPanel(QWidget):
             "sink. Other playback channels: send apps to the interface's own output channels "
             "(Pro Audio profile) with qpwgraph/Helvum.")
         lay.addStretch()
+
+    def add_control_room(self, section):
+        """The main window's Control Room section, between the device sections and Display."""
+        self.layout().insertWidget(self._control_room_at, section)
 
     def _build_ui_scale(self, lay, scale):
         self._scale_at_start = scale
@@ -323,8 +330,9 @@ class SettingsPanel(QWidget):
         lay.addWidget(clock)
 
         ports = Section("OPTICAL PORTS")
+        ports.setObjectName("ports")      # 10 px grid: four rows in little height
         pl = QGridLayout(ports)
-        for c, h in enumerate(["", "In format", "In status", "In rate", "Out format"]):
+        for c, h in enumerate(["", "Input", "Status", "Rate", "Output"]):
             lbl = QLabel(h)
             lbl.setObjectName("hint")
             pl.addWidget(lbl, 0, c)
@@ -332,12 +340,15 @@ class SettingsPanel(QWidget):
         for i in range(4):
             fmt, led, rate, out = QLabel("—"), Led(), QLabel("—"), QComboBox()
             out.addItems(["ADAT", "S/PDIF"])
+            out.setToolTip(f"Output {i + 1} format")
             out.activated.connect(lambda v, n=i + 1: self._write(f"Output {n} Format", v))
             for c, w in enumerate([key_label(f"{i + 1}"), fmt, led, rate, out]):
                 pl.addWidget(w, i + 1, c)
             self.port_widgets.append((fmt, led, rate, out))
+        pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
 
+    def _build_card_profile(self, lay):
         prof = Section("CARD PROFILE")
         vl = QVBoxLayout(prof)
         self.profile = QLabel("—")
