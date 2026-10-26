@@ -95,12 +95,40 @@ def save_state(st, dev=DEFAULT):
     atomic_write(matrix_file(dev), matrix_file_bytes(st, dev))
 
 
+def load_ui():
+    """ui.json: the UI scale, plus the window size and whether the settings sidebar is open."""
+    try:
+        ui = json.loads(UI_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return ui if isinstance(ui, dict) else {}
+
+
+def save_ui(**changes):
+    atomic_write(UI_FILE, json.dumps({**load_ui(), **changes}))
+
+
+def load_window():
+    """(width, height, sidebar open) of the last window, so the app reopens as it was left.
+    Size is None when there is none saved."""
+    ui = load_ui()
+    size = ui.get("window")
+    if not (isinstance(size, list) and len(size) == 2 and all(isinstance(v, int) and v > 0
+                                                              for v in size)):
+        size = None
+    return size, ui.get("sidebar", True) is not False
+
+
+def save_window(width, height, sidebar):
+    save_ui(window=[int(width), int(height)], sidebar=bool(sidebar))
+
+
 def load_ui_scale():
     """The saved UI scale (1.0 = the desktop's own scale). It is applied by laying the widgets
     out larger (theme.px), not through QT_SCALE_FACTOR, so nothing is rasterised and stretched."""
     try:
-        scale = float(json.loads(UI_FILE.read_text())["scale"])
-    except (OSError, ValueError, TypeError, KeyError):
+        scale = float(load_ui()["scale"])
+    except (ValueError, TypeError, KeyError):
         return UI_SCALE_DEFAULT
     if not math.isfinite(scale):
         return UI_SCALE_DEFAULT
@@ -109,7 +137,7 @@ def load_ui_scale():
 
 def save_ui_scale(scale):
     scale = max(UI_SCALE_MIN, min(UI_SCALE_MAX, float(scale)))
-    atomic_write(UI_FILE, json.dumps({"scale": scale}))
+    save_ui(scale=scale)
 
 
 def load_device_choice():

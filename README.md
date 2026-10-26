@@ -115,18 +115,22 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 
 | Action | How |
 | --- | --- |
+| Undo / redo | Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y). Covers levels, mutes, routing, groups, names, colours, hidden channels, preset recall, import and reset |
 | Fine fader move | Ctrl + drag (or Ctrl + scroll) |
+| Fader from the keyboard | Click a fader (or Tab to it), then Up/Down (1 dB, Ctrl = 0.5 dB), Page Up/Down (6 dB), Home (0 dB), End (-∞) |
 | Fader to 0 dB | Double-click or Alt-click |
-| Centre pan | Double-click the knob |
+| Centre pan | Double-click the knob (or Home); Left/Right move it |
 | Reset peak / clip | Click the meter |
 | Solo | **S** on a strip: solo-in-place in the current submix |
-| Store a preset | Click **Store**, then a slot (or right-click a slot). In a narrow window: **Presets ▾** |
+| Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
-| Recall a preset | Click a lit slot |
+| Recall a preset | Click a lit slot (Ctrl+Z goes back to the mix before) |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
-| Rename a channel | Right-click a strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
-| Hide channels | Settings panel → Display → *Show*: untick a channel group |
+| Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
+| Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
 | Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
+| Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
+| Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
 
 ### Control room and ARC USB
 

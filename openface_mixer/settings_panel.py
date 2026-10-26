@@ -34,42 +34,69 @@ def udev_rule_hint(dev):
             "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
 
 
-def hw_state_text(dev, state):
+CYAN, AMBER, RED, OFF = "#2ad4ff", "#ffb020", "#ff2a4f", "#6f8a94"
+
+
+def light(color, text, on=True):
+    """A status value: a light, filled when things are fine or busy and an empty ring when
+    not, then the words (the state never depends on telling the colours apart)."""
+    return f"<span style='color:{color}'>{'●' if on else '○'}</span>&nbsp;{text}"
+
+
+def hw_state(dev, state):
+    """(short value for the Hardware mixer row, what to do about it or "")."""
     short = dev.name.replace("RME ", "")
-    red = "<span style='color:#ff2a4f'>{}</span>"
     hint = dev.missing_hint() if state == "no-device" else ""
     return {
-        "starting": f"Connecting to the {short}…",
-        "no-device": red.format(f"{short} not found on {dev.bus}.") + (hint and f"<br>{hint}"),
-        "no-access": red.format(f"No permission to open the {short}.") + "<br>"
-                     + udev_rule_hint(dev),
-        "busy": red.format(
-            f"The {short} driver refuses mixer changes while playback and recording are open in "
-            "two different programs. Let one program (PipeWire or JACK) use both."
-            if dev.bus == "PCIe" else f"The {short} mixer interface is in use by another program."),
-        "active": "<span style='color:#2ad4ff'>Hardware mixer active</span>",
-        "no-nodes": f"<span style='color:#ffb020'>Hardware mixer active, but this mix needs "
-                    f"more than {dev.max_routes} routes; some sends are missing.</span>",
-        "error": red.format(f"{dev.bus} error talking to the {short}; retrying."),
-        "wrong-driver": red.format(
-            f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards from 2022 on. "
-            "Install snd-hdspe and blacklist snd-hdspm (see the README)."),
-    }.get(state, state)
+        "starting": (light(AMBER, "Connecting…"), ""),
+        "no-device": (light(RED, "Not found", False), f"{short} not found on {dev.bus}."
+                      + (hint and f"<br>{hint}")),
+        "no-access": (light(RED, "No permission", False),
+                      f"No permission to open the {short}.<br>" + udev_rule_hint(dev)),
+        "busy": (light(RED, "In use", False),
+                 f"The {short} driver refuses mixer changes while playback and recording are "
+                 "open in two different programs. Let one program (PipeWire or JACK) use both."
+                 if dev.bus == "PCIe" else
+                 f"The {short} mixer interface is in use by another program."),
+        "active": (light(CYAN, "Active"), ""),
+        "no-nodes": (light(AMBER, "Active, routes full"),
+                     f"This mix needs more than {dev.max_routes} routes; some sends are "
+                     "missing."),
+        "error": (light(RED, f"{dev.bus} error", False),
+                  f"{dev.bus} error talking to the {short}; retrying."),
+        "wrong-driver": (light(RED, "Wrong driver", False),
+                         f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards "
+                         "from 2022 on. Install snd-hdspe and blacklist snd-hdspm (see the "
+                         "README)."),
+    }.get(state, (state, ""))
+
+
+def ask(parent, title, text, action):
+    """A question with a button named for what it does and Cancel (the safe default), instead
+    of Yes / No."""
+    box = QMessageBox(QMessageBox.Question, title, text, parent=parent)
+    go = box.addButton(action, QMessageBox.AcceptRole)
+    box.setDefaultButton(box.addButton(QMessageBox.Cancel))
+    box.exec()
+    return box.clickedButton() is go
 
 
 class Led(QLabel):
-    COLORS = {"No Lock": "#2a4552", "Lock": "#ffb020", "Sync": "#2ad4ff"}
+    """Lock state: a filled light when locked or in sync, an empty ring when not, so it reads
+    without telling the colours apart."""
+    COLORS = {"No Lock": "#6f8a94", "Lock": "#ffb020", "Sync": "#2ad4ff"}
 
     def set_state(self, s):
-        c = self.COLORS.get(s, "#2a4552")
-        self.setText(f"<span style='color:{c}'>●</span> {s or '—'}")
+        c = self.COLORS.get(s, "#6f8a94")
+        dot = "●" if s in ("Lock", "Sync") else "○"
+        self.setText(f"<span style='color:{c}'>{dot}</span> {s or '—'}")
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
     from the chosen source, dark while it does not (or the state is unknown). The tooltip
     names the current source."""
-    ON, OFF = "#56e39f", "#2a4552"
+    ON, OFF = "#56e39f", "#6f8a94"
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
@@ -85,8 +112,11 @@ class SyncLight(QLabel):
 
     def refresh(self):
         on = self.current not in (None, "—") and self.current == self.combo.currentText()
-        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>●</span>")
-        self.setToolTip(f"Current source: {self.current}" if self.current else
+        # filled and green while in use, an empty ring otherwise (shape, not only colour)
+        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>{'●' if on else '○'}"
+                     "</span>")
+        self.setToolTip(("Running from this source" if on else
+                         f"Running from: {self.current}") if self.current else
                         "Current source unknown")
 
 
@@ -112,7 +142,7 @@ class Sidebar(QFrame):
         close.setText("×")
         close.setObjectName("sidebarclose")
         close.setCursor(Qt.PointingHandCursor)
-        close.setToolTip("Hide the settings (the Settings button brings them back)")
+        close.setToolTip("Hide settings (Ctrl+,)")
         close.clicked.connect(self.closed.emit)
         head.addWidget(close)
         lay.addLayout(head)
@@ -131,12 +161,15 @@ class Sidebar(QFrame):
     def is_open(self):
         return self._open
 
-    def set_open(self, on):
+    def set_open(self, on, animate=True):
         if on == self._open:
             return
         self._open = on
         self.setMinimumWidth(0)
         self._anim.stop()
+        if not animate:
+            self.setMaximumWidth(self.full_width if on else 0)
+            return
         self._anim.setStartValue(self.width())
         self._anim.setEndValue(self.full_width if on else 0)
         self._anim.start()
@@ -173,18 +206,24 @@ class SettingsPanel(QWidget):
         self._card_name = None
         self._updating = False
 
+        # one value per row, as the other sections, so the state can be read at a glance; what
+        # to do about a problem goes in the note below the rows
         eng = Section("STATUS")
-        el = QVBoxLayout(eng)
+        el = QGridLayout(eng)
         if dev.key == "digiface":
             self._build_card_profile(el)
-        self.hw_label = QLabel("—")
-        self.hw_label.setWordWrap(True)
-        el.addWidget(self.hw_label)
-        self.eng_label = QLabel("—")
-        self.eng_label.setWordWrap(True)
-        el.addWidget(self.eng_label)
+        self.hw_label, self.routes_label, self.eng_label, self.sink_label = (
+            self._status_row(el, key) for key in ("Hardware mixer", "Routes", "Engine",
+                                                  "Playback sink"))
+        self.status_note = QLabel()
+        self.status_note.setObjectName("note")
+        self.status_note.setWordWrap(True)
+        self.status_note.setTextInteractionFlags(Qt.TextSelectableByMouse)   # commands to copy
+        self.status_note.hide()
+        el.addWidget(self.status_note, el.rowCount(), 0, 1, 2)
         self.eng_btn = QPushButton("Restart engine")
-        el.addWidget(self.eng_btn)
+        el.addWidget(self.eng_btn, el.rowCount(), 0, 1, 2)
+        el.setColumnStretch(1, 1)
         lay.addWidget(eng)
 
         if dev.family == "ff802":
@@ -239,11 +278,13 @@ class SettingsPanel(QWidget):
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
+        self.show_boxes = {}
         for i, g in enumerate(self.dev.channel_groups()):
             cb = QCheckBox(group_title(g))
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
+            self.show_boxes[g] = cb
         dl.addLayout(show, 3, 0, 1, 2)
         lay.addWidget(disp)
 
@@ -252,14 +293,23 @@ class SettingsPanel(QWidget):
         window)."""
         box = Section("MIX")
         ml = QVBoxLayout(box)
-        self.export_btn = QPushButton("Export current mix…")
+        self.export_btn = QPushButton("Export mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
-        self.reset_btn = QPushButton("Reset mix to default…")
-        self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
+        self.reset_btn = QPushButton("Reset mix to default")
+        self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups. "
+                                  "Ctrl+Z undoes it.")
         for b in (self.export_btn, self.import_btn, self.reset_btn):
             ml.addWidget(b)
         lay.addWidget(box)
+
+    def sync_display(self, st):
+        """Show st's names and SHOW options after an undo or redo changed them."""
+        for box, on in [(self.names_box, st["custom_names"])] + [
+                (cb, g not in st["hidden"]) for g, cb in self.show_boxes.items()]:
+            box.blockSignals(True)
+            box.setChecked(on)
+            box.blockSignals(False)
 
     def _show_toggled(self, group, on):
         hidden = [g for g in self.st["hidden"] if g != group]
@@ -297,10 +347,10 @@ class SettingsPanel(QWidget):
     def _update_clicked(self):
         src, installed = self._source
         if self._pending:
-            if QMessageBox.question(
-                    self, "Update Openface Mixer",
-                    f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
-                    "up first, and the engines restart with the new version.") != QMessageBox.Yes:
+            if not ask(self, "Update Openface Mixer",
+                       f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
+                       "up first, and the engines restart with the new version.",
+                       "Update and restart"):
                 return
             step, job, text = "update", lambda: updater.update(src), "Updating…"
         else:
@@ -334,7 +384,7 @@ class SettingsPanel(QWidget):
             latest = "<br>".join(f"• {html.escape(s)}" for s in result[:5])
             more = f"<br>…and {len(result) - 5} more" if len(result) > 5 else ""
             self.update_label.setText(f"{len(result)} update(s) on GitHub:<br>{latest}{more}")
-            self.update_btn.setText("Update and restart")
+            self.update_btn.setText("Update and restart…")
         else:
             self.update_label.setText("Openface Mixer is up to date.")
 
@@ -373,14 +423,28 @@ class SettingsPanel(QWidget):
         pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
 
-    def _build_card_profile(self, vl):
+    @staticmethod
+    def _status_row(grid, key):
+        r = grid.rowCount()
+        grid.addWidget(key_label(key), r, 0, Qt.AlignTop)
+        value = QLabel("—")
+        value.setWordWrap(True)
+        grid.addWidget(value, r, 1)
+        return value
+
+    def show_status_note(self, *notes):
+        """The STATUS section's note: what is wrong and how to fix it (empty: hidden)."""
+        text = "<br><br>".join(n for n in notes if n)
+        self.status_note.setText(text)
+        self.status_note.setVisible(bool(text))
+
+    def _build_card_profile(self, grid):
         """The Digiface's PipeWire profile, at the top of the STATUS section."""
-        self.profile = QLabel("—")
-        self.profile.setWordWrap(True)
-        vl.addWidget(self.profile)
-        self.pro_btn = QPushButton("Record all inputs (Pro Audio profile)")
+        self.profile = self._status_row(grid, "Card profile")
+        self.recording = self._status_row(grid, "Recording")
+        self.pro_btn = QPushButton("Record all inputs (Pro Audio)…")
         self.pro_btn.clicked.connect(self._enable_pro)
-        vl.addWidget(self.pro_btn)
+        grid.addWidget(self.pro_btn, grid.rowCount(), 0, 1, 2)
 
     # ------------------------------------------------------------------ Fireface 802
     def _build_ff802(self, lay):
@@ -642,13 +706,11 @@ class SettingsPanel(QWidget):
     def _enable_pro(self):
         if not self._card_name:
             return
-        r = QMessageBox.question(
-            self, "Switch profile",
-            "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-            "This lets apps record all 32 hardware inputs. The output device will be renamed to "
-            "'…pro-output-0' (your existing combine-stream config already matches it). "
-            "Audio may briefly drop out.")
-        if r == QMessageBox.Yes:
+        if ask(self, "Switch profile",
+               "Switch the Digiface to the 'Pro Audio' profile?\n\n"
+               "This lets apps record all 32 hardware inputs. The output device will be renamed "
+               "to '…pro-output-0' (your existing combine-stream config already matches it). "
+               "Audio may briefly drop out.", "Switch profile"):
             set_card_profile(self._card_name, "pro-audio")
 
     def update_hw(self, ctrls):
@@ -686,29 +748,44 @@ class SettingsPanel(QWidget):
         finally:
             self._updating = False
 
-    def update_hw_mixer(self, status):
-        """status: Engine.status() dict, or None if the engine is not running."""
+    def update_hw_mixer(self, status, engine_error=None):
+        """status: Engine.status() dict, or None if the engine is not running (engine_error:
+        why it could not be started)."""
         if status is None:
             self.hw_label.setText("—")
+            self.routes_label.setText("—")
+            self.eng_label.setText(light(RED, "Stopped", False))
+            self.sink_label.setText("—")
+            self.show_status_note(html.escape(engine_error) if engine_error else
+                                  "The hardware keeps its last mix. Start the engine to "
+                                  "change it.")
+            self.eng_btn.setText("Start engine")
             return
-        text = hw_state_text(self.dev, status["hw"])
+        value, note = hw_state(self.dev, status["hw"])
+        self.hw_label.setText(value)
         if status["hw"] in ("active", "no-nodes"):
-            if self.dev.max_routes:
-                text += f"<br>{status['hw_nodes']} of {self.dev.max_routes} routes in use"
-            else:
-                text += f"<br>{status['hw_nodes']} routes in use"
-            if status["hw_levels"]:
-                text += " · meters from the interface"
-        self.hw_label.setText(text)
+            limit = f" of {self.dev.max_routes}" if self.dev.max_routes else ""
+            self.routes_label.setText(f"{status['hw_nodes']}{limit}")
+            self.hw_label.setToolTip("Meters come from the interface" if status["hw_levels"]
+                                     else "")
+        else:
+            self.routes_label.setText("—")
+        self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
+                               light(AMBER, "Not responding"))
+        self.sink_label.setText(
+            f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
+            light(AMBER, f"Not linked to the {self.dev.name.replace('RME ', '')}", False))
+        self.show_status_note(note)
+        self.eng_btn.setText("Restart engine")
 
     def update_profile(self, name, profile, has_in):
         self._card_name = name
         if not name:
-            self.profile.setText("Digiface not present in PipeWire")
+            self.profile.setText(light(OFF, "Not in PipeWire", False))
+            self.recording.setText("—")
             self.pro_btn.setVisible(False)
             return
-        ok = "<span style='color:#2ad4ff'>inputs available for recording</span>" if has_in else \
-            "<span style='color:#ffb020'>no input device — apps can't record the inputs " \
-            "(monitoring still works)</span>"
-        self.profile.setText(f"Active: <b>{profile}</b><br>{ok}")
+        self.profile.setText(html.escape(profile or "—"))
+        self.recording.setText(light(CYAN, "All inputs") if has_in else
+                               light(AMBER, "No inputs (monitoring still works)", False))
         self.pro_btn.setVisible(not has_in)
