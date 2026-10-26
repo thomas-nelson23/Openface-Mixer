@@ -229,6 +229,7 @@ def stylesheet():
         QPushButton:checked {{ background:white; color:#0b0f1c; border-color:white; font-weight:600; }}
         QPushButton:checked:hover {{ background:{c}; border-color:{c}; color:#0b0f1c; }}
         QPushButton::menu-indicator {{ width:0; }}
+        QPushButton#gear {{ padding:{p(4)}px {p(7)}px; }}
         QWidget#segment {{ background:rgba(4,12,18,0.7); border:1px solid {HAIR};
                           border-radius:{p(13)}px; }}
         QPushButton#segbtn {{ background:transparent; border:none; border-radius:{p(10)}px;
@@ -243,11 +244,6 @@ def stylesheet():
         QPushButton#slot[active="true"] {{ color:{r}; border-color:{r}; font-weight:700; }}
         QPushButton#slot:hover {{ border-color:{c}; }}
         QPushButton#store:checked {{ background:{r}; border-color:{r}; color:white; }}
-        QPushButton#solomaster, QPushButton#namesbtn {{ color:#3c5560; font-weight:700;
-                                 padding:{p(4)}px {p(12)}px; letter-spacing:{p(2)}px; }}
-        QPushButton#solomaster[armed="true"] {{ color:{SOLO.name()}; border-color:{SOLO.name()}; }}
-        QPushButton#solomaster[active="true"] {{ background:{SOLO.name()}; color:#0b0f1c; }}
-        QPushButton#namesbtn:checked {{ background:white; color:#0b0f1c; border-color:white; }}
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
                      border-radius:{p(13)}px; padding:{p(5)}px {p(16)}px; font-family:{MONO_STACK};
                      font-size:{p(10)}px; }}

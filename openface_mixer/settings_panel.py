@@ -103,6 +103,9 @@ class Sidebar(QFrame):
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._open = True
 
+    def is_open(self):
+        return self._open
+
     def set_open(self, on):
         if on == self._open:
             return
@@ -118,6 +121,7 @@ class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface 802/800) changed in st["hw"]
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
+    names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
@@ -166,6 +170,7 @@ class SettingsPanel(QWidget):
         lay.addWidget(eng)
 
         self._build_ui_scale(lay, ui_scale)
+        self._build_mix(lay)
         self._build_updates(lay)
 
         eng.setToolTip(
@@ -191,8 +196,14 @@ class SettingsPanel(QWidget):
         dl.addWidget(self.scale_combo, 0, 1)
         self.scale_combo.setToolTip("Lays the whole window out larger or smaller, on top of the "
                                     "desktop's display scale. Applies right away.")
+        self.names_box = QCheckBox("Custom channel names")
+        self.names_box.setChecked(self.st["custom_names"])
+        self.names_box.setToolTip("Show the names given with right-click > Rename, or the "
+                                  "standard channel names.")
+        self.names_box.toggled.connect(self.names_changed.emit)
+        dl.addWidget(self.names_box, 1, 0, 1, 2)
         # SHOW: hide whole channel groups (an unused ADAT port, ...) from the mixer and matrix
-        dl.addWidget(key_label("Show"), 1, 0, 1, 2)
+        dl.addWidget(key_label("Show"), 2, 0, 1, 2)
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
@@ -201,8 +212,22 @@ class SettingsPanel(QWidget):
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
-        dl.addLayout(show, 2, 0, 1, 2)
+        dl.addLayout(show, 3, 0, 1, 2)
         lay.addWidget(disp)
+
+    def _build_mix(self, lay):
+        """Export / import a mix as a file, or start over (the buttons are wired by the main
+        window)."""
+        box = Section("MIX")
+        ml = QVBoxLayout(box)
+        self.export_btn = QPushButton("Export current mix…")
+        self.export_btn.setToolTip("Save the routing, levels and groups to a file")
+        self.import_btn = QPushButton("Import mix…")
+        self.reset_btn = QPushButton("Reset mix to default…")
+        self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
+        for b in (self.export_btn, self.import_btn, self.reset_btn):
+            ml.addWidget(b)
+        lay.addWidget(box)
 
     def _show_toggled(self, group, on):
         hidden = [g for g in self.st["hidden"] if g != group]
