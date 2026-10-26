@@ -181,7 +181,11 @@ def compact_boxes(panel):
         lay.setContentsMargins(px(14), px(2), px(14), px(14))
         if isinstance(lay, QGridLayout):
             lay.setHorizontalSpacing(px(6))
-            lay.setVerticalSpacing(px(4))
+            if box.objectName() == "ports":
+                lay.setVerticalSpacing(px(2))
+            else:
+                lay.setVerticalSpacing(px(4))
+                lay.setColumnMinimumWidth(0, px(96))   # values line up across the sections
         else:
             lay.setSpacing(px(4))
 
@@ -222,20 +226,29 @@ def stylesheet():
         QMenu::separator {{ height:1px; background:{HAIR}; margin:{p(4)}px {p(6)}px; }}
         QMenu::icon {{ margin-left:{p(6)}px; }}
         QPushButton {{ background:transparent; color:{t}; border:1px solid {HAIR_STRONG};
-                      border-radius:{p(12)}px; padding:{p(4)}px {p(14)}px; }}
+                      border-radius:{p(11)}px; padding:{p(3)}px {p(12)}px; }}
         QPushButton:hover {{ border-color:rgba(42,212,255,0.5); color:white; }}
         QPushButton:pressed {{ background:rgba(42,212,255,0.08); }}
         QPushButton:disabled {{ color:{MUTED}; border-color:{HAIR}; }}
         QPushButton:checked {{ background:white; color:#0b0f1c; border-color:white; font-weight:600; }}
         QPushButton:checked:hover {{ background:{c}; border-color:{c}; color:#0b0f1c; }}
         QPushButton::menu-indicator {{ width:0; }}
-        QPushButton#gear {{ padding:{p(4)}px {p(7)}px; }}
-        QWidget#segment {{ background:rgba(4,12,18,0.7); border:1px solid {HAIR};
-                          border-radius:{p(13)}px; }}
-        QPushButton#segbtn {{ background:transparent; border:none; border-radius:{p(10)}px;
-                             padding:{p(3)}px {p(16)}px; color:{d}; font-weight:500; }}
+        /* the top bar: every control 11 px and the same height, quiet selected states */
+        QWidget#topbar QPushButton, QWidget#topbar QComboBox {{ font-size:{p(11)}px; }}
+        QWidget#topbar QComboBox {{ padding:{p(3)}px {p(8)}px; border-radius:{p(11)}px;
+                                   background:rgba(4,12,18,0.6); }}
+        QWidget#topbar QComboBox::drop-down {{ width:{p(16)}px; }}
+        QPushButton#gear {{ padding:{p(3)}px {p(6)}px; }}
+        QPushButton#gear:checked {{ background:rgba(42,212,255,0.12); border-color:rgba(42,212,255,0.45); }}
+        QPushButton#gear:checked:hover {{ background:rgba(42,212,255,0.2); }}
+        QWidget#segment {{ background:rgba(4,12,18,0.6); border:1px solid {HAIR};
+                          border-radius:{p(11)}px; }}
+        QPushButton#segbtn {{ background:transparent; border:none; border-radius:{p(9)}px;
+                             padding:{p(2)}px {p(14)}px; color:{d}; font-weight:500; }}
         QPushButton#segbtn:hover {{ color:white; }}
-        QPushButton#segbtn:checked {{ background:white; color:#0b0f1c; font-weight:600; }}
+        QPushButton#segbtn:checked {{ background:rgba(255,255,255,0.09); color:white;
+                                     font-weight:500; }}
+        QPushButton#segbtn:checked:hover {{ background:rgba(255,255,255,0.12); color:white; }}
         QPushButton#slot {{ background:transparent; border:1px solid {HAIR}; border-radius:{p(11)}px;
                            padding:0; color:#3c5560; font-family:{MONO_STACK}; font-size:{p(9)}px;
                            min-width:{p(22)}px; max-width:{p(22)}px; min-height:{p(22)}px;
@@ -245,7 +258,7 @@ def stylesheet():
         QPushButton#slot:hover {{ border-color:{c}; }}
         QPushButton#store:checked {{ background:{r}; border-color:{r}; color:white; }}
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
-                     border-radius:{p(13)}px; padding:{p(5)}px {p(16)}px; font-family:{MONO_STACK};
+                     border-radius:{p(11)}px; padding:{p(4)}px {p(14)}px; font-family:{MONO_STACK};
                      font-size:{p(10)}px; }}
         QLabel#caption {{ color:{d}; font-size:{p(8)}px; font-weight:600; }}
         QLabel#key {{ color:{d}; }}
@@ -270,9 +283,13 @@ def stylesheet():
             font-size:{p(11)}px; }}
         QFrame#sidebar QLabel#head {{ color:white; }}
         QGroupBox QPushButton {{ padding:{p(3)}px {p(10)}px; border-radius:{p(6)}px; }}
-        QGroupBox QPushButton:checked {{ background:{c}; border-color:{c}; color:#021012; }}
+        QGroupBox QPushButton:checked {{ background:rgba(42,212,255,0.16); border-color:{c};
+                                         color:{c}; font-weight:500; }}
+        QGroupBox QPushButton:checked:hover {{ background:rgba(42,212,255,0.26); color:white; }}
         QGroupBox QComboBox {{ padding:{p(2)}px {p(2)}px {p(2)}px {p(7)}px; }}
         QGroupBox QComboBox::drop-down {{ width:{p(12)}px; }}
+        QGroupBox#ports QLabel, QGroupBox#ports QComboBox {{ font-size:{p(10)}px; }}
+        QGroupBox#ports QComboBox {{ padding:{p(1)}px {p(1)}px {p(1)}px {p(6)}px; }}
         QCheckBox {{ spacing:{p(6)}px; }}
         QCheckBox::indicator {{ width:{p(12)}px; height:{p(12)}px; border:1px solid {HAIR_STRONG};
                                border-radius:{p(3)}px; background:rgba(255,255,255,0.035); }}

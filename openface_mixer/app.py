@@ -25,8 +25,8 @@ from .matrix_view import MatrixView
 from .model import (
     N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
     compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
-    set_strip_color, set_strip_db, set_strip_icon, speed_mode, strip_channels, strip_color,
-    strip_icon, strip_key,
+    set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels,
+    strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .settings_panel import SettingsPanel, Sidebar
@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(px(12), px(10), px(12), px(10))
         root.setSpacing(px(10))
         self.topbar = QWidget()
+        self.topbar.setObjectName("topbar")
         self.topbar.setLayout(self._build_top_bar())
         root.addWidget(self.topbar)
         edge = QFrame()
@@ -73,6 +74,10 @@ class MainWindow(QMainWindow):
 
         body = QHBoxLayout()
         mixer_page = QWidget()
+        # right-click on the workspace (not on a strip): bring hidden channels back
+        mixer_page.setContextMenuPolicy(Qt.CustomContextMenu)
+        mixer_page.customContextMenuRequested.connect(
+            lambda pos: self.workspace_menu(mixer_page.mapToGlobal(pos)))
         rows = QVBoxLayout(mixer_page)
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(px(10))
@@ -104,7 +109,7 @@ class MainWindow(QMainWindow):
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
-        self.settings.layout().insertWidget(self.settings.layout().count() - 1, self.control)
+        self.settings.add_control_room(self.control)
         compact_boxes(self.settings)
         self.arc = ArcLink(self)
         self.arc.key.connect(self.arc_key)
@@ -219,8 +224,8 @@ class MainWindow(QMainWindow):
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setCursor(Qt.PointingHandCursor)
         gear = QIcon()
-        size = px(16)
-        for color, state in (("#d9eef2", QIcon.Off), ("#0b0f1c", QIcon.On)):
+        size = px(14)
+        for color, state in (("#d9eef2", QIcon.Off), ("#2ad4ff", QIcon.On)):
             pm = icon_pixmap("settings", color, size)
             if pm:
                 gear.addPixmap(pm, QIcon.Normal, state)
@@ -319,9 +324,53 @@ class MainWindow(QMainWindow):
         return display_name(self.st, key, self.standard_label(kind, c, pair))
 
     def shown(self, kind, c):
-        """False if channel c is in a group hidden with the SHOW options."""
+        """False if channel c is in a group hidden with the SHOW options, or its strip was
+        hidden with right-click > Hide channel."""
         k = "out" if kind == "play" else kind
-        return self.dev.channel_group(k, c, self.mode) not in self.st["hidden"]
+        if self.dev.channel_group(k, c, self.mode) in self.st["hidden"]:
+            return False
+        key = strip_key("out", c // 2) if kind == "out" else strip_key(kind, c)
+        return not strip_hidden(self.st, key)
+
+    def hidden_strips(self):
+        """[(key, name)] of the strips hidden one by one, in channel order."""
+        found = []
+        for kind in ("in", "play"):
+            for c in self.channels(kind):
+                key = strip_key(kind, c)
+                if strip_hidden(self.st, key):
+                    pair = c % 2 == 0 and self.st["stereo"][kind][c // 2]
+                    found.append((key, self.label(kind, c, pair)))
+        for pair in self.out_pairs(all_pairs=True):
+            key = strip_key("out", pair)
+            if strip_hidden(self.st, key):
+                found.append((key, self.label("out", 2 * pair, True)))
+        return found
+
+    def hide_strip(self, strip):
+        set_strip_hidden(self.st, strip.key, True)
+        self.channels_shown()
+
+    def unhide_strip(self, key):
+        set_strip_hidden(self.st, key, False)
+        self.channels_shown()
+
+    def unhide_all(self):
+        self.st["hidden_strips"] = []
+        self.channels_shown()
+
+    def workspace_menu(self, pos):
+        menu = QMenu(self)
+        hidden = self.hidden_strips()
+        sub = menu.addMenu("Unhide channel")
+        for key, name in hidden:
+            sub.addAction(name, lambda _=False, k=key: self.unhide_strip(k))
+        sub.setEnabled(bool(hidden))
+        if not hidden:
+            sub.setTitle("No hidden channels")
+        a = menu.addAction("Show all hidden channels", self.unhide_all)
+        a.setEnabled(bool(hidden))
+        menu.exec(pos)
 
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
@@ -614,6 +663,9 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, n=g: self.set_group(strip, n))
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
+        menu.addSeparator()
+        hide = menu.addAction("Hide channel", lambda: self.hide_strip(strip))
+        hide.setToolTip("Right-click the empty workspace to bring it back")
         menu.exec(pos)
 
     @staticmethod
