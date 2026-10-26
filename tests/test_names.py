@@ -57,8 +57,22 @@ class CustomNamesTest(unittest.TestCase):
         st["hidden"] = ["AD4"]
         st["colors"]["out:0"] = "#56e39f"
         st["icons"]["out:0"] = "speaker"
-        for k in ("names", "hidden", "colors", "icons"):
+        m.set_strip_hidden(st, "in:3", True)
+        for k in ("names", "hidden", "colors", "icons", "hidden_strips"):
             self.assertNotIn(k, m.extract_mix(st))
+
+    def test_hide_and_unhide_single_strips(self):
+        st = m.default_state()
+        self.assertFalse(m.strip_hidden(st, "in:3"))
+        m.set_strip_hidden(st, "in:3", True)
+        m.set_strip_hidden(st, "in:3", True)      # twice is still one entry
+        m.set_strip_hidden(st, "out:2", True)
+        self.assertEqual(st["hidden_strips"], ["in:3", "out:2"])
+        self.assertTrue(m.strip_hidden(st, "in:3"))
+        m.set_strip_hidden(st, "in:3", False)
+        self.assertEqual(st["hidden_strips"], ["out:2"])
+        old = {k: v for k, v in m.default_state().items() if k != "hidden_strips"}
+        self.assertEqual(m.upgrade_state(old)["hidden_strips"], [])
 
 
 class ChannelGroupsTest(unittest.TestCase):

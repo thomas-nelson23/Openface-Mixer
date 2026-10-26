@@ -16,7 +16,7 @@ from . import raydat, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
-from .theme import Section, caption_html, key_label, px
+from .theme import SANS, Section, caption_html, font, key_label, px
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules"}
@@ -63,6 +63,31 @@ class Led(QLabel):
     def set_state(self, s):
         c = self.COLORS.get(s, "#2a4552")
         self.setText(f"<span style='color:{c}'>●</span> {s or '—'}")
+
+
+class SyncLight(QLabel):
+    """A small light beside a clock source combo: green while the interface actually runs
+    from the chosen source, dark while it does not (or the state is unknown). The tooltip
+    names the current source."""
+    ON, OFF = "#56e39f", "#2a4552"
+
+    def __init__(self, combo, parent=None):
+        super().__init__(parent)
+        self.combo = combo
+        self.current = None
+        self.setFont(font(SANS, 9))
+        combo.currentIndexChanged.connect(lambda _i: self.refresh())
+        self.refresh()
+
+    def set_current(self, source):
+        self.current = source
+        self.refresh()
+
+    def refresh(self):
+        on = self.current not in (None, "—") and self.current == self.combo.currentText()
+        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>●</span>")
+        self.setToolTip(f"Current source: {self.current}" if self.current else
+                        "Current source unknown")
 
 
 class Sidebar(QFrame):
@@ -147,11 +172,11 @@ class SettingsPanel(QWidget):
         lay.addWidget(box)
         self._card_name = None
         self._updating = False
-        if dev.key == "digiface":
-            self._build_card_profile(lay)
 
-        eng = Section("HARDWARE MIXER")
+        eng = Section("STATUS")
         el = QVBoxLayout(eng)
+        if dev.key == "digiface":
+            self._build_card_profile(el)
         self.hw_label = QLabel("—")
         self.hw_label.setWordWrap(True)
         el.addWidget(self.hw_label)
@@ -321,12 +346,12 @@ class SettingsPanel(QWidget):
         self.sync_src = QComboBox()
         self.sync_src.activated.connect(lambda i: self._write("Sync Source", i))
         cl.addWidget(self.sync_src, 0, 1)
-        cl.addWidget(key_label("Current source"), 1, 0)
-        self.cur_src = QLabel("—")
-        cl.addWidget(self.cur_src, 1, 1)
-        cl.addWidget(key_label("Sample rate"), 2, 0)
+        self.cur_src = SyncLight(self.sync_src)    # lit while the device runs from that source
+        cl.addWidget(self.cur_src, 0, 2)
+        cl.addWidget(key_label("Sample rate"), 1, 0)
         self.rate = QLabel("—")
-        cl.addWidget(self.rate, 2, 1)
+        cl.addWidget(self.rate, 1, 1)
+        cl.setColumnStretch(1, 1)
         lay.addWidget(clock)
 
         ports = Section("OPTICAL PORTS")
@@ -348,16 +373,14 @@ class SettingsPanel(QWidget):
         pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
 
-    def _build_card_profile(self, lay):
-        prof = Section("CARD PROFILE")
-        vl = QVBoxLayout(prof)
+    def _build_card_profile(self, vl):
+        """The Digiface's PipeWire profile, at the top of the STATUS section."""
         self.profile = QLabel("—")
         self.profile.setWordWrap(True)
         vl.addWidget(self.profile)
         self.pro_btn = QPushButton("Record all inputs (Pro Audio profile)")
         self.pro_btn.clicked.connect(self._enable_pro)
         vl.addWidget(self.pro_btn)
-        lay.addWidget(prof)
 
     # ------------------------------------------------------------------ Fireface 802
     def _build_ff802(self, lay):
@@ -400,12 +423,12 @@ class SettingsPanel(QWidget):
         cl = QGridLayout(clock)
         cl.addWidget(key_label(clock_label), 0, 0)
         cl.addWidget(clock_combo, 0, 1)
-        cl.addWidget(key_label("Current source"), 1, 0)
-        self.cur_src = QLabel("—")
-        cl.addWidget(self.cur_src, 1, 1)
-        cl.addWidget(key_label("Sample rate"), 2, 0)
+        self.cur_src = SyncLight(clock_combo)      # lit while the device runs from that source
+        cl.addWidget(self.cur_src, 0, 2)
+        cl.addWidget(key_label("Sample rate"), 1, 0)
         self.rate = QLabel("—")
-        cl.addWidget(self.rate, 2, 1)
+        cl.addWidget(self.rate, 1, 1)
+        cl.setColumnStretch(1, 1)
         lay.addWidget(clock)
 
         sync = Section("INPUT STATUS")
@@ -427,14 +450,14 @@ class SettingsPanel(QWidget):
     def _show_fw_status(self, st):
         """st: the device's decode_status() dict, or None while it is not connected."""
         if st is None:
-            self.cur_src.setText("—")
+            self.cur_src.set_current(None)
             self.rate.setText(f"<span style='color:#ff2a4f'>{self.dev.name.replace('RME ', '')} "
                               "not connected</span>")
             for led, rate in self.sync_widgets:
                 led.set_state(None)
                 rate.setText("—")
             return
-        self.cur_src.setText(st["source"])
+        self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
             led.set_state(state)
@@ -524,10 +547,10 @@ class SettingsPanel(QWidget):
             combos[role] = combo
         self.rd_combos = combos
         clock = self._build_fw_clock(lay, combos["clock"], raydat.STATUS_INPUTS, "Clock mode")
-        clock.addWidget(key_label("Prefer"), 3, 0)
-        clock.addWidget(combos["pref"], 3, 1)
-        clock.addWidget(key_label("Internal rate"), 4, 0)
-        clock.addWidget(combos["internal"], 4, 1)
+        clock.addWidget(key_label("Prefer"), 2, 0)
+        clock.addWidget(combos["pref"], 2, 1)
+        clock.addWidget(key_label("Internal rate"), 3, 0)
+        clock.addWidget(combos["internal"], 3, 1)
 
         opts = Section("OPTIONS")
         ol = QGridLayout(opts)
@@ -601,7 +624,7 @@ class SettingsPanel(QWidget):
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
             self.rd_info.setText(info)
-        self.cur_src.setText(st["source"])
+        self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}
         for (led, rate), (label, *_unused) in zip(self.sync_widgets, raydat.STATUS_INPUTS):
@@ -643,7 +666,7 @@ class SettingsPanel(QWidget):
                     self.sync_src.setCurrentIndex(src["value"])
             cs = ctrls.get("Current Sync Source")
             if cs:
-                self.cur_src.setText(cs["items"][cs["value"]])
+                self.cur_src.set_current(cs["items"][cs["value"]])
             r = ctrls.get("Current Rate")
             if r:
                 self.rate.setText(f"{r['value'] / 1000:g} kHz")
