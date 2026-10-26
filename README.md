@@ -26,13 +26,13 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
 - **Channel names, colours and icons like TotalMix:** right-click a strip → *Rename…* to give
   it your own name, *Color* to pick a colour for its name tag, and *Icon* for one of some fifty
-  instrument, studio and device icons on the tag (all saved per device). The
-  **NAMES** button in the top bar switches between your names and the standard ones.
+  instrument, studio and device icons on the tag (all saved per device). *Custom channel
+  names* in the Display section of the settings switches between your names and the standard
+  ones.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing.
-- **Solo like TotalMix:** solo-in-place, post fader, in the current submix only. The **SOLO**
-  button in the top bar lights while anything is soloed and switches all solos off and back on.
+- **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 also the AES and optical options of TotalMix's settings dialog, on the
   Fireface 800 the line levels and the S/PDIF, optical and word clock options, on the RayDAT
@@ -119,11 +119,12 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Fader to 0 dB | Double-click or Alt-click |
 | Centre pan | Double-click the knob |
 | Reset peak / clip | Click the meter |
-| Solo | **S** on a strip: solo-in-place in the current submix. **SOLO** (top bar) switches all solos off, and back on |
-| Store a preset | Click **Store**, then a slot (or right-click a slot) |
+| Solo | **S** on a strip: solo-in-place in the current submix |
+| Store a preset | Click **Store**, then a slot (or right-click a slot). In a narrow window: **Presets ▾** |
+| Export / import a mix | Settings → Mix |
 | Recall a preset | Click a lit slot |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
-| Rename a channel | Right-click a strip → *Rename…* (empty = standard name). **NAMES** toggles custom / standard names |
+| Rename a channel | Right-click a strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Hide channels | Settings panel → Display → *Show*: untick a channel group |
 | Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
 

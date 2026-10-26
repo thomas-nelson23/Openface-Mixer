@@ -3,7 +3,7 @@ import os
 import sys
 import time
 
-from PySide6.QtCore import QProcess, Qt, QTimer
+from PySide6.QtCore import QProcess, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel,
@@ -64,7 +64,9 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(main)
         root.setContentsMargins(px(12), px(10), px(12), px(10))
         root.setSpacing(px(10))
-        root.addLayout(self._build_top_bar())
+        self.topbar = QWidget()
+        self.topbar.setLayout(self._build_top_bar())
+        root.addWidget(self.topbar)
         edge = QFrame()
         edge.setObjectName("edge")
         root.addWidget(edge)
@@ -94,6 +96,10 @@ class MainWindow(QMainWindow):
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
         self.settings.shown_changed.connect(self.channels_shown)
+        self.settings.names_changed.connect(self.set_custom_names)
+        self.settings.export_btn.clicked.connect(self.export_mix)
+        self.settings.import_btn.clicked.connect(self.import_mix)
+        self.settings.reset_btn.clicked.connect(self.reset_mix)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
@@ -109,6 +115,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(self.settings)
         self.sidebar.closed.connect(lambda: self.settings_btn.setChecked(False))
         self.settings_btn.toggled.connect(self.sidebar.set_open)
+        self.settings_btn.toggled.connect(lambda _on: self.fit_top_bar())
         outer.addWidget(self.sidebar)
         self.setCentralWidget(central)
 
@@ -125,17 +132,21 @@ class MainWindow(QMainWindow):
         QTimer(self, interval=500, timeout=self.poll_engine).start()
         QTimer(self, interval=3000, timeout=self.poll_profile).start()
         self.poll_profile()
-        self.setMinimumSize(px(1190), px(640))
+        self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
+        self.fit_top_bar(px(1600))       # sets the bar's compact minimum before the first resize
         self.resize(px(1600), px(960))
 
     # ------------------------------------------------------------------ top bar
     def _build_top_bar(self):
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(px(8))
-        top.addWidget(QLabel(
+        wordmark = QLabel(
             f"<span style='font-family:Michroma;font-size:{px(14)}px;letter-spacing:{px(1.5)}px;"
             "color:white'>OPENFACE</span><span style='font-family:Michroma;"
-            f"font-size:{px(14)}px;letter-spacing:{px(1.5)}px;color:#ff2a4f'>MIXER</span>"))
+            f"font-size:{px(14)}px;letter-spacing:{px(1.5)}px;color:#ff2a4f'>MIXER</span>")
+        wordmark.setMinimumWidth(wordmark.sizeHint().width())   # never clipped
+        top.addWidget(wordmark)
         top.addSpacing(px(8))
 
         seg = QWidget()
@@ -154,40 +165,27 @@ class MainWindow(QMainWindow):
         top.addWidget(seg)
         top.addSpacing(px(8))
 
-        top.addWidget(self._caption("SUBMIX"))
+        self.captions = [self._caption("SUBMIX"), self._caption("PRESETS")]
+        top.addWidget(self.captions[0])
         self.submix = QComboBox()
         self.submix.setMinimumWidth(px(104))
         self.submix.activated.connect(self.select_out)
         top.addWidget(self.submix)
-        top.addSpacing(px(4))
-        self.solo_master = QPushButton("SOLO")
-        self.solo_master.setObjectName("solomaster")
-        self.solo_master.setCursor(Qt.PointingHandCursor)
-        self.solo_master.setToolTip("Lit while any channel is soloed. Click to switch all solos "
-                                    "off; click again to bring them back.")
-        self.solo_master.clicked.connect(self.toggle_solo_master)
-        self._solo_memory = None          # solos switched off by the master, for recall
-        top.addWidget(self.solo_master)
-        self.names_btn = QPushButton("NAMES")
-        self.names_btn.setObjectName("namesbtn")
-        self.names_btn.setCheckable(True)
-        self.names_btn.setChecked(self.st["custom_names"])
-        self.names_btn.setCursor(Qt.PointingHandCursor)
-        self.names_btn.setToolTip("Show custom channel names (lit) or the standard ones. "
-                                  "Right-click a strip to rename it.")
-        self.names_btn.toggled.connect(self.set_custom_names)
-        top.addWidget(self.names_btn)
         top.addStretch(1)
 
         self.status = QLabel("")
         self.status.setObjectName("lcd")
         self.status.setAlignment(Qt.AlignCenter)
         self.status.setMinimumWidth(px(120))
+        self._status_short = False        # narrow window: just the light and "HW DSP"
         top.addWidget(self.status)
         top.addStretch(1)
 
-        top.addWidget(self._caption("PRESETS"))
-        slots = QHBoxLayout()
+        top.addWidget(self.captions[1])
+        # the eight slots, or one "Presets" menu when the window is narrow
+        self.slot_box = QWidget()
+        slots = QHBoxLayout(self.slot_box)
+        slots.setContentsMargins(0, 0, 0, 0)
         slots.setSpacing(px(3))
         self.slot_btns = []
         for i in range(N_SLOTS):
@@ -199,26 +197,35 @@ class MainWindow(QMainWindow):
             b.customContextMenuRequested.connect(lambda pos, n=i: self.slot_menu(n))
             slots.addWidget(b)
             self.slot_btns.append(b)
-        top.addLayout(slots)
+        top.addWidget(self.slot_box)
         self.store_btn = QPushButton("Store")
         self.store_btn.setObjectName("store")
         self.store_btn.setCheckable(True)
         self.store_btn.setToolTip("Arm, then click a slot to save the current mix into it")
         top.addWidget(self.store_btn)
+        self.presets_menu = QMenu(self)
+        self.presets_menu.aboutToShow.connect(self._fill_presets_menu)
+        self.presets_btn = QPushButton("Presets ▾")
+        self.presets_btn.setMenu(self.presets_menu)
+        self.presets_btn.setVisible(False)
+        top.addWidget(self.presets_btn)
 
-        mix_menu = QMenu(self)
-        mix_menu.addAction("Export current mix…", self.export_mix)
-        mix_menu.addAction("Import mix…", self.import_mix)
-        mix_menu.addSeparator()
-        mix_menu.addAction("Reset mix to default…", self.reset_mix)
-        mix_btn = QPushButton("Mix ▾")
-        mix_btn.setMenu(mix_menu)
-        top.addWidget(mix_btn)
         top.addSpacing(px(4))
 
-        self.settings_btn = QPushButton("Settings")
+        self.settings_btn = QPushButton()
+        self.settings_btn.setObjectName("gear")
         self.settings_btn.setCheckable(True)
         self.settings_btn.setChecked(True)
+        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        gear = QIcon()
+        size = px(16)
+        for color, state in (("#d9eef2", QIcon.Off), ("#0b0f1c", QIcon.On)):
+            pm = icon_pixmap("settings", color, size)
+            if pm:
+                gear.addPixmap(pm, QIcon.Normal, state)
+        self.settings_btn.setIcon(gear)
+        self.settings_btn.setIconSize(QSize(size, size))
         top.addWidget(self.settings_btn)
         return top
 
@@ -230,6 +237,71 @@ class MainWindow(QMainWindow):
         f.setLetterSpacing(QFont.AbsoluteSpacing, px(2.4))
         lbl.setFont(f)
         return lbl
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fit_top_bar(e.size().width())
+
+    def fit_top_bar(self, window_width=None):
+        """Drop the top bar's less important parts, one step at a time, until it fits the
+        window: first the SUBMIX / PRESETS captions, then the status readout shrinks to its
+        light, then the eight preset slots fold into a Presets menu."""
+        if window_width is None:
+            window_width = self.width()
+        # the bar's width after this resize (its own width() still shows the old layout)
+        avail = window_width - 2 * px(12) - (self.sidebar.full_width if self.sidebar.is_open()
+                                             else 0)
+        lay = self.topbar.layout()
+        steps = (self._show_captions, self._show_status_detail, self._show_slots)
+        if self.topbar.minimumWidth() == 0:
+            # the window may shrink down to the bar's most compact form, not its full one
+            for show in steps:
+                show(False)
+            lay.activate()
+            self.topbar.setMinimumWidth(lay.sizeHint().width())
+        for show in steps:
+            show(True)
+        lay.activate()
+        for show in steps:
+            if lay.sizeHint().width() <= avail:
+                break
+            show(False)
+            lay.activate()
+
+    def _show_captions(self, on):
+        for c in self.captions:
+            c.setVisible(on)
+
+    def _show_status_detail(self, on):
+        if self._status_short == (not on):
+            return
+        self._status_short = not on
+        self.status.setMinimumWidth(px(120) if on else 0)
+        self.poll_engine()
+
+    def _show_slots(self, on):
+        self.slot_box.setVisible(on)
+        self.store_btn.setVisible(on)
+        self.presets_btn.setVisible(not on)
+
+    def _fill_presets_menu(self):
+        """The Presets menu of a narrow window: recall a slot, or store into one."""
+        menu = self.presets_menu
+        menu.clear()
+        active = self.st.get("active_slot")
+        for i in range(N_SLOTS):
+            name = self.presets.name(i)
+            a = menu.addAction(f"{i + 1}  {name}" if name else f"{i + 1}  (empty)")
+            a.setEnabled(name is not None)
+            a.setCheckable(True)
+            a.setChecked(name is not None and i == active)
+            a.triggered.connect(lambda _=False, n=i: self.recall_slot(n))
+        menu.addSeparator()
+        store = menu.addMenu("Store current mix in")
+        for i in range(N_SLOTS):
+            name = self.presets.name(i)
+            store.addAction(f"{i + 1}  {name}" if name else f"{i + 1}  (empty)",
+                            lambda _=False, n=i: self.store_slot(n))
 
     # ------------------------------------------------------------------ building strips
     def channels(self, kind):
@@ -304,7 +376,6 @@ class MainWindow(QMainWindow):
         (self.row_in if kind == "in" else self.row_play).set_strips(strips)
         self.refresh_settings_buttons()
         self.refresh_sends(kind)
-        self.refresh_solo()
         self.matrix.rebuild()
 
     def rebuild_outputs(self):
@@ -401,36 +472,7 @@ class MainWindow(QMainWindow):
     def set_solo(self, kind, chans, on):
         for c in chans:
             self.st["solo"][kind][c] = on
-        if on:
-            self._solo_memory = None
-        self.refresh_solo()
         self.push_matrix()
-
-    def toggle_solo_master(self):
-        """TotalMix's Solo master: switch every solo off, and the same set back on next time."""
-        if any_solo(self.st):
-            self._solo_memory = {k: list(v) for k, v in self.st["solo"].items()}
-            for k in self.st["solo"]:
-                self.st["solo"][k] = [False] * len(self.st["solo"][k])
-        elif self._solo_memory:
-            self.st["solo"] = self._solo_memory
-            self._solo_memory = None
-        else:
-            self.refresh_solo()
-            return
-        for s in self.row_in.strips + self.row_play.strips:
-            s.solo.blockSignals(True)
-            s.solo.setChecked(self.st["solo"][s.kind][s.channels[0]])
-            s.solo.blockSignals(False)
-        self.refresh_solo()
-        self.push_matrix()
-
-    def refresh_solo(self):
-        on = any_solo(self.st)
-        self.solo_master.setProperty("active", on)
-        self.solo_master.setProperty("armed", not on and bool(self._solo_memory))
-        self.solo_master.style().unpolish(self.solo_master)
-        self.solo_master.style().polish(self.solo_master)
 
     def set_out_mute(self, pair, on):
         self.st["out"][pair]["mute"] = on
@@ -517,7 +559,7 @@ class MainWindow(QMainWindow):
         else:
             self.st["names"].pop(strip.key, None)
         if name and not self.st["custom_names"]:
-            self.names_btn.setChecked(True)      # show the name just given (rebuilds)
+            self.settings.names_box.setChecked(True)   # show the name just given (rebuilds)
         else:
             self.rebuild_all()
         self.schedule_save()
@@ -812,7 +854,9 @@ class MainWindow(QMainWindow):
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
                       else "offline")
-            txt = f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP{sep}{rate}{sep}{routes}"
+            txt = (f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP" +
+                   ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
+            self.status.setToolTip(f"Hardware DSP: {rate}, {routes}")
             self.settings.eng_label.setText(
                 ("Running" if s["processing"] else "Running (not responding)") +
                 "<br>Playback sink: " +
