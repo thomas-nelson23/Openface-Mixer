@@ -1,8 +1,8 @@
 # Architecture
 
 Openface Mixer is two programs that share one block of memory. All mixing happens in the
-interface's own DSP; the computer only tells it what to do. The Digiface USB, the Fireface 802, the
-Fireface 800 and the HDSPe RayDAT use the same mix model and GUI; what differs is described by a device (`openface_mixer/devices.py`)
+interface's own DSP; the computer only tells it what to do. The Digiface USB, the Fireface 802,
+UCX II, 800 and 400 and the HDSPe RayDAT, AIO, AIO Pro and AES use the same mix model and GUI; what differs is described by a device (`openface_mixer/devices.py`)
 in the GUI and a backend (`engine/backend.h`) in the engine. Each device has its own engine
 process, shared memory and config files, so several can run at once.
 
@@ -20,12 +20,14 @@ process, shared memory and config files, so several can run at once.
 
 ## Engine (`engine/openface-mixer-engine.c`)
 
-`--device digiface` (default), `--device ff802`, `--device ff802usb`, `--device ff800` or
-`--device raydat` picks the backend: `backend_digiface.c` on top of `digiface_usb.c` (libusb), the
-802 or 800 backend in `fireface_fw.c` (FireWire transactions through `/dev/fw*`), the 802 over USB
-in `fireface_usb.c` (SysEx through the ALSA sequencer, `/dev/snd/seq`), or `raydat.c` (snd-hdspm's or snd-hdspe's `Mixer`
-control and hwdep meters in `/dev/snd`). The rest of the engine is the same
-for all of them.
+`--device KEY` (`digiface`, the default, `ff802`, `ff802usb`, `ucx2`, `ff800`, `ff400`, `raydat`,
+`aio`, `aiopro` or `aes`) picks the backend: `backend_digiface.c` on top of `digiface_usb.c`
+(libusb), the 802 or the 800/400 ("former" protocol, one backend with a model table) in
+`fireface_fw.c` (FireWire transactions through `/dev/fw*`), the 802 or UCX II over USB in
+`fireface_usb.c` (SysEx through the ALSA sequencer, `/dev/snd/seq`; one backend with a model
+table), or `hdspe.c` for the HDSPe cards (snd-hdspm's or snd-hdspe's `Mixer` control and hwdep
+meters in `/dev/snd`; one backend, the cards differ only in name and channel count). The rest of
+the engine is the same for all of them.
 
 - A 20 ms main-loop timer (`hw_tick`) opens the device and sends only the changed crosspoints,
   output faders and (Firefaces) device settings (protocols in [HARDWARE.md](HARDWARE.md)). It retries every second while the device is missing or not
@@ -36,10 +38,10 @@ for all of them.
 - A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
   it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`; the RayDAT's by its ALSA card name), re-linking on
+  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name), re-linking on
   hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
-  `openface-mixer-engine@ff802`, `@ff802usb`, `@ff800` and `@raydat` for the others. At startup it loads the
+  `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
   to date; files from before the 36-channel layout are moved into place. When it exits, the
   interface keeps mixing with the last mix.
@@ -54,7 +56,8 @@ One `struct ofm_shm` per user and device at `/dev/shm/openface-mixer-<uid>` (Dig
 `/dev/shm/openface-mixer-<device>-<uid>`. It has room for 36 inputs, 36 playback channels and 36
 outputs, the RayDAT's counts; source k is input k below 36 and playback k − 36 above. The
 Digiface uses inputs 0–31, playback 0–33 and outputs 0–33; the 802 inputs 0–31 (30/31 its FX
-returns), playback 0–29 and outputs 0–29; the 800 inputs, playback and outputs 0–27.
+returns), playback 0–29 and outputs 0–29; the 800 inputs, playback and outputs 0–27; the 400 and
+the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up to 19.
 
 | Field | Writer | Meaning |
 | --- | --- | --- |
@@ -78,6 +81,7 @@ app.MainWindow
  ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
  ├─ matrix_view.py  grid editor for the same sends
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
+ ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
  └─ config.py       state.json / matrix.bin / presets.json
 ```
 
@@ -87,10 +91,13 @@ app.MainWindow
 - **Outputs** are stereo pairs (0–17; on the Digiface pair 16 = phones at single speed).
 - The device decides which channels exist at the current rate and their names
   (`Device.channels()`, `chan_label()`, `pair_label()`); the window only builds strips for those.
-- **Device settings** (802, 800) live in `state["hw"]`. `fireface802.commands()` turns them into
-  the DSP command list the engine sends, in a fixed slot order so only changed slots go out;
-  `fireface800.config_words()` into the 800's three configuration quadlets, which are written
-  only after the first status read has filled in the options the 800 reports.
+- **Device settings** (Firefaces) live in `state["hw"]`. `fireface802.commands()` (and
+  `ucx2.usb_commands()`) turns them into the DSP command list the engine sends, in a fixed slot
+  order so only changed slots go out; `fireface800.config_words()` (and `fireface400`'s) into the
+  three configuration quadlets, which are written only after the first status read has filled in
+  the options the device reports. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
+  and written live. The settings panel picks its layout by `Device.family` ("latter", "former",
+  "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).
 - Pan uses a balance law: at centre both sides get full level. A mono source is panned across the

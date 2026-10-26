@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import devices, hardware, model as m, raydat as rd
+from openface_mixer import devices, hardware, hdspe as rd, model as m
 
 # amixer -c N contents, cut down to the RayDAT controls the GUI uses (snd-hdspm's names)
 AMIXER = """\
@@ -157,25 +157,53 @@ CARDS = """\
                       HDA Intel PCH at 0xf7f10000 irq 32
  1 [HDSPMx1a2b3c   ]: HDSPM - RME RayDAT_1a2b3c
                       RME RayDAT S/N 0x1a2b3c at 0xf7c00000, irq 16
+ 2 [HDSPe         ]: HDSPe - RME AIO Pro_00012345
+                      RME AIO Pro S/N 00012345 at 0xf7b00000 irq 17
 """
+
+
+RAYDAT, AIO, AES = rd.MODELS["raydat"], rd.MODELS["aio"], rd.MODELS["aes"]
 
 
 class ChannelTest(unittest.TestCase):
     def test_counts(self):
-        self.assertEqual([rd.n_channels(mode) for mode in (1, 2, 4)], [36, 20, 12])
+        self.assertEqual([RAYDAT.n_channels(mode) for mode in (1, 2, 4)], [36, 20, 12])
         for kind, limit in (("in", m.N_IN), ("play", m.N_PLAY), ("out", m.N_OUT)):
-            self.assertEqual(len(rd.channels(kind, 1)), limit)
+            self.assertEqual(len(RAYDAT.channels(kind, 1)), limit)
 
     def test_labels(self):
-        self.assertEqual(rd.chan_label("in", 0, 1), "AES L")
-        self.assertEqual(rd.chan_label("out", 3, 1), "SPDIF R")
-        self.assertEqual(rd.chan_label("in", 4, 1), "A1 1")
-        self.assertEqual(rd.chan_label("in", 35, 1), "A4 8")
-        self.assertEqual(rd.chan_label("in", 19, 2), "A4 4")       # packed at double speed
-        self.assertEqual(rd.chan_label("play", 11, 4), "A4 2")
-        self.assertEqual(rd.pair_label("out", 0, 1), "AES")
-        self.assertEqual(rd.pair_label("out", 2, 1), "SPDIF")
-        self.assertEqual(rd.pair_label("out", 12, 1), "A2 1/2")
+        self.assertEqual(RAYDAT.chan_label("in", 0, 1), "AES L")
+        self.assertEqual(RAYDAT.chan_label("out", 3, 1), "SPDIF R")
+        self.assertEqual(RAYDAT.chan_label("in", 4, 1), "A1 1")
+        self.assertEqual(RAYDAT.chan_label("in", 35, 1), "A4 8")
+        self.assertEqual(RAYDAT.chan_label("in", 19, 2), "A4 4")       # packed at double speed
+        self.assertEqual(RAYDAT.chan_label("play", 11, 4), "A4 2")
+        self.assertEqual(RAYDAT.pair_label("out", 0, 1), "AES")
+        self.assertEqual(RAYDAT.pair_label("out", 2, 1), "SPDIF")
+        self.assertEqual(RAYDAT.pair_label("out", 12, 1), "A2 1/2")
+
+    def test_aio(self):
+        # the driver's channel maps: no phones inputs, ADAT packed from 12 at every speed
+        self.assertEqual(AIO.channels("in", 1), [0, 1] + list(range(8, 20)))
+        self.assertEqual(AIO.channels("out", 2), [0, 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+        self.assertEqual(AIO.channels("play", 4), [0, 1, 6, 7, 8, 9, 10, 11, 12, 13])
+        self.assertEqual([AIO.pair_label("out", c, 1) for c in (0, 6, 8, 10, 12, 18)],
+                         ["AN 1/2", "PH", "AES", "SPDIF", "A 1/2", "A 7/8"])
+        self.assertEqual(AIO.chan_label("in", 19, 1), "A 8")
+        dev = devices.DEVICES["aio"]
+        self.assertEqual(dev.phones_pair(1), 3)
+        self.assertEqual(dev.sink_channels, "AN 1/2")
+        self.assertEqual(devices.DEVICES["aiopro"].channels("in", 1), AIO.channels("in", 1))
+
+    def test_aes(self):
+        self.assertEqual(AES.channels("out", 4), list(range(16)))
+        self.assertEqual(AES.chan_label("in", 15, 1), "AES 16")
+        self.assertEqual(AES.pair_label("in", 2, 1), "AES 3/4")
+        # snd-hdspm's AES32 status controls
+        self.assertEqual(AES.status_inputs[1], ("AES 1", "AES1 Sync Check", "AES1 Frequency"))
+        self.assertEqual(AES.status_inputs[-1], ("Sync In", "SYNC IN Sync Check",
+                                                 "SYNC IN Frequency"))
+        self.assertEqual(AIO.status_inputs[3], ("ADAT", "ADAT SyncCheck", "ADAT Frequency"))
 
 
 class StatusTest(unittest.TestCase):
@@ -212,6 +240,7 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(rd.control(c, "pref")[0], "Preferred AutoSync Reference")
         self.assertEqual(rd.control(c, "spdif_in")[1]["value"], 1)
         self.assertEqual(rd.display_item("ADAT1"), "ADAT 1")
+        self.assertEqual(rd.display_item("AES3"), "AES 3")
         self.assertEqual(rd.display_item("44.1 KHz"), "44.1 kHz")
 
     def test_profiles(self):
@@ -221,13 +250,27 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(rd.control(hdspm, "internal"), (None, None))   # not in the fixture
         self.assertEqual(rd.control(hdspm, "spdif_in"), (None, None))
 
+    def test_aio_hdspm(self):
+        # snd-hdspm names the AIO's clock controls like the AES32's, not the RayDAT's
+        c = {"System Clock Mode": {"items": ["Master", "AutoSync"], "value": 1, "rw": True},
+             "Preferred Sync Reference": {"items": ["Word Clock", "ADAT"], "value": 1,
+                                          "rw": True},
+             "Input Level": {"items": ["Lo Gain", "+4 dBu", "-10 dBV"], "value": 0, "rw": True},
+             "ADAT SyncCheck": {"items": ["No Lock", "Lock", "Sync", "N/A"], "value": 2},
+             "ADAT Frequency": {"items": ["No Lock", "48 kHz"], "value": 1}}
+        st = rd.decode_status(c, AIO)
+        self.assertEqual(st["source"], "AutoSync, prefers ADAT")
+        self.assertEqual(st["inputs"], [("ADAT", "Sync", "48 kHz")])
+        self.assertEqual(rd.control(c, "in_level")[0], "Input Level")
+        self.assertEqual(rd.control(c, "clock")[0], "System Clock Mode")
+
     def test_driver_usable(self):
         self.assertTrue(rd.driver_usable(rd.HDSPM, 0x10ee))
         self.assertFalse(rd.driver_usable(rd.HDSPM, rd.VENDOR_RME))
         self.assertTrue(rd.driver_usable(rd.HDSPE, rd.VENDOR_RME))
 
     def test_write_by_numid(self):
-        hw = hardware.Hardware(rd.CARD_NAME)
+        hw = hardware.Hardware(RAYDAT.card)
         hw.card, hw.ctrls = 1, hardware.parse_amixer_contents(AMIXER_HDSPE)
         with mock.patch.object(hardware.subprocess, "run") as run:
             hw.write("Clock Mode", 1)
@@ -251,12 +294,16 @@ class DeviceTest(unittest.TestCase):
 
     def test_detect(self):
         with mock.patch.object(Path, "read_text", return_value=CARDS):
-            self.assertEqual(hardware.Hardware.find_card(rd.CARD_NAME), 1)
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card), 1)
             self.assertIsNone(hardware.Hardware.find_card())       # no Digiface
             self.assertTrue(devices.DEVICES["raydat"].present())
             self.assertEqual(hardware.Hardware.card_driver(1), "HDSPM")
             self.assertEqual(hardware.Hardware.card_driver(0), "HDA-Intel")
             self.assertFalse(devices.DEVICES["digiface"].present())
+            # "RME AIO" is not the start of "RME AIO Pro"
+            self.assertFalse(devices.DEVICES["aio"].present())
+            self.assertEqual(hardware.Hardware.find_card(AIO.card + " Pro"), 2)
+            self.assertTrue(devices.DEVICES["aiopro"].present())
 
 
 class OldMixTest(unittest.TestCase):

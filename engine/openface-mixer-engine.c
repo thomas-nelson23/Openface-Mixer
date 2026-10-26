@@ -6,16 +6,17 @@
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
  * added latency, as with TotalMix. The device's level meters come back the same way. The
  * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c), the
- * Fireface 802 or Fireface 800 over FireWire (fireface_fw.c), the Fireface 802 over USB in
- * Class Compliant mode (fireface_usb.c), or the HDSPe RayDAT PCIe card
- * through its kernel driver (raydat.c).
+ * Fireface 802, 800 or 400 over FireWire (fireface_fw.c), the Fireface 802 or UCX II over USB
+ * in Class Compliant mode (fireface_usb.c), or an HDSPe RayDAT, AIO, AIO Pro or AES PCIe card
+ * through its kernel driver (hdspe.c).
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
  * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
  * (systemd user service), and the interface keeps mixing with the last mix when it exits.
  *
  * Options:
- *   --device KEY    digiface (default), ff802, ff802usb, ff800 or raydat
+ *   --device KEY    digiface (default), ff802, ff802usb, ucx2, ff800, ff400, raydat, aio,
+ *                   aiopro or aes
  *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
  *   --no-autolink   don't link the sink to the interface (useful for testing with pw-link)
  */
@@ -265,7 +266,7 @@ static struct obj *node_by_card(struct data *d, const char *prefix)
 	for (int i = 0; i < d->n_objs; i++) {
 		struct obj *o = &d->objs[i];
 		if (o->type == 1 && strncmp(o->name, "alsa_output.", 12) == 0 &&
-		    strncmp(o->card, prefix, strlen(prefix)) == 0)
+		    ofm_card_match(o->card, prefix))
 			return o;
 	}
 	return NULL;
@@ -535,8 +536,9 @@ int main(int argc, char *argv[])
 	int no_sink = 0;
 
 	static const struct ofm_backend *const backends[] = {
-		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff802usb, &ofm_backend_ff800,
-		&ofm_backend_raydat,
+		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff802usb, &ofm_backend_ucx2,
+		&ofm_backend_ff800, &ofm_backend_ff400, &ofm_backend_raydat, &ofm_backend_aio,
+		&ofm_backend_aiopro, &ofm_backend_aes,
 	};
 	d.be = &ofm_backend_digiface;
 	for (int i = 1; i < argc; i++) {
@@ -552,7 +554,7 @@ int main(int argc, char *argv[])
 		else if (be != NULL)
 			d.be = be, i++;
 		else {
-			fprintf(stderr, "usage: %s [--device digiface|ff802|ff802usb|ff800|raydat] [--no-sink] "
+			fprintf(stderr, "usage: %s [--device KEY] [--no-sink] "
 				"[--no-autolink]\n", argv[0]);
 			return 2;
 		}

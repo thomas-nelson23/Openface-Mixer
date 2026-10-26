@@ -1,17 +1,19 @@
 # Openface Mixer
 
 A TotalMix-style mixer and control panel for the **RME Digiface USB**, the
-**RME Fireface 802** (FireWire, or USB in Class Compliant mode), the **RME Fireface 800**
-(FireWire) and the **RME HDSPe RayDAT** (PCIe) on Linux.
+**RME Fireface 802** (FireWire, or USB in Class Compliant mode), the **RME Fireface UCX II** (USB
+in Class Compliant mode), the **RME Fireface 800 and 400** (FireWire) and the **RME HDSPe RayDAT,
+AIO, AIO Pro and AES** (PCIe) on Linux. [Other TotalMix interfaces](#interfaces-not-supported-yet)
+are not supported yet.
 
 ![Openface Mixer: mixer view with input, playback and output rows, presets and hardware panel](docs/screenshots/mixer.png)
 
 RME's TotalMix only runs on Windows and macOS. Linux streams audio to these interfaces
-(`snd-usb-audio` for the Digiface since kernel 6.12 and the 802 over USB, `snd-fireface` for the
-802 and 800 over FireWire,
-`snd-hdspm` or `snd-hdspe` for the RayDAT), but nothing gave them the TotalMix workflow. Openface Mixer drives
-the interface's own DSP mixer, over USB on the Digiface, over FireWire on the Firefaces and
-through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
+(`snd-usb-audio` for the Digiface since kernel 6.12 and the 802 and UCX II over USB,
+`snd-fireface` for the 802, 800 and 400 over FireWire, `snd-hdspm` or `snd-hdspe` for the HDSPe
+cards), but nothing gave them the TotalMix workflow. Openface Mixer drives the interface's own
+DSP mixer, over USB or FireWire on the Firefaces and the Digiface and through the kernel driver
+on the HDSPe cards, with the familiar TotalMix workflow.
 
 - **Mixer view:** Hardware Inputs, Playback and Hardware Outputs, one row each.
   Pick an output, and the input and playback faders set the submix sent to it.
@@ -34,22 +36,26 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
   channels keep their routing.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
-  On the Fireface 802 also the AES and optical options of TotalMix's settings dialog, on the
-  Fireface 800 the line levels and the S/PDIF, optical and word clock options, on the RayDAT
-  clock mode, preferred sync reference, internal rate and the S/PDIF and word clock options.
+  On the Fireface 802 and UCX II also the AES/S/PDIF and optical options of TotalMix's settings
+  dialog, on the Fireface 800 and 400 the line levels and the S/PDIF, optical and word clock
+  options, on the HDSPe cards clock mode, preferred sync reference, internal rate, levels (AIO)
+  and the S/PDIF, AES and word clock options.
 - **Channel settings (Fireface 802):** the ⚙ on each hardware input and output strip, like
   TotalMix's wrench: phase invert on every channel, level and gain on inputs AN 1–8, 48V and
   Inst on inputs AN 9–12, and level on outputs AN 1–8.
+- **Channel settings (Fireface UCX II):** phase invert on every channel, gain on AN 1–8, 48V on
+  AN 1/2, level on AN 3–8, Hi-Z on AN 3/4, and level on outputs AN 1–6 and the phones.
 - **Input options (Fireface 800):** the ⚙ on inputs AN 1 and AN 7–10: front or rear jack on
   AN 1, 7 and 8, 48V on AN 7–10, and Drive, Limiter and Speaker Emulation on the AN 1
   instrument input.
+- **Input options (Fireface 400):** 48V and gain on AN 1/2, instrument, pad and gain on AN 3/4.
 - **Several interfaces:** pick the device in the settings panel. Each has its own mix, presets
   and engine, so a Digiface and a Fireface can run side by side.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
   it at login.
 
 > **How mixing works:** Openface Mixer drives the interface's own DSP mixer (over USB on the
-> Digiface, over FireWire on the Firefaces, through `snd-hdspm` or `snd-hdspe` on the RayDAT), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
+> Digiface, over FireWire or USB MIDI on the Firefaces, through `snd-hdspm` or `snd-hdspe` on the HDSPe cards), like TotalMix, so input monitoring has no added latency and the mix keeps running in the
 > interface even with the computer idle. There is no software mixing. See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/HARDWARE.md](docs/HARDWARE.md).
 
@@ -59,11 +65,11 @@ through the kernel driver on the RayDAT, with the familiar TotalMix workflow.
 
 ## Requirements
 
-- Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802 or 800
-  a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the 802 over
-  USB the 802 in Class Compliant mode (`snd-usb-audio`, any recent kernel), or for the RayDAT the
-  `snd-hdspm` driver (in the kernel; cards before 2022) or the `snd-hdspe` driver (cards from
-  2022 on, see below)
+- Linux 6.12 or newer (Digiface USB support in `snd-usb-audio`), or for the Fireface 802, 800
+  or 400 a FireWire port and the `snd-fireface` driver (in the kernel since 5.x), or for the 802
+  or UCX II over USB the interface in Class Compliant mode (`snd-usb-audio`, any recent kernel),
+  or for the HDSPe cards the `snd-hdspm` driver (in the kernel; cards before 2022) or the
+  `snd-hdspe` driver (cards from 2022 on, see below)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
@@ -153,8 +159,41 @@ TotalMix layout printed on it:
 - Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit. Faders
   grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; the window must be open for it to
-work.
+Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
+it to work (its window can be hidden, see below).
+
+### Network remote (OSC)
+
+Openface Mixer can be controlled over the network by anything that speaks TotalMix FX's
+**Global OSC** (TotalMix FX 2.1 and later): a Q-SYS or Crestron plugin, Bitfocus Companion, a
+Stream Deck, TouchOSC. Tick **Allow OSC control** in the **Network remote** section of the settings sidebar and
+point the controller at this computer's IP address and the UDP port shown there (7001, the
+TotalMix default). Replies go back to the address and port each controller sends from.
+
+What a controller can do, with TotalMix's addresses and zero-based channel numbers:
+
+| Address | What it does |
+| --- | --- |
+| `/mix/in/<ch>/<out>/faderlin`, `fader` | Send from an input to an output pair (0..1 TotalMix fader position, or dB) |
+| `/mix/pb/<ch>/<out>/faderlin`, `fader` | The same for a playback channel |
+| `/mix/in/<ch>/<out>/solo`, `/mix/pb/…/solo` | Solo, and select that output pair's submix |
+| `/input/<ch>/mute`, `/playback/<ch>/mute` | Channel mute |
+| `/input/<ch>/stereo`, `/playback/<ch>/stereo` | Link or unlink a pair |
+| `/output/<ch>/faderlin`, `volume`, `mute` | Output pair level and mute |
+| `/controlroom/dim`, `mainmono`, `speakerb`, `talkback`, `externalin` | Control Room switches |
+| `/globalsolo` | Switch all solos off (0) |
+| `/snapshot/load/<1-8>`, `/snapshot/save/<1-8>` | Recall or store a preset |
+| `/sendall`, `/sendstate`, `/sendsubmix/<out>`, `/sendchan/<bus>/<ch>` | Ask for the current state |
+
+Openface Mixer sends names, link state, faders, mutes, solos, the Control Room switches, the lit
+preset and (unless switched off) peak levels in dB to `/level/in|pb|out/<ch>`, whenever they
+change. Writing to either channel of a linked pair changes both. Phase, EQ, dynamics and
+TotalMix's global mute have no equivalent and are ignored.
+
+Anyone who can reach the port can change the mix while the remote is on, so only turn it on in
+a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
+tick **Start at login, no window**, or run `openface-mixer --background`. Opening Openface
+Mixer again shows the window, and closing it only hides it; **Ctrl+Q** quits.
 
 ### Fireface 802
 
@@ -178,6 +217,16 @@ sends the whole mix and all settings, and it switches the DSP's EQ, dynamics, lo
 and reverb/echo off, because it has no controls for them yet. Don't run
 `snd-fireface-ctl-service` alongside it.
 
+### Fireface UCX II
+
+The UCX II works like the 802 over USB: switch it to **Class Compliant mode** (see its manual),
+connect it over USB and pick **RME Fireface UCX II** under **Device** (or run
+`openface-mixer --device ucx2`); its engine is `openface-mixer-engine@ucx2`. All 20 inputs (AN 1–8,
+S/PDIF, AES, ADAT), 20 playback channels and 20 outputs (AN 1–6, phones PH 7/8, S/PDIF, AES,
+ADAT) are in the mix. Openface Mixer sets the UCX II's *CC Mix* option to TotalMix so its DSP
+mixer is what you hear, and, as on the 802, switches the channel effects, room EQ and
+reverb/echo off. The MIDI port rule of the 802 applies, and don't run oscmix alongside it.
+
 ### Fireface 800
 
 The 800 works the same way: connect it over **FireWire**, pick **RME Fireface 800** under
@@ -192,9 +241,26 @@ rest (line levels, input jacks, 48V, instrument options) at their defaults (Lo G
 out, front jacks, 48V off), and from then on sends its own copy, as TotalMix does. Don't run
 `snd-fireface-ctl-service` alongside it either.
 
-### HDSPe RayDAT
+The **Fireface 400** (`openface-mixer --device ff400`, engine `openface-mixer-engine@ff400`)
+works exactly like the 800 and needs the same udev rule. All 18 inputs (AN 1–8, S/PDIF, ADAT),
+18 playback channels and 18 outputs (AN 1–6, phones PH 7/8, S/PDIF, ADAT) are in the mix. Its
+input gains are set from the ⚙ on AN 1–4 (the front knobs' last settings can't be read back, so
+they start at 0 dB). The output faders also drive the 400's analog output amplifiers, as
+snd-firewire-ctl-services does.
 
-Pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
+### HDSPe RayDAT, AIO, AIO Pro and AES
+
+Pick the card under **Device** (or run `openface-mixer --device raydat`, `aio`, `aiopro` or
+`aes`), and its engine (`openface-mixer-engine@raydat` and so on) restores the mix at every
+login. Everything below about the RayDAT applies to all four; their channels are:
+
+- **RayDAT:** 36 channels, see below.
+- **AIO and AIO Pro:** analog AN 1/2, phones PH L/R (outputs), AES, S/PDIF and ADAT (8, 4 or 2
+  channels by speed). The optional AI4S/AO4S extension boards (analog 3–6) aren't in the mix
+  yet. The playback sink feeds AN 1/2.
+- **AES:** AES 1–16 at every speed. The playback sink feeds AES 1/2.
+
+On the RayDAT, pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
 (`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
 channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
 then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). The driver
@@ -231,9 +297,11 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
-| `~/.config/openface-mixer/raydat/` | The same for the HDSPe RayDAT |
+| `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
+| `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
 | `~/.config/openface-mixer/ui.json` | Window (UI) scale, shared by all devices |
+| `~/.config/autostart/openface-mixer.desktop` | Starts Openface Mixer at login without a window (when ticked) |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
@@ -261,18 +329,39 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
   The TCO module isn't offered as a clock source.
-- HDSPe RayDAT support is built on the kernel's `snd-hdspm` driver, the `snd-hdspe` driver,
-  hdspeconf and alsa-tools' hdspmixer, and has not been checked on a card yet (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
+- Fireface UCX II support follows oscmix's register documentation, Fireface 400 support
+  snd-firewire-ctl-services; neither has been checked on a unit yet.
+- HDSPe RayDAT, AIO, AIO Pro and AES support is built on the kernel's `snd-hdspm` driver, the
+  `snd-hdspe` driver, hdspeconf and alsa-tools' hdspmixer, and has not been checked on a card yet
+  (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
   The driver only accepts mixer changes while playback and recording are opened by the same
   program (PipeWire or JACK normally do that). No TCO or pitch settings. A card counts as
   2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
-- The hardware mixer allows 2048 active routes; the settings panel warns if a mix needs more.
+- The Digiface's hardware mixer allows 2048 active routes; the settings panel warns if a mix
+  needs more.
+
+### Interfaces not supported yet
+
+These TotalMix interfaces are left out for now:
+
+| Interface | Why |
+| --- | --- |
+| HDSPe MADI, MADI FX, MADIface USB/XT/Pro, Fireface UFX+, UFX III | More than 36 channels per direction, the mix model's limit (and no Linux mixer driver for the MADI FX) |
+| Fireface UFX II, 802 FS | Their Class Compliant mixer protocol isn't documented beyond partial notes |
+| Fireface UFX, UCX (original) | Their DSP protocols aren't documented for Linux (the UCX's FireWire mic channels, the UFX's DSP) |
+| Babyface Pro FS | The kernel exposes its mixer but no meters; a candidate for later |
+| Babyface, Babyface Pro, Fireface UC | No Linux access to their mixers |
+| HDSP 9632/9652, Multiface, Digiface (PCI), RPM | The older `snd-hdsp` driver: firmware loading and a different mixer; the RPM has no mixer |
+| Digiface Dante, AVB and Ravenna interfaces | Network audio with no Linux control path |
 - The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
   `make install` installs, which need sudo once). Without them nothing is mixed, and the
   settings panel says why.
 - Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
 - Solo has no PFL / live mode or exclusive mode yet.
 - No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
+- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
+  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
+  (before version 2.1) are not supported.
 - ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
   supported (it sent nothing in testing).
 
@@ -284,13 +373,13 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   (see [docs/HARDWARE.md](docs/HARDWARE.md)).
 - **Takashi Sakamoto** wrote the kernel's `snd-fireface` driver and
   [snd-firewire-ctl-services](https://github.com/alsa-project/snd-firewire-ctl-services), whose
-  Fireface 802 and Fireface 800 protocol code is where their register and DSP layouts come
+  Fireface 802, 800 and 400 protocol code is where their register and DSP layouts come
   from.
 - [oscmix](https://github.com/michaelforney/oscmix) by Michael Forney does the same job for the
   Fireface UCX II and was the model for controlling the interface's own mixer instead of mixing
   in software. Its documentation of the Class Compliant SysEx protocol and of the Fireface 802's
-  registers (on its wiki, with contributions from its users) is what the 802's USB support is
-  built on. None of its code is used here, and it does not support the Digiface.
+  registers (on its wiki, with contributions from its users) is what the 802's and UCX II's
+  USB support is built on. None of its code is used here, and it does not support the Digiface.
 
 ## License
 

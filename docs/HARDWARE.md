@@ -227,6 +227,24 @@ follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which
 the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
 and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
 
+## Fireface UCX II over USB
+
+The UCX II's DSP takes the same SysEx transport in Class Compliant mode, and it is oscmix's own
+device, so its registers are the best documented (oscmix wiki, "Protocol"). The engine's USB
+backend serves both through a model table (`engine/fireface_usb.c`): the ALSA card and sequencer
+client name starts with `Fireface UCX II`, there are 20 inputs and outputs, mixer sources 0–19
+are the inputs and `0x20`–`0x33` playback, output volumes are register `0x0500 + 0x40 × output`
+(0.1 dB, `-650` = off), the clock is reported in `0x3064` (source) and `0x3065` (rate), and
+`0x3e04 = 0x67cd` asks for every register. The GUI's settings (`openface_mixer/ucx2.py`) are
+register writes `(channel << 6) | setting`, channels 0–19 inputs and 20–39 outputs: phase `0x07`
+(inputs) / `0x08` (outputs), gain `0x08` (0.1 dB; 0–75 dB on AN 1/2, 0–24 dB on AN 3–8), 48V or
+level `0x09`, Hi-Z `0x0b`, output level `0x09`; the channel effects (`0x0c`, `0x0f`, `0x1b`,
+`0x23`), room EQ (`0x35d1 + 0x20 × output`) and reverb/echo (`0x3000`, `0x3014`) are switched
+off, input and output mute (`0x00`, `0x02`) cleared, and *CC mix* (`0x307b`) set to 0 =
+TotalMix so the DSP mixer is used rather than one of the fixed Class Compliant routings. Options:
+word clock single speed `0x3067`, optical out S/PDIF `0x3078`, S/PDIF professional `0x3079`.
+Not checked on a unit with Openface Mixer yet.
+
 # RME Fireface 800
 
 The Fireface 800 is FireWire only (FireWire 800 and 400). The kernel's `snd-fireface` driver
@@ -283,6 +301,28 @@ the lock/sync bits (the kernel's `/proc` dump reads some of them the other way r
 snd-firewire-ctl-services, which Openface Mixer follows), and the mixer and playback slots at
 2x/4x speed.
 
+# RME Fireface 400
+
+The 400 is the 800's FireWire-400 sibling in the same "former" family (unit version
+`0x000002`, `former/ff400.rs` in snd-firewire-ctl-services). The engine runs it with the 800's
+backend and a model table: 18 channels, mixer at `0x0000'8008'0000` as 18 blocks of 36
+quadlets (inputs 0–17, playback from 18), output volumes at `0x0000'8008'0f80`, configuration at
+`0x0000'8010'0514`, status and meters at the 800's addresses (meters 648 bytes: 54 64-bit
+values, then 54 quadlets). The kernel streams 18 / 14 / 10 channels (ADAT 8, 4, 0).
+
+Unlike the 800 it has an amplifier register at `0x0000'801c'0180`, written with
+`(channel << 16) | level`: channels 0/1 the AN 1/2 mic gain (0–65 dB), 2/3 the AN 3/4 line gain
+(0–36 half dB steps), 4–21 the output amplifiers, which the engine sets with each output volume
+as `0x3f × (0x10000 − volume) / 0x10000` (`0x3f` = silent). The GUI puts the four input gain
+commands in `dev_cmd[3..6]` with bit 31 set.
+
+Configuration differences from the 800: quadlet 0 holds phones level (`0x60000`: `0x40000` Hi
+Gain, `0x20000` −10 dBV, 0 +4 dBu), 48V on AN 1/2 (`0x01`, `0x80`), instrument and pad on AN 3
+(`0x200`, `0x100`) and AN 4 (`0x04`, `0x02`), and the line in/out levels with the 800's bits;
+quadlet 2 needs `0x04000000` (MIDI to the low address the kernel driver registered) and has no
+ADAT 2 or TCO clock (`0x1400` is LTC). Status quadlet 0 has one ADAT lock/sync pair
+(`0x1000`/`0x400`). Not checked on a unit yet.
+
 # RME HDSPe RayDAT
 
 The RayDAT is a PCIe card with four ADAT ports, AES and S/PDIF. Two drivers run it: the kernel's
@@ -292,7 +332,7 @@ adds a fuller settings interface. The kernel's `snd-hdspm` driver
 (firmware revision 211) streams 36 in / 36 out at 32–48 kHz, 20 at 64–96 kHz and 12 at
 128–192 kHz, and, unlike the USB and FireWire drivers, already exposes the card's hardware
 mixer to userspace. That is what alsa-tools' `hdspmixer` uses, and what Openface Mixer's engine
-uses too (`engine/raydat.c`). No low-level protocol and no udev rule are needed: the engine
+uses too (`engine/hdspe.c`). No low-level protocol and no udev rule are needed: the engine
 opens the card's `/dev/snd/controlC<n>` and `/dev/snd/hwC<n>D0`, found by driver name `HDSPM`
 or `HDSPe` and short name `RME RayDAT_<serial>`.
 
@@ -324,6 +364,29 @@ output's sends back from the driver every 500 ms, and sends everything again if 
 driver was reloaded, or another program changed the mixer). snd-hdspe also mutes the mixer
 channels that don't exist when the speed mode changes; the same read-back catches that and
 restores the mix.
+
+## AIO, AIO Pro and AES
+
+The same engine backend (`engine/hdspe.c`) and settings code (`openface_mixer/hdspe.py`) run the
+other HDSPe cards with the same `Mixer` control and ioctls; they differ in the card name
+(`RME AIO`, `RME AIO Pro`, `RME AES32`, each followed by `_<serial>` when the driver knows it;
+`RME AIO` must not match `RME AIO Pro`), the channel count and the controls' names:
+
+- **AIO, AIO Pro:** hardware channels 0/1 analog, 2–5 the optional AI4S/AO4S boards (not in the
+  mix yet), 6/7 phones (outputs only), 8/9 AES, 10/11 S/PDIF, ADAT from 12 (8, 4 or 2 channels,
+  as in snd-hdspe's channel maps). snd-hdspm names the clock controls `System Clock Mode` and
+  `Preferred Sync Reference`, its status `ADAT SyncCheck` and so on, and adds `S/PDIF Input`,
+  `Input Level`, `Output Level`, `Phones Level`, `XLR Breakout Cable` and `ADAT internal
+  (AEB/TEB)`. snd-hdspe has the RayDAT's controls plus the levels, `XLR Breakout Cable`, `ADAT
+  Internal` and `AI4S Present`/`AO4S Present`.
+- **AES:** 16 channels at every speed, AES 1–16. snd-hdspm's status controls are `WC Sync Check`,
+  `AES1 Sync Check` … `AES8 Sync Check` with `… Frequency`; options `Professional`, `Emphasis`,
+  `Non Audio`, `Clear Track Marker`, `Double/Quad Speed Wire Mode`. snd-hdspe: `Double Speed
+  Mode`, `Quad Speed Mode`, `Professional`, `Emphasis`, `Non Audio`, `Single Speed WordClk Out`,
+  `Clear TMS`. (`Line Out` isn't offered.)
+
+The MADI cards (HDSPe MADI, MADIface, MADI FX) use 64 channels and don't fit the 36-channel mix
+model. None of these cards has been checked with Openface Mixer.
 
 ## Channels
 

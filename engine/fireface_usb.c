@@ -1,6 +1,6 @@
 /*
- * RME Fireface 802 over USB (Class Compliant mode) as an engine backend: DSP mixer, settings
- * and meters as SysEx on the 802's second USB MIDI port. See fireface_usb.h for the protocol.
+ * RME Fireface 802 and UCX II over USB (Class Compliant mode) as engine backends: DSP mixer,
+ * settings and meters as SysEx on the second USB MIDI port. See fireface_usb.h for the protocol.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +39,17 @@
 
 static const uint8_t SYSEX_HEAD[] = { 0xf0, 0x00, 0x20, 0x0d, 0x10 };
 
+const struct ffusb_model ff802usb_model = {
+	.card = "Fireface 802 (", .n_in = FF802_N_IN, .n_out = FF802_N_OUT,
+	.n_src_in = FF802_PLAY_SRC, .vol_reg = 0x1e00, .vol_step = 0x100,
+	.clock_reg = 0x3d20, .rate_reg = 0x3d21, .dump = 0x3f990812,
+};
+const struct ffusb_model ucx2usb_model = {
+	.card = "Fireface UCX II", .n_in = 20, .n_out = 20,
+	.n_src_in = 20, .vol_reg = 0x0500, .vol_step = 0x40,
+	.clock_reg = 0x3064, .rate_reg = 0x3065, .dump = 0x3e0467cd,
+};
+
 /* ---------- encoding (no I/O) ---------- */
 
 uint16_t ff802usb_encode_gain(float lin)
@@ -76,6 +87,11 @@ void ff802usb_reg_msg(uint32_t word, uint8_t msg[FF802USB_MSG_LEN])
 	msg[11] = 0xf7;
 }
 
+uint32_t ffusb_vol_cmd(const struct ffusb_model *m, int out, int16_t vol)
+{
+	return (uint32_t)(m->vol_reg + m->vol_step * out) << 16 | (uint16_t)vol;
+}
+
 uint32_t ff802usb_rate(unsigned int value)
 {
 	static const uint32_t rates[] = {
@@ -84,15 +100,16 @@ uint32_t ff802usb_rate(unsigned int value)
 	return value < sizeof(rates) / sizeof(rates[0]) ? rates[value] : 0;
 }
 
-static void levels(int subid, const uint8_t *p, size_t n_words, struct ofm_shm *s)
+static void levels(const struct ffusb_model *m, int subid, const uint8_t *p, size_t n_words,
+		   struct ofm_shm *s)
 {
 	float *dst;
 	int n;
 
 	switch (subid) {
-	case 4: dst = s->peak_src; n = FF802_N_IN; break;               /* inputs, pre FX */
-	case 2: dst = s->peak_src + OFM_N_IN; n = FF802_N_OUT; break;    /* playback */
-	case 5: dst = s->peak_out; n = FF802_N_OUT; break;               /* outputs, post fader */
+	case 4: dst = s->peak_src; n = m->n_in; break;                 /* inputs, pre FX */
+	case 2: dst = s->peak_src + OFM_N_IN; n = m->n_out; break;      /* playback */
+	case 5: dst = s->peak_out; n = m->n_out; break;                 /* outputs, post fader */
 	default: return;
 	}
 	for (int i = 0; i < n && 3 * (size_t)i + 2 < n_words; i++) {
@@ -116,14 +133,14 @@ int ff802usb_handle_sysex(const uint8_t *msg, size_t len, struct ff802usb_info *
 		for (size_t i = 0; i < n_words; i++) {
 			uint32_t w = get_word(p + 5 * i);
 			unsigned int reg = (w >> 16) & 0x7fff, val = w & 0xffff;
-			if (reg == FF802USB_REG_CLOCK)
+			if (reg == info->m->clock_reg)
 				info->clock = (int)val;
-			else if (reg == FF802USB_REG_RATE)
+			else if (reg == info->m->rate_reg)
 				info->rate = (int)val;
 		}
 	} else if (subid >= 1 && subid <= 5) {
 		info->level_packets++;
-		levels(subid, p, n_words, s);
+		levels(info->m, subid, p, n_words, s);
 	}
 	return subid;
 }
@@ -175,6 +192,7 @@ long ff802usb_proc_avail(const char *text, int sub)
 /* ---------- ALSA sequencer ---------- */
 
 struct ff802usb {
+	const struct ffusb_model *m;
 	int fd;
 	struct snd_seq_addr me, dev;
 	int card;
@@ -259,14 +277,14 @@ static void seq_drain(struct ff802usb *f, struct ofm_shm *s)
 	}
 }
 
-/* Finds the 802's sequencer client and the address of its control port. */
+/* Finds the interface's sequencer client and the address of its control port. */
 static int find_device(struct ff802usb *f)
 {
 	struct snd_seq_client_info ci;
 	memset(&ci, 0, sizeof(ci));
 	ci.client = -1;
 	while (ioctl(f->fd, SNDRV_SEQ_IOCTL_QUERY_NEXT_CLIENT, &ci) == 0) {
-		if (strncmp(ci.name, FF802USB_CARD_PREFIX, strlen(FF802USB_CARD_PREFIX)) != 0)
+		if (!ofm_card_match(ci.name, f->m->card))
 			continue;
 		/* its MIDI ports in order; a MIDI 2.0 (UMP) client adds an endpoint port first */
 		struct snd_seq_port_info pi;
@@ -331,14 +349,25 @@ static void forget_sent(struct ff802usb *f)
 	f->routes = 0;
 }
 
-static void *create(void)
+static void *create_model(const struct ffusb_model *m)
 {
 	struct ff802usb *f = calloc(1, sizeof(*f));
 	if (f == NULL)
 		return NULL;
+	f->m = m;
 	f->fd = -1;
 	forget_sent(f);
 	return f;
+}
+
+static void *create(void)
+{
+	return create_model(&ff802usb_model);
+}
+
+static void *create_ucx2(void)
+{
+	return create_model(&ucx2usb_model);
 }
 
 static void close_dev(void *h)
@@ -400,7 +429,7 @@ static int open_dev(void *h)
 	struct snd_seq_port_info pi;
 	memset(&pi, 0, sizeof(pi));
 	pi.addr.client = (unsigned char)me;
-	snprintf(pi.name, sizeof(pi.name), "Fireface 802 control");
+	snprintf(pi.name, sizeof(pi.name), "Openface control");
 	pi.capability = SNDRV_SEQ_PORT_CAP_READ | SNDRV_SEQ_PORT_CAP_WRITE |
 			SNDRV_SEQ_PORT_CAP_NO_EXPORT;
 	pi.type = SNDRV_SEQ_PORT_TYPE_MIDI_GENERIC | SNDRV_SEQ_PORT_TYPE_APPLICATION;
@@ -416,13 +445,13 @@ static int open_dev(void *h)
 	}
 
 	memset(&f->rx, 0, sizeof(f->rx));
-	f->info = (struct ff802usb_info){ .clock = -1, .rate = -1 };
+	f->info = (struct ff802usb_info){ .m = f->m, .clock = -1, .rate = -1 };
 	f->seen_levels = 0;
 	clock_gettime(CLOCK_MONOTONIC, &f->last_levels);
 	forget_sent(f);
 	/* ask for every register, for the clock source and sample rate */
 	f->budget = FF802USB_MSG_LEN;
-	write_reg(f, (uint32_t)FF802USB_REG_DUMP << 16 | 0x0812);
+	write_reg(f, f->m->dump);
 	return DFU_STATE_ACTIVE;
 
 fail:
@@ -431,7 +460,7 @@ fail:
 	return state;
 }
 
-/* Is the 802's sequencer client still there (it goes away when the 802 is unplugged)? */
+/* Is the interface's sequencer client still there (it goes away when unplugged)? */
 static bool device_present(struct ff802usb *f)
 {
 	struct snd_seq_client_info ci;
@@ -458,6 +487,7 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 static int sync_mix(void *h, struct ofm_shm *s, bool full)
 {
 	struct ff802usb *f = h;
+	const struct ffusb_model *m = f->m;
 	int r, routes = 0;
 
 	if (full)
@@ -466,9 +496,11 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 	bool room = true;
 
 	/* the mix first, it's what is heard; then the channel settings */
-	for (int o = 0; o < FF802_N_OUT; o++) {
+	for (int o = 0; o < m->n_out; o++) {
 		bool muted = !(s->out_gain[o] > 0.0f);   /* volume only goes down to -65 dB */
-		for (int k = 0; k < FF802_N_SRC; k++) {
+		for (int k = 0; k < FF802_PLAY_SRC + m->n_out; k++) {
+			if (k == m->n_src_in)
+				k = FF802_PLAY_SRC;      /* no sources between the inputs and playback */
 			uint32_t g = muted ? 0 : ff802usb_encode_gain(s->gain[o][ff802_shm_source(k)]);
 			if (g)
 				routes++;
@@ -480,7 +512,7 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 		}
 		uint32_t v = (uint16_t)ff802_out_vol(s->out_gain[o]);
 		if (v != f->sent_vol[o] && (room = room && f->budget >= FF802USB_MSG_LEN)) {
-			if ((r = write_reg(f, ff802_vol_cmd(o, (int16_t)v))) < 0)
+			if ((r = write_reg(f, ffusb_vol_cmd(m, o, (int16_t)v))) < 0)
 				return r;
 			f->sent_vol[o] = v;
 		}
@@ -530,19 +562,25 @@ static int meters(void *h, struct ofm_shm *s)
 	return ms_since(&f->last_levels) < LEVELS_TIMEOUT_MS ? 0 : -ETIMEDOUT;
 }
 
-const struct ofm_backend ofm_backend_ff802usb = {
-	.key = "ff802usb",
-	.name = "Fireface 802 USB",
-	/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)" */
-	.out_node_card = FF802USB_CARD_PREFIX,
-	.meter_us = 30000,
-	.create = create,
-	.destroy = destroy,
-	.open = open_dev,
-	.close = close_dev,
-	.is_open = is_open,
-	.status = status,
-	.sync = sync_mix,
-	.routes = routes,
-	.meters = meters,
-};
+/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)" */
+#define FFUSB_BACKEND(k, n, card_name, create_fn)	\
+	{						\
+		.key = k,				\
+		.name = n,				\
+		.out_node_card = card_name,		\
+		.meter_us = 30000,			\
+		.create = create_fn,			\
+		.destroy = destroy,			\
+		.open = open_dev,			\
+		.close = close_dev,			\
+		.is_open = is_open,			\
+		.status = status,			\
+		.sync = sync_mix,			\
+		.routes = routes,			\
+		.meters = meters,			\
+	}
+
+const struct ofm_backend ofm_backend_ff802usb =
+	FFUSB_BACKEND("ff802usb", "Fireface 802 USB", "Fireface 802 (", create);
+const struct ofm_backend ofm_backend_ucx2 =
+	FFUSB_BACKEND("ucx2", "Fireface UCX II", "Fireface UCX II", create_ucx2);

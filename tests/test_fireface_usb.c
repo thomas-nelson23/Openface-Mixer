@@ -1,4 +1,4 @@
-/* Unit test for the Fireface 802 USB (Class Compliant) SysEx encoding and decoding. */
+/* Unit test for the Fireface 802 and UCX II USB (Class Compliant) SysEx encoding and decoding. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -60,7 +60,7 @@ int main(void)
 	check("rate bad", ff802usb_rate(9), 0);
 
 	/* register notifications: clock source and rate */
-	struct ff802usb_info info = { .clock = -1, .rate = -1 };
+	struct ff802usb_info info = { .m = &ff802usb_model, .clock = -1, .rate = -1 };
 	static struct ofm_shm s;
 	uint8_t pkt[7 + 5 * 3 * 30];
 	memcpy(pkt, (uint8_t[]){ 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x00 }, 6);
@@ -84,6 +84,29 @@ int main(void)
 		fprintf(stderr, "input meters: %g %g\n", s.peak_src[1], s.peak_src[2]);
 		failed = 1;
 	}
+
+	/* output volume: the 802's channel commands; the UCX II's 0x0500 + 0x40 * output */
+	check("802 vol", ffusb_vol_cmd(&ff802usb_model, 0, -60), 0x1e00ffc4);
+	check("802 vol out 3", ffusb_vol_cmd(&ff802usb_model, 2, 0), 0x20000000);
+	check("UCX II vol out 3", ffusb_vol_cmd(&ucx2usb_model, 2, -650), 0x0580fd76);
+
+	/* UCX II: clock registers 0x3064/0x3065, 20 inputs */
+	info = (struct ff802usb_info){ .m = &ucx2usb_model, .clock = -1, .rate = -1 };
+	memset(&s, 0, sizeof(s));
+	memset(pkt, 0, sizeof(pkt));
+	memcpy(pkt, (uint8_t[]){ 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x00 }, 6);
+	put_word(pkt + 6, 0x30640004);
+	put_word(pkt + 11, 0x30650001);
+	pkt[16] = 0xf7;
+	ff802usb_handle_sysex(pkt, 17, &info, &s);
+	check("UCX II clock", info.clock, 4);
+	check("UCX II rate", info.rate, 1);
+	memset(pkt, 0, sizeof(pkt));
+	memcpy(pkt, (uint8_t[]){ 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x04 }, 6);
+	put_word(pkt + 6 + 5 * (3 * 25 + 2), (1u << 22) << 4);  /* past the UCX II's inputs */
+	pkt[sizeof(pkt) - 1] = 0xf7;
+	ff802usb_handle_sysex(pkt, sizeof(pkt), &info, &s);
+	check("UCX II ignores channel 26", s.peak_src[25] != 0.0f, 0);
 
 	/* the rawmidi proc file */
 	const char *proc =
