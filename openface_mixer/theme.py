@@ -25,7 +25,8 @@ SOLO = WARN
 TEXT = QColor("#d9eef2")
 SOFT = QColor("#9cc7cf")
 DIM = QColor("#7d9299")
-MUTED = "#6f8a94"            # hints and scale marks (4.7:1 on the blue field, readable text)
+MUTED = "#58707a"            # text-muted: hints, scale marks, off lights, disabled (3.2:1, never
+                             # the only copy of something; text that must be read is DIM)
 KIND_COLOR = {"in": QColor("#2ad4ff"), "play": QColor("#a77bff"), "out": QColor("#ff2a4f")}
 GROUP_COLOR = {1: QColor("#ff2a4f"), 2: QColor("#ffb020"), 3: QColor("#2ad4ff"), 4: QColor("#ff7ad9")}
 # the channel colour palette offered in the strip menu (TotalMix has a similar set)
@@ -80,7 +81,7 @@ def px(n):
 
 def caption_html(text, color=None):
     """Wide-tracked small caps label, as the dashboard's panel titles."""
-    return (f"<span style='color:{(color or DIM).name()};font-size:{px(9)}px;font-weight:600;"
+    return (f"<span style='color:{(color or DIM).name()};font-size:{px(8)}px;font-weight:600;"
             f"letter-spacing:{px(2.4)}px'>{text.upper()}</span>")
 
 
@@ -230,7 +231,7 @@ def stylesheet():
         QPushButton:hover {{ border-color:rgba(42,212,255,0.5); color:white; }}
         QPushButton:pressed {{ background:rgba(42,212,255,0.08); }}
         /* keyboard focus (buttons only take focus from Tab, see MainWindow.tab_focus_only) */
-        QPushButton:focus, QToolButton:focus {{ border-color:rgba(42,212,255,0.8); }}
+        QPushButton:focus, QToolButton:focus {{ border-color:rgba(42,212,255,0.5); }}
         QPushButton:disabled {{ color:{MUTED}; border-color:{HAIR}; }}
         QPushButton:checked {{ background:white; color:#0b0f1c; border-color:white; font-weight:600; }}
         QPushButton:checked:hover {{ background:{c}; border-color:{c}; color:#0b0f1c; }}
@@ -264,14 +265,27 @@ def stylesheet():
         QLabel#lcd {{ background:rgba(4,12,18,0.6); color:{s}; border:1px solid {HAIR};
                      border-radius:{p(11)}px; padding:{p(4)}px {p(14)}px; font-family:{MONO_STACK};
                      font-size:{p(10)}px; }}
-        QLabel#caption {{ color:{d}; font-size:{p(9)}px; font-weight:600; }}
-        QLabel#toast {{ background:rgba(4,14,22,0.96); color:{t}; border:1px solid {HAIR_STRONG};
-                       border-radius:{p(14)}px; padding:{p(6)}px {p(16)}px; font-size:{p(12)}px; }}
+        QLabel#caption {{ color:{d}; font-size:{p(8)}px; font-weight:600; }}
+        QLabel#toast {{ background:rgba(4,12,18,0.97); color:{t}; border:1px solid {HAIR_STRONG};
+                       border-radius:{p(8)}px; padding:{p(8)}px {p(14)}px; font-size:{p(13)}px; }}
         QLabel#empty {{ color:{d}; font-size:{p(12)}px; }}
         QLabel#key {{ color:{d}; }}
         QLabel#hint {{ color:{MUTED}; font-size:{p(10)}px; }}
-        QLabel#note {{ color:{s}; background:rgba(255,42,79,0.07); border-left:{p(2)}px solid {r};
-                      border-radius:{p(3)}px; padding:{p(6)}px {p(8)}px; }}
+        QLabel#note {{ color:{t}; background:rgba(255,255,255,0.035); border:1px solid {HAIR_STRONG};
+                      border-radius:{p(6)}px; padding:{p(6)}px {p(8)}px; }}
+        /* a dialog (see settings_panel.ask): menu fill, radius 12, verbs for buttons */
+        QFrame#dialog {{ background:rgba(4,12,18,0.97); border:1px solid {HAIR_STRONG};
+                        border-radius:{p(12)}px; }}
+        QLabel#dialogtitle {{ color:white; font-size:{p(17)}px; font-weight:600; }}
+        QLabel#dialogbody {{ color:{s}; font-size:{p(13)}px; }}
+        QFrame#dialog QPushButton {{ font-size:{p(13)}px; padding:{p(6)}px {p(16)}px;
+                                    border-radius:{p(16)}px; }}
+        QPushButton[kind="primary"] {{ background:{c}; border-color:{c}; color:#021012; font-weight:600; }}
+        QPushButton[kind="primary"]:hover {{ background:#7fe9ff; border-color:#7fe9ff; color:#021012; }}
+        QPushButton[kind="danger"] {{ background:{r}; border-color:{r}; color:white; font-weight:600; }}
+        QPushButton[kind="danger"]:hover {{ background:#ff5a74; border-color:#ff5a74; color:white; }}
+        QPushButton[kind="quiet"] {{ border-color:transparent; }}
+        QPushButton[kind="quiet"]:hover, QPushButton[kind="quiet"]:focus {{ border-color:rgba(42,212,255,0.5); }}
         QComboBox {{ background:rgba(255,255,255,0.035); border:1px solid {HAIR};
                     border-radius:{p(6)}px; padding:{p(3)}px {p(8)}px; color:{t}; }}
         QComboBox:hover, QComboBox:focus {{ border-color:rgba(42,212,255,0.5); }}

@@ -1,12 +1,14 @@
 """Right-hand panel: device choice, the device's clock/port settings, card profile and hardware
 mixer status."""
 import html
+import re
 import threading
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
+    QCheckBox, QComboBox, QDialog, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
+    QLabel, QMessageBox,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -34,13 +36,29 @@ def udev_rule_hint(dev):
             "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
 
 
-CYAN, AMBER, RED, OFF = "#2ad4ff", "#ffb020", "#ff2a4f", "#6f8a94"
+# a light is cyan when on (active, locked, linked), red when something is wrong and muted when
+# off or unknown; ok green is for the clock sync light only
+CYAN, RED, OFF, OK, RED_TEXT = "#2ad4ff", "#ff2a4f", "#58707a", "#56e39f", "#ff7a93"
 
 
-def light(color, text, on=True):
-    """A status value: a light, filled when things are fine or busy and an empty ring when
-    not, then the words (the state never depends on telling the colours apart)."""
-    return f"<span style='color:{color}'>{'●' if on else '○'}</span>&nbsp;{text}"
+def light(color, text):
+    """A status value: a dot and the words beside it (the words carry the meaning, the dot
+    never stands alone)."""
+    return f"<span style='color:{color}'>●</span>&nbsp;{text}"
+
+
+def message(text, kind="bad", lead=None):
+    """A message: a coloured dot, a bold lead phrase (in red-text when it is a fault; the first
+    sentence unless given), then the rest, which says what to do."""
+    dot, lead_color = {"bad": (RED, RED_TEXT), "info": (CYAN, None), "ok": (OK, None)}[kind]
+    m = re.match(r"(.+?[.:])(\s|<br>|$)(.*)", text, re.S)
+    if lead is not None:
+        rest = " " + text
+    else:
+        lead, rest = (m.group(1), m.group(2) + m.group(3)) if m else (text, "")
+    color = f"color:{lead_color};" if lead_color else ""
+    return (f"<span style='color:{dot}'>●</span>&nbsp;<b style='{color}'>{lead}</b>"
+            f"{rest}")
 
 
 def hw_state(dev, state):
@@ -48,55 +66,115 @@ def hw_state(dev, state):
     short = dev.name.replace("RME ", "")
     hint = dev.missing_hint() if state == "no-device" else ""
     return {
-        "starting": (light(AMBER, "Connecting…"), ""),
-        "no-device": (light(RED, "Not found", False), f"{short} not found on {dev.bus}."
+        "starting": (light(OFF, "Connecting…"), ""),
+        "no-device": (light(RED, "Not found"), f"{short} not found on {dev.bus}."
                       + (hint and f"<br>{hint}")),
-        "no-access": (light(RED, "No permission", False),
+        "no-access": (light(RED, "No permission"),
                       f"No permission to open the {short}.<br>" + udev_rule_hint(dev)),
-        "busy": (light(RED, "In use", False),
+        "busy": (light(RED, "In use"),
                  f"The {short} driver refuses mixer changes while playback and recording are "
                  "open in two different programs. Let one program (PipeWire or JACK) use both."
                  if dev.bus == "PCIe" else
                  f"The {short} mixer interface is in use by another program."),
         "active": (light(CYAN, "Active"), ""),
-        "no-nodes": (light(AMBER, "Active, routes full"),
+        "no-nodes": (light(RED, "Active, routes full"),
                      f"This mix needs more than {dev.max_routes} routes; some sends are "
                      "missing."),
-        "error": (light(RED, f"{dev.bus} error", False),
+        "error": (light(RED, f"{dev.bus} error"),
                   f"{dev.bus} error talking to the {short}; retrying."),
-        "wrong-driver": (light(RED, "Wrong driver", False),
+        "wrong-driver": (light(RED, "Wrong driver"),
                          f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards "
                          "from 2022 on. Install snd-hdspe and blacklist snd-hdspm (see the "
                          "README)."),
     }.get(state, (state, ""))
 
 
-def ask(parent, title, text, action):
-    """A question with a button named for what it does and Cancel (the safe default), instead
-    of Yes / No."""
-    box = QMessageBox(QMessageBox.Question, title, text, parent=parent)
-    go = box.addButton(action, QMessageBox.AcceptRole)
-    box.setDefaultButton(box.addButton(QMessageBox.Cancel))
-    box.exec()
-    return box.clickedButton() is go
+class Dialog(QDialog):
+    """One question, answered with verbs: Cancel first, the committing action last (cyan, or
+    red when it destroys something), an optional escape route at the left. Esc and Cancel are
+    the same; focus starts on Cancel. Drawn as a card over a dimmed window."""
+
+    def __init__(self, parent, title, text, action, danger=False, escape=None):
+        super().__init__(parent, Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowTitle(title)
+        self.setAccessibleName(title)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(px(32), px(24), px(32), px(40))   # room for the shadow
+        card = QFrame(objectName="dialog")
+        card.setFixedWidth(px(400))
+        shadow = QGraphicsDropShadowEffect(card, blurRadius=px(32), xOffset=0, yOffset=px(12))
+        shadow.setColor(QColor(0, 0, 0, 115))
+        card.setGraphicsEffect(shadow)
+        outer.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(px(24), px(24), px(24), px(24))
+        lay.setSpacing(px(8))
+        head = QLabel(title, objectName="dialogtitle")
+        head.setWordWrap(True)
+        body = QLabel(text, objectName="dialogbody")
+        body.setWordWrap(True)
+        lay.addWidget(head)
+        lay.addWidget(body)
+        lay.addSpacing(px(16))
+        row = QHBoxLayout()
+        row.setSpacing(px(8))
+        if escape:
+            label, slot = escape
+            esc = QPushButton(label)
+            esc.setProperty("kind", "quiet")
+            esc.clicked.connect(slot)
+            row.addWidget(esc)
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setProperty("kind", "quiet")
+        cancel.clicked.connect(self.reject)
+        go = QPushButton(action)
+        go.setProperty("kind", "danger" if danger else "primary")
+        go.clicked.connect(self.accept)
+        row.addWidget(cancel)
+        row.addWidget(go)
+        lay.addLayout(row)
+        for b in (cancel, go):
+            b.setAutoDefault(False)
+        go.setDefault(not danger)    # Enter commits, unless it destroys something
+        cancel.setFocus()
+
+    def exec(self):
+        """Shows the dialog centred over a scrim on the parent window."""
+        win = self.parent().window() if self.parent() else None
+        scrim = None
+        if win is not None:
+            scrim = QWidget(win)
+            scrim.setStyleSheet("background:rgba(2,29,46,0.72);")
+            scrim.setGeometry(win.rect())
+            scrim.show()
+            self.adjustSize()
+            self.move(win.mapToGlobal(win.rect().center()) - self.rect().center())
+        try:
+            return super().exec()
+        finally:
+            if scrim is not None:
+                scrim.deleteLater()
+
+
+def ask(parent, title, text, action, danger=False, escape=None):
+    """True if the person chose `action` (see Dialog)."""
+    return Dialog(parent, title, text, action, danger, escape).exec() == QDialog.Accepted
 
 
 class Led(QLabel):
-    """Lock state: a filled light when locked or in sync, an empty ring when not, so it reads
-    without telling the colours apart."""
-    COLORS = {"No Lock": "#6f8a94", "Lock": "#ffb020", "Sync": "#2ad4ff"}
+    """Lock state: a cyan light when locked or in sync, muted when not, always with the word."""
 
     def set_state(self, s):
-        c = self.COLORS.get(s, "#6f8a94")
-        dot = "●" if s in ("Lock", "Sync") else "○"
-        self.setText(f"<span style='color:{c}'>{dot}</span> {s or '—'}")
+        self.setText(light(CYAN if s in ("Lock", "Sync") else OFF, s or "—"))
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
     from the chosen source, dark while it does not (or the state is unknown). The tooltip
     names the current source."""
-    ON, OFF = "#56e39f", "#6f8a94"
+    ON = OK
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
@@ -112,9 +190,7 @@ class SyncLight(QLabel):
 
     def refresh(self):
         on = self.current not in (None, "—") and self.current == self.combo.currentText()
-        # filled and green while in use, an empty ring otherwise (shape, not only colour)
-        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>{'●' if on else '○'}"
-                     "</span>")
+        self.setText(f"<span style='color:{self.ON if on else OFF}'>●</span>")
         self.setToolTip(("Running from this source" if on else
                          f"Running from: {self.current}") if self.current else
                         "Current source unknown")
@@ -124,7 +200,7 @@ class Sidebar(QFrame):
     """The settings panel docked to the window's right edge: one dark column with the sections
     stacked and divided by hairlines, slid in and out by the Settings button."""
     closed = Signal()
-    WIDTH = 268
+    WIDTH = 270
 
     def __init__(self, panel, parent=None):
         super().__init__(parent)
@@ -153,26 +229,18 @@ class Sidebar(QFrame):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         lay.addWidget(scroll, 1)
-        self._anim = QPropertyAnimation(self, b"maximumWidth", self)
-        self._anim.setDuration(180)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._open = True
 
     def is_open(self):
         return self._open
 
-    def set_open(self, on, animate=True):
+    def set_open(self, on):
+        """Opens or closes at once (no sliding: motion only where it is information)."""
         if on == self._open:
             return
         self._open = on
         self.setMinimumWidth(0)
-        self._anim.stop()
-        if not animate:
-            self.setMaximumWidth(self.full_width if on else 0)
-            return
-        self._anim.setStartValue(self.width())
-        self._anim.setEndValue(self.full_width if on else 0)
-        self._anim.start()
+        self.setMaximumWidth(self.full_width if on else 0)
 
 
 class SettingsPanel(QWidget):
@@ -291,7 +359,7 @@ class SettingsPanel(QWidget):
         window)."""
         box = Section("MIX")
         ml = QVBoxLayout(box)
-        self.export_btn = QPushButton("Export mix…")
+        self.export_btn = QPushButton("Export current mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
         self.reset_btn = QPushButton("Reset mix to default…")
@@ -336,9 +404,9 @@ class SettingsPanel(QWidget):
     def _update_clicked(self):
         src, installed = self._source
         if self._pending:
-            if not ask(self, "Update Openface Mixer",
-                       f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
-                       "up first, and the engines restart with the new version.",
+            if not ask(self, "Install updates and restart?",
+                       f"{len(self._pending)} update(s) from GitHub. Your mixes are backed up first, "
+                       "and the engines restart with the new version.",
                        "Update and restart"):
                 return
             step, job, text = "update", lambda: updater.update(src), "Updating…"
@@ -421,9 +489,9 @@ class SettingsPanel(QWidget):
         grid.addWidget(value, r, 1)
         return value
 
-    def show_status_note(self, *notes):
+    def show_status_note(self, *notes, kind="bad"):
         """The STATUS section's note: what is wrong and how to fix it (empty: hidden)."""
-        text = "<br><br>".join(n for n in notes if n)
+        text = "<br><br>".join(message(n, kind) for n in notes if n)
         self.status_note.setText(text)
         self.status_note.setVisible(bool(text))
 
@@ -695,11 +763,10 @@ class SettingsPanel(QWidget):
     def _enable_pro(self):
         if not self._card_name:
             return
-        if ask(self, "Switch profile",
-               "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-               "This lets apps record all 32 hardware inputs. The output device will be renamed "
-               "to '…pro-output-0' (your existing combine-stream config already matches it). "
-               "Audio may briefly drop out.", "Switch profile"):
+        if ask(self, "Switch the Digiface to Pro Audio?",
+               "Apps can then record all 32 hardware inputs. The output device is renamed "
+               "to '…pro-output-0', which the combine-stream config already expects. Audio may "
+               "drop out for a moment.", "Switch profile"):
             set_card_profile(self._card_name, "pro-audio")
 
     def update_hw(self, ctrls):
@@ -743,11 +810,13 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             self.routes_label.setText("—")
-            self.eng_label.setText(light(RED, "Stopped", False))
+            self.eng_label.setText(light(RED, "Stopped"))
             self.sink_label.setText("—")
-            self.show_status_note(html.escape(engine_error) if engine_error else
-                                  "The hardware keeps its last mix. Start the engine to "
-                                  "change it.")
+            if engine_error:
+                self.show_status_note(html.escape(engine_error))
+            else:
+                self.show_status_note("The hardware keeps its last mix. Start the engine to "
+                                      "change it.", kind="info")
             self.eng_btn.setText("Start engine")
             return
         value, note = hw_state(self.dev, status["hw"])
@@ -760,21 +829,21 @@ class SettingsPanel(QWidget):
         else:
             self.routes_label.setText("—")
         self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
-                               light(AMBER, "Not responding"))
+                               light(RED, "Not responding"))
         self.sink_label.setText(
             f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
-            light(AMBER, f"Not linked to the {self.dev.name.replace('RME ', '')}", False))
+            light(RED, f"Not linked to the {self.dev.name.replace('RME ', '')}"))
         self.show_status_note(note)
         self.eng_btn.setText("Restart engine")
 
     def update_profile(self, name, profile, has_in):
         self._card_name = name
         if not name:
-            self.profile.setText(light(OFF, "Not in PipeWire", False))
+            self.profile.setText(light(OFF, "Not in PipeWire"))
             self.recording.setText("—")
             self.pro_btn.setVisible(False)
             return
         self.profile.setText(html.escape(profile or "—"))
         self.recording.setText(light(CYAN, "All inputs") if has_in else
-                               light(AMBER, "No inputs (monitoring still works)", False))
+                               light(OFF, "No inputs (monitoring still works)"))
         self.pro_btn.setVisible(not has_in)

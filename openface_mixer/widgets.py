@@ -197,11 +197,11 @@ class Fader(QWidget):
         top, bot = self._track()
         tx = px(9)   # track centre
         # printed scale between fader and meter, as in Pro Tools
-        p.setFont(font(SANS, 8, QFont.Medium))
+        p.setFont(font(SANS, 7, QFont.Medium))
         last = None
         for db in self.SCALE:
             y = bot - db2pos(db) * (bot - top)
-            if last is not None and y - last < px(10) and db != 0:
+            if last is not None and y - last < px(9) and db != 0:
                 continue   # short fader: drop marks that would overlap
             last = y
             p.setPen(QColor("#e6f3f6") if db == 0 else QColor(MUTED))
@@ -350,7 +350,7 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
     b = QToolButton()
     b.setText(text)
     b.setCheckable(True)
-    b.setFixedSize(QSize(px(width), px(20)))
+    b.setFixedSize(QSize(px(width), px(17)))
     b.setToolTip(tip)
     b.setCursor(Qt.PointingHandCursor)
     b.setFont(font(SANS, 9, QFont.DemiBold))
@@ -359,7 +359,7 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
         f"border-radius:{px(3)}px}}"
         "QToolButton:hover{background:#12293a;color:white;border-color:rgba(255,255,255,0.18)}"
         "QToolButton:pressed{background:#1a3b4c}"
-        "QToolButton:focus{border-color:rgba(42,212,255,0.8)}"
+        "QToolButton:focus{border-color:rgba(42,212,255,0.5)}"
         f"QToolButton:checked{{background:{color};color:{fg};border-color:{color}}}"
         "QToolButton:checked:pressed{background:#d9eef2}")
     return b

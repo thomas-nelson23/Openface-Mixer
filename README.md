@@ -121,7 +121,7 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Centre pan | Double-click the knob (or Home); Left/Right move it |
 | Reset peak / clip | Click the meter |
 | Solo | **S** on a strip: solo-in-place in the current submix |
-| Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
+| Store a preset | Click **Store** (it turns red), then a slot (Esc cancels), or right-click a slot. Right-click → *Rename…* names it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
 | Recall a preset | Click a lit slot |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
