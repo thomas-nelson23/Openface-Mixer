@@ -1,14 +1,16 @@
 """Main window: wires the model, the engine link, the hardware panel and the widgets together."""
+import html
 import os
 import sys
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QProcess, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame,
+    QGraphicsDropShadowEffect, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox,
+    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from . import APP_ID, APP_NAME
@@ -30,7 +32,7 @@ from .model import (
     strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .settings_panel import SettingsPanel, Sidebar, ask
+from .settings_panel import SettingsPanel, Sidebar, ask, message
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
     icon_pixmap, px,
@@ -125,10 +127,14 @@ class MainWindow(QMainWindow):
         self.settings_btn.toggled.connect(lambda _on: self.fit_top_bar())
         outer.addWidget(self.sidebar)
         self.setCentralWidget(central)
-        self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
+        self.toast = QLabel(central)      # a result with no place on screen, see notify()
         self.toast.setObjectName("toast")
+        shadow = QGraphicsDropShadowEffect(self.toast, blurRadius=px(32), xOffset=0,
+                                           yOffset=px(12))
+        shadow.setColor(QColor(0, 0, 0, 115))
+        self.toast.setGraphicsEffect(shadow)
         self.toast.hide()
-        self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
+        self._toast_timer = QTimer(self, singleShot=True, interval=5000, timeout=self.toast.hide)
         self._build_shortcuts()
 
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
@@ -149,7 +155,7 @@ class MainWindow(QMainWindow):
         size, sidebar_open = load_window()
         if not sidebar_open:
             self.settings_btn.setChecked(False)
-            self.sidebar.set_open(False, animate=False)
+            self.sidebar.set_open(False)
         width, height = size or (px(1600), px(960))
         self.fit_top_bar(width)          # sets the bar's compact minimum before the first resize
         self.resize(width, height)
@@ -271,10 +277,11 @@ class MainWindow(QMainWindow):
             if b.focusPolicy() != Qt.NoFocus:
                 b.setFocusPolicy(Qt.TabFocus)
 
-    def notify(self, text):
-        """Brief feedback over the bottom of the mixer, gone after a few seconds. Only for
-        things that are also visible elsewhere (nothing has to be read in time)."""
-        self.toast.setText(text)
+    def notify(self, text, kind="ok", lead=None):
+        """A message over the bottom of the mixer, gone after 5 s. Only for a result that has
+        no place on screen (an exported file); a change that shows (a stored slot, a recalled
+        mix) is its own feedback."""
+        self.toast.setText(message(text, kind, lead))
         self.toast.adjustSize()
         area = self.centralWidget().width() - (self.sidebar.width() if self.sidebar.is_open()
                                                  else 0)
@@ -400,7 +407,6 @@ class MainWindow(QMainWindow):
     def hide_strip(self, strip):
         set_strip_hidden(self.st, strip.key, True)
         self.channels_shown()
-        self.notify(f"{strip.name} hidden · right-click empty space to show it")
 
     def unhide_strip(self, key):
         set_strip_hidden(self.st, key, False)
@@ -770,7 +776,7 @@ class MainWindow(QMainWindow):
             b.setProperty("filled", name is not None)
             b.setProperty("active", name is not None and i == active)
             b.setToolTip(f"{i + 1}: {name}\nClick to recall · right-click for options" if name
-                         else f"{i + 1}: empty — arm Store, then click to save")
+                         else f"{i + 1}: empty · press Store, then click here to save the mix")
             b.style().unpolish(b)
             b.style().polish(b)
 
@@ -780,33 +786,25 @@ class MainWindow(QMainWindow):
             self.store_slot(i)
         elif self.presets.slots[i]:
             self.recall_slot(i)
-        else:
-            self.store_slot(i)      # nothing to overwrite: no need to arm Store first
 
     def store_slot(self, i):
-        name, ok = QInputDialog.getText(self, "Store preset", f"Name for slot {i + 1}:",
-                                        text=self.presets.name(i) or f"Mix {i + 1}")
-        if not ok:
-            return
-        name = name.strip() or f"Mix {i + 1}"
-        self.presets.store(i, name, extract_mix(self.st))
+        """Writes the mix to slot i at once (Store, then a slot: two steps, no dialog). The slot
+        keeps its name; right-click renames it."""
+        self.presets.store(i, self.presets.name(i) or f"Mix {i + 1}", extract_mix(self.st))
         self.st["active_slot"] = i
         self.refresh_slots()
         self.schedule_save()
-        self.notify(f"Saved “{name}” in slot {i + 1}")
 
     def recall_slot(self, i):
         apply_mix(self.st, self.presets.slots[i]["mix"])
         self.st["active_slot"] = i
-        name = self.presets.name(i)
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Recalled “{name}”")
 
     def slot_menu(self, i):
         menu = QMenu(self)
-        menu.addAction("Store current mix here…", lambda: self.store_slot(i))
+        menu.addAction("Store current mix here", lambda: self.store_slot(i))
         if self.presets.slots[i]:
             menu.addAction("Recall", lambda: self.recall_slot(i))
             menu.addAction("Rename…", lambda: self._rename_slot(i))
@@ -827,6 +825,7 @@ class MainWindow(QMainWindow):
         if path:
             slot = self.st.get("active_slot")
             export_mix(path, self.presets.name(slot) if slot is not None else "Mix", extract_mix(self.st))
+            self.notify(f"to {html.escape(path.replace(str(Path.home()), '~', 1))}", lead="Mix exported")
 
     def import_mix(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import mix", "", "Openface Mixer mix (*.json)")
@@ -842,18 +841,18 @@ class MainWindow(QMainWindow):
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Imported “{name}”")
 
     def reset_mix(self):
-        if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
-                   "no input monitoring, no groups)? This can't be undone.", "Reset mix"):
+        if not ask(self, "Reset mix to default?",
+                   "All routing goes back to the default: playback n to output n, no input "
+                   "monitoring, no groups. Presets are kept. This can't be undone.",
+                   "Reset mix", danger=True, escape=("Export first…", self.export_mix)):
             return
         apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
         self.st["active_slot"] = None
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify("Mix reset to default")
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
@@ -955,17 +954,16 @@ class MainWindow(QMainWindow):
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff2a4f'>○</span>&nbsp; ENGINE STOPPED"
+            txt = "<span style='color:#ff2a4f'>●</span>&nbsp; Engine stopped"
             self.status.setToolTip("The engine is not running · click for details")
         else:
             hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
+                      "#58707a" if s["hw"] == "starting" else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
                       else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
-            txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
+            txt = (f"<span style='color:{hw_col}'>●</span>&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
