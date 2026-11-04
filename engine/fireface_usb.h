@@ -1,10 +1,10 @@
 /*
- * RME Fireface 802 over USB, in Class Compliant mode.
+ * RME Fireface 802 and Fireface UCX II over USB, in Class Compliant mode.
  *
- * Over USB, Linux runs the 802 only in Class Compliant (CC) mode, where its TotalMix FX DSP
- * listens to the second of its two USB MIDI ports, as RME's TotalMix FX for iPad uses it.
+ * Over USB, Linux runs these only in Class Compliant (CC) mode, where their TotalMix FX DSP
+ * listens to the second of their two USB MIDI ports, as RME's TotalMix FX for iPad uses it.
  * The commands are SysEx packets (protocol documented by oscmix, github.com/michaelforney/oscmix,
- * wiki pages "Protocol" and "Devices/Fireface-802"):
+ * wiki pages "Protocol" (the UCX II, oscmix's own device) and "Devices/Fireface-802"):
  *
  *   F0 00 20 0D 10 <subid> <payload> F7
  *
@@ -22,6 +22,12 @@
  * So the engine sends the same words as over FireWire, wrapped in SysEx, plus the clock and
  * option registers 0x3d20-0x3d46, which the GUI puts in dev_cmd[] (fireface802.usb_commands()).
  *
+ * The UCX II's mixer registers are the 802's (0x4000 + 0x40 * output + source, playback from
+ * source 0x20, same gain encoding). Its channel settings are register (channel << 6) | setting,
+ * channels 0-19 the inputs and 20-39 the outputs (output volume at 0x0500 + 0x40 * output, in
+ * 0.1 dB like the 802's), and its clock and options sit at 0x3064-0x307b. The GUI's commands
+ * for it come from openface_mixer/ucx2.py.
+ *
  * The MIDI port is reached through the ALSA sequencer (/dev/snd/seq), which shares it with
  * PipeWire's MIDI bridge. The sequencer drops events that don't fit in the port's output buffer
  * instead of waiting, so the backend sends no more than the buffer has room for each tick (read
@@ -35,15 +41,24 @@
 
 #include "shm_layout.h"
 
-#define FF802USB_CARD_PREFIX "Fireface 802 ("   /* ALSA card and sequencer client name */
 #define FF802USB_MSG_LEN     12                 /* one register write */
-#define FF802USB_REG_CLOCK   0x3d20
-#define FF802USB_REG_RATE    0x3d21
-#define FF802USB_REG_DUMP    0x3f99             /* 0x0812 asks for all registers */
 #define FF802USB_REG_SERIAL  0x3f00             /* host keep-alive, cycling 0-15 */
 #define FF802USB_STATUS_VALID 0x80000000u       /* dev_status: rate (8-15) and clock (0-7) known */
 
+/* One interface. */
+struct ffusb_model {
+	const char *card;      /* start of the ALSA card and sequencer client name */
+	int n_in, n_out;       /* physical inputs and outputs (playback = outputs) */
+	int n_src_in;          /* mixer sources before playback (the 802's include its FX return) */
+	uint16_t vol_reg;      /* output 1's volume register */
+	uint16_t vol_step;     /* register step to the next output */
+	uint16_t clock_reg, rate_reg;   /* clock source; sample rate (oscmix's enum on both) */
+	uint32_t dump;         /* register write asking for every register */
+};
+extern const struct ffusb_model ff802usb_model, ucx2usb_model;
+
 /* Exposed for tests. */
+uint32_t ffusb_vol_cmd(const struct ffusb_model *m, int out, int16_t vol);
 uint16_t ff802usb_encode_gain(float lin);
 /* Writes the SysEx for one register write (FF802USB_MSG_LEN bytes). word: (reg << 16) | value,
  * parity is added here. */
@@ -53,13 +68,14 @@ uint32_t ff802usb_rate(unsigned int value);
 
 /* What the backend learns from the device's SysEx. */
 struct ff802usb_info {
+	const struct ffusb_model *m;
 	int clock;       /* clock source register, -1 until reported */
 	int rate;        /* sample rate register, -1 until reported */
 	unsigned int level_packets;
 };
 
 /* Handles one complete SysEx message (F0 .. F7): register notifications update info, level
- * packets raise the peaks in s. Returns the sub ID, or -1 if it isn't the 802's. */
+ * packets raise the peaks in s. Returns the sub ID, or -1 if it isn't RME's. */
 int ff802usb_handle_sysex(const uint8_t *msg, size_t len, struct ff802usb_info *info,
 			  struct ofm_shm *s);
 

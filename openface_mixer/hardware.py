@@ -28,8 +28,11 @@ class Hardware:
             text = Path("/proc/asound/cards").read_text()
         except OSError:
             return None
+        # a name ending in a letter or digit must end there ("RME AIO" isn't "RME AIO Pro"),
+        # as the engine's ofm_card_match
+        pat = re.escape(card_name) + (r"(?! ?[A-Za-z0-9])" if card_name[-1].isalnum() else "")
         for m in re.finditer(r"^\s*(\d+)\s+\[.*?\]:.*?-\s*(.*)$", text, re.M):
-            if card_name in m.group(2):
+            if re.search(pat, m.group(2)):
                 return int(m.group(1))
         return None
 

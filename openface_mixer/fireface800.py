@@ -153,8 +153,8 @@ def default_settings():
     }
 
 
-def upgrade_settings(s):
-    base = default_settings()
+def upgrade_settings(s, base=None):
+    base = base or default_settings()
     if not isinstance(s, dict):
         return base
     for k, v in base.items():
@@ -230,14 +230,15 @@ def device_words(s):
     return (1, config_words(s)) if s["known"] else (0, [])
 
 
-def decode_status(q0, q1):
+def decode_status(q0, q1, status_inputs=STATUS_INPUTS, active_sources=ACTIVE_SOURCES):
     """Status quadlets -> {"rate": Hz or None, "source": label, "inputs": [(label,
-    "No Lock" | "Lock" | "Sync", rate or None)]}."""
+    "No Lock" | "Lock" | "Sync", rate or None)]}. The Fireface 400 passes its own inputs and
+    sources (the status layout is otherwise the same)."""
     internal = bool(q1 & 0x00000001)
     ext_rate = RATES.get(q0 & 0x1E000000)
-    active = ACTIVE_SOURCES.get(q0 & 0x01C00000, "—")
+    active = active_sources.get(q0 & 0x01C00000, "—")
     inputs = []
-    for label, lock, sync in STATUS_INPUTS:
+    for label, lock, sync in status_inputs:
         state = "Sync" if q0 & lock and q0 & sync else "Lock" if q0 & lock else "No Lock"
         if not q0 & lock:
             rate = None

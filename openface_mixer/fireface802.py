@@ -63,6 +63,12 @@ CLOCK_SOURCES = (                       # (key, label, config bits), TotalMix's 
     ("adat_b", "ADAT B", 0x00001000),
 )
 
+OPTION_ROWS = (                 # settings panel: (label, key, ((text, value), ...))
+    ("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
+    ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
+    ("AES out", "aes_pro", (("Consumer", False), ("Professional", True))),
+)
+
 # Class Compliant mode (USB) registers, from oscmix's Fireface 802 notes
 USB_CARD_NAME = "Fireface 802 ("   # ALSA card name in CC mode: "Fireface 802 (<serial>)"
 USB_REG_CLOCK = 0x3D20          # clock source, index into CLOCK_SOURCES
@@ -155,8 +161,8 @@ def default_settings():
     }
 
 
-def upgrade_settings(s):
-    base = default_settings()
+def upgrade_settings(s, base=None):
+    base = base or default_settings()
     if not isinstance(s, dict):
         return base
     for k, v in base.items():
@@ -272,7 +278,7 @@ def decode_status(word):
     }
 
 
-def decode_usb_status(word):
+def decode_usb_status(word, clock_sources=CLOCK_SOURCES):
     """The USB engine's dev_status -> decode_status()'s dict. Class Compliant mode reports the
     clock source setting and the rate, not the lock state of each input."""
     if not word & USB_STATUS_VALID:
@@ -280,7 +286,7 @@ def decode_usb_status(word):
     rate, clock = (word >> 8) & 0xFF, word & 0xFF
     return {
         "rate": USB_RATES[rate] if rate < len(USB_RATES) else None,
-        "source": CLOCK_SOURCES[clock][1] if clock < len(CLOCK_SOURCES) else "—",
+        "source": clock_sources[clock][1] if clock < len(clock_sources) else "—",
         "inputs": [],
     }
 

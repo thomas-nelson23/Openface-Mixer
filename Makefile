@@ -11,9 +11,9 @@ all: engine ## Build everything (just the engine; the GUI is plain Python)
 engine: $(ENGINE) ## Build the C mixer engine
 
 ENGINE_SRC = engine/openface-mixer-engine.c engine/backend_digiface.c engine/digiface_usb.c \
-	     engine/fireface_fw.c engine/fireface_usb.c engine/raydat.c
+	     engine/fireface_fw.c engine/fireface_usb.c engine/hdspe.c
 ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/fireface_usb.h \
-	     engine/raydat.h \
+	     engine/hdspe.h \
 	     engine/shm_layout.h
 
 $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
@@ -22,7 +22,7 @@ $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
 
-run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802|ff802usb|ff800|raydat)
+run-engine: engine ## Run the engine in the foreground (stop the systemd service first; DEVICE=ff802|ff802usb|ucx2|ff800|ff400|raydat|aio|aiopro|aes)
 	./$(ENGINE) --device $(or $(DEVICE),digiface)
 
 test: ## Run the unit tests (no audio hardware or display needed)
@@ -35,8 +35,8 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	$(CC) $(CFLAGS) -o tests/test_fireface_usb tests/test_fireface_usb.c engine/fireface_usb.c \
 		engine/fireface_fw.c -lm
 	./tests/test_fireface_usb
-	$(CC) $(CFLAGS) -o tests/test_raydat tests/test_raydat.c engine/raydat.c -lm
-	./tests/test_raydat
+	$(CC) $(CFLAGS) -o tests/test_hdspe tests/test_hdspe.c engine/hdspe.c -lm
+	./tests/test_hdspe
 
 lint: ## Byte-compile everything to catch syntax errors
 	python3 -m compileall -q openface_mixer tests
@@ -48,7 +48,7 @@ uninstall: ## Remove the user install (keeps saved mixes)
 	./scripts/uninstall.sh
 
 clean: ## Remove build output
-	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_raydat
+	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_hdspe
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
 help: ## Show this help
