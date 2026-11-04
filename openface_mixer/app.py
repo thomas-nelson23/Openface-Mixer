@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.st = load_state(dev)
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
+        self._quitting = False             # Ctrl+Q: close for real even when started in the background
         self.reopen_geometry = None        # where main() puts the window it reopens
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
@@ -115,11 +116,12 @@ class MainWindow(QMainWindow):
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
         self.settings.add_control_room(self.control)
-        self.remote_panel = RemotePanel(self.st, dev.key)
+        self.remote_panel = RemotePanel(self.st, dev)
         self.settings.add_before_updates(self.remote_panel)
         self.remote = RemoteLink(self.remote_snapshot, self)
         self.remote.received.connect(self.remote_message)
-        self.remote.status_changed.connect(self.remote_panel.set_status)
+        self.remote.status_changed.connect(
+            lambda st: self.remote_panel.set_status(st, self.remote.target_error))
         self.remote_panel.changed.connect(self.apply_remote_settings)
         self._hw_active = False
         compact_boxes(self.settings)
@@ -270,7 +272,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
             ("Escape", lambda: self.store_btn.setChecked(False)),
-            ("Ctrl+Q", QApplication.quit),      # also quits when closing only hides (--background)
+            ("Ctrl+Q", self.quit_app),          # also quits when closing only hides (--background)
         )
         for key, slot in keys:
             sc = QShortcut(QKeySequence(key), self)
@@ -626,6 +628,12 @@ class MainWindow(QMainWindow):
                 s.set_settings_active(any(self.dev.channel_settings_active(self.st, s.kind, c)
                                           for c in s.channels))
 
+    def quit_app(self):
+        """Quit for real: the close event saves the mix and the window, then the loop ends."""
+        self._quitting = True
+        self.close()
+        QApplication.quit()
+
     def switch_device(self, key):
         if key == self.dev.key:
             return
@@ -971,6 +979,7 @@ class MainWindow(QMainWindow):
     def apply_remote_settings(self):
         r = remote_settings(self.st)
         self.remote.levels_on = r["levels"]
+        self.remote.set_target(r["host"], r["out_port"])
         port = self.remote.sock.localPort() if self.remote.sock else None
         if not r["enabled"]:
             self.remote.stop()
@@ -1084,17 +1093,18 @@ class MainWindow(QMainWindow):
         self.save()
         size = (self.normalGeometry() if self.isMaximized() else self.geometry()).size()
         save_window(size.width(), size.height(), self.sidebar.is_open())
-        if self.background and self.switch_to is None:
+        if self.background and self.switch_to is None and not self._quitting:
             e.ignore()                  # keep mixing and serving the remote; reopen to show
             self.hide()
             return
         super().closeEvent(e)
 
 
-def _single_instance(app):
-    """Make this the only running Openface Mixer of this user. If one is already running, ask it
-    to show its window and return None; otherwise return the server that answers later starts."""
-    name = f"{APP_ID}-{os.getuid()}"
+def _single_instance(app, dev):
+    """Make this the only running Openface Mixer window for dev (each device has its own engine,
+    mix and window, so one per device may run). If one is already running, ask it to show its
+    window and return None; otherwise return the server that answers later starts."""
+    name = f"{APP_ID}-{os.getuid()}-{dev.key}"
     probe = QLocalSocket()
     probe.connectToServer(name)
     if probe.waitForConnected(300):
@@ -1104,7 +1114,9 @@ def _single_instance(app):
         return None
     QLocalServer.removeServer(name)            # left behind by a crashed instance
     server = QLocalServer(app)
-    server.listen(name)
+    if not server.listen(name):
+        print(f"openface-mixer: single-instance socket {name}: {server.errorString()}",
+              file=sys.stderr)
     return server
 
 
@@ -1113,9 +1125,12 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
     args = app.arguments()[1:]
-    server = _single_instance(app)
-    if server is None:
-        sys.exit(0)
+    if "--device" in args and args.index("--device") + 1 < len(args):
+        dev = DEVICES.get(args[args.index("--device") + 1])
+        if dev is None:
+            sys.exit(f"--device: one of {', '.join(DEVICES)}")
+    else:
+        dev = detect(load_device_choice())
     background = "--background" in args
     app.setQuitOnLastWindowClosed(not background)
     current = {}
@@ -1127,14 +1142,16 @@ def main():
             w.raise_()
             w.activateWindow()
 
-    server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
-                                          show_window()))
-    if "--device" in args and args.index("--device") + 1 < len(args):
-        dev = DEVICES.get(args[args.index("--device") + 1])
-        if dev is None:
-            sys.exit(f"--device: one of {', '.join(DEVICES)}")
-    else:
-        dev = detect(load_device_choice())
+    def claim(dev):
+        """This process becomes dev's window, or hands over to the one already running."""
+        server = _single_instance(app, dev)
+        if server is None:
+            sys.exit(0)
+        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
+                                              show_window()))
+        return server
+
+    server = claim(dev)
     geometry = None
     while True:
         apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
@@ -1155,3 +1172,7 @@ def main():
         w.arc.disconnect_port()      # so the next window can open the ARC USB
         w.remote.stop()              # and the next one can bind the remote's port
         w.deleteLater()
+        if w.dev is not dev:         # the other device may already have a window: show that
+            server.close()
+            server.deleteLater()
+            server = claim(dev)

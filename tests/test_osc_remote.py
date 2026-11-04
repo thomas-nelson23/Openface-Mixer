@@ -207,3 +207,20 @@ class ApplyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoteSettingsTest(unittest.TestCase):
+    def test_defaults_are_off_and_totalmix_ports(self):
+        st = {}
+        r = osc.remote_settings(st)
+        self.assertFalse(r["enabled"])
+        self.assertEqual((r["port"], r["out_port"]), (7001, 9001))
+        self.assertEqual(r["host"], "")
+        self.assertTrue(r["levels"])
+        self.assertIs(st["remote"], r)
+
+    def test_existing_settings_are_kept(self):
+        st = {"remote": {"enabled": True, "port": 8000, "host": "10.0.0.5"}}
+        r = osc.remote_settings(st)
+        self.assertEqual((r["enabled"], r["port"], r["host"], r["out_port"]),
+                         (True, 8000, "10.0.0.5", 9001))

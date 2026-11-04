@@ -168,7 +168,10 @@ Openface Mixer can be controlled over the network by anything that speaks TotalM
 **Global OSC** (TotalMix FX 2.1 and later): a Q-SYS or Crestron plugin, Bitfocus Companion, a
 Stream Deck, TouchOSC. Tick **Allow OSC control** in the **Network remote** section of the settings sidebar and
 point the controller at this computer's IP address and the UDP port shown there (7001, the
-TotalMix default). Replies go back to the address and port each controller sends from.
+TotalMix default). Replies go back to the address and port each controller sends from; a
+controller that listens on a port of its own (TouchOSC, or anything set up for TotalMix's "Port
+outgoing") also gets everything at the **Send to** host and **Port out** (9001, the TotalMix
+default).
 
 What a controller can do, with TotalMix's addresses and zero-based channel numbers:
 
@@ -192,8 +195,9 @@ TotalMix's global mute have no equivalent and are ignored.
 
 Anyone who can reach the port can change the mix while the remote is on, so only turn it on in
 a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
-tick **Start at login, no window**, or run `openface-mixer --background`. Opening Openface
-Mixer again shows the window, and closing it only hides it; **Ctrl+Q** quits.
+tick **Start at login, no window**, or run `openface-mixer --background --device <key>`. Opening
+Openface Mixer again for that device shows the window, and closing it only hides it; **Ctrl+Q**
+quits. Each device has its own window and login entry, so two interfaces can run side by side.
 
 ### Fireface 802
 

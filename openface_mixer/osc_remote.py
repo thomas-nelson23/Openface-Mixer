@@ -30,6 +30,7 @@ from . import control_room
 from .model import NEG_INF, any_solo, display_name, strip_channels, strip_key
 
 DEFAULT_PORT = 7001        # TotalMix's default "Port incoming"
+DEFAULT_OUT_PORT = 9001    # TotalMix's default "Port outgoing"
 LEVEL_FLOOR_DB = -90.0
 
 KINDS = {"input": "in", "playback": "play", "output": "out"}
@@ -45,6 +46,20 @@ CONTROL_ROOM = {
     "/controlroom/externalin": "ext_in",
 }
 N_SLOTS = 8
+
+
+def remote_settings(st):
+    """st["remote"], created with defaults: off until the user switches it on. host/out_port is
+    where state is sent besides the controllers' own addresses (TotalMix's "IP or Host Name" and
+    "Port outgoing"); an empty host sends only to the controllers."""
+    r = st.setdefault("remote", {})
+    r.setdefault("enabled", False)
+    r.setdefault("port", DEFAULT_PORT)
+    r.setdefault("host", "")
+    r.setdefault("out_port", DEFAULT_OUT_PORT)
+    r.setdefault("levels", True)
+    return r
+
 
 
 # ------------------------------------------------------------------ OSC 1.0 codec
