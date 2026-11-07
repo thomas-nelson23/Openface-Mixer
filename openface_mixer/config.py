@@ -18,8 +18,8 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") 
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
 
 MATRIX_MAGIC = 0x344D464F                   # "OFM4", see load_matrix() in the engine
-DEVICE_MAGIC = 0x3144464F                   # "OFD1": device settings block after the gains
-N_DEV_CMD = 512                             # OFM_N_DEV_CMD in engine/shm_layout.h
+DEVICE_MAGIC = 0x3244464F                   # "OFD2": device settings block after the gains
+N_DEV_CMD = 4096                            # OFM_N_DEV_CMD in engine/shm_layout.h
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last
 UI_FILE = CONFIG_DIR / "ui.json"            # UI scale, shared by all devices
 
@@ -78,7 +78,7 @@ def device_block(st, dev=DEFAULT):
 
 def matrix_file_bytes(st, dev=DEFAULT):
     """matrix.bin: magic, gain matrix, output gains (all little-endian), then for devices with
-    settings "OFD1", the configuration word and the command slots. Solo is left out, so an
+    settings "OFD2", the configuration word, the number of command slots and the slots. Solo is left out, so an
     engine started without the GUI never comes up with channels soloed."""
     gains, out_gains = control_room.apply(st, compute_matrix(st, solo=False),
                                           compute_out_gains(st), talkback=False)
@@ -86,7 +86,7 @@ def matrix_file_bytes(st, dev=DEFAULT):
     block = device_block(st, dev)
     if block is not None:
         config, cmds = block
-        data += struct.pack(f"<II{N_DEV_CMD}I", DEVICE_MAGIC, config, *cmds)
+        data += struct.pack(f"<III{N_DEV_CMD}I", DEVICE_MAGIC, config, N_DEV_CMD, *cmds)
     return data
 
 

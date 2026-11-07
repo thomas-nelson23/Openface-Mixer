@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, osc_remote
+from . import arc, control_room, fx, osc_remote
 from .channel_settings import ChannelSettings
+from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
     device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
     save_device_choice, save_state, save_ui_scale, save_window,
@@ -57,6 +58,8 @@ class MainWindow(QMainWindow):
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
+        self.fx_panels = {}                # (kind of panel, strip key) -> open effect panel
+        self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
         self._last_meter = time.monotonic()
@@ -248,6 +251,15 @@ class MainWindow(QMainWindow):
 
         top.addSpacing(px(4))
 
+        # TotalMix FX: the Reverb / Echo panel (interfaces with effects only)
+        self.fx_btn = QPushButton("FX")
+        self.fx_btn.setCheckable(True)
+        self.fx_btn.setToolTip("Reverb and Echo (Ctrl+E)")
+        self.fx_btn.setCursor(Qt.PointingHandCursor)
+        self.fx_btn.toggled.connect(self.show_fx_unit)
+        self.fx_btn.setVisible(self.dev.fx is not None)
+        top.addWidget(self.fx_btn)
+
         self.settings_btn = QPushButton()
         self.settings_btn.setObjectName("gear")
         self.settings_btn.setCheckable(True)
@@ -269,6 +281,7 @@ class MainWindow(QMainWindow):
         """The standard settings key and a few for what people do most."""
         keys = (
             ("Ctrl+,", self.settings_btn.toggle),
+            ("Ctrl+E", lambda: self.dev.fx is not None and self.fx_btn.toggle()),
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
             ("Escape", lambda: self.store_btn.setChecked(False)),
@@ -471,8 +484,10 @@ class MainWindow(QMainWindow):
             s = Strip(key, title, chans, kind, standard=self.standard_label(kind, c, stereo),
                       color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_pan=True, show_stereo=has_pair,
-                      show_solo=True, show_settings=kind == "in" and any(
-                          self.dev.channel_has_settings(kind, ch) for ch in chans))
+                      show_solo=True, show_settings=(kind == "in" and any(
+                          self.dev.channel_has_settings(kind, ch) for ch in chans)) or (
+                          self.dev.fx is not None),
+                      show_fx=kind == "in" and self.dev.fx is not None)
             s.stereo.setChecked(stereo)
             s.solo.setChecked(self.st["solo"][kind][c])
             s.solo.toggled.connect(lambda on, k=kind, ch=chans: self.set_solo(k, ch, on))
@@ -484,10 +499,13 @@ class MainWindow(QMainWindow):
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
+            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
         (self.row_in if kind == "in" else self.row_play).set_strips(strips)
+        self.close_stale_fx_panels()
         self.refresh_settings_buttons()
         self.refresh_sends(kind)
         self.matrix.rebuild()
@@ -503,7 +521,8 @@ class MainWindow(QMainWindow):
                       standard=self.standard_label("out", 2 * pair, True),
                       color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
-                                        for ch in (2 * pair, 2 * pair + 1)))
+                                        for ch in (2 * pair, 2 * pair + 1)),
+                      show_fx=self.dev.fx is not None)
             s.pair = pair
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
@@ -514,11 +533,14 @@ class MainWindow(QMainWindow):
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
+            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
             self.submix.addItem(title, pair)
         self.row_out.set_strips(strips)
+        self.close_stale_fx_panels()
         self.refresh_settings_buttons()
         self.matrix.rebuild()
         sel = self.st["selected"]
@@ -613,20 +635,111 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ device settings
     def channel_settings(self, strip, pos):
-        """TotalMix's channel settings for a hardware input or output strip (Fireface 802)."""
+        """TotalMix's channel settings for a strip (Fireface 802, UCX II, 800, 400)."""
         popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
                                 strip.name, self)
         popup.setAttribute(Qt.WA_DeleteOnClose)
         popup.changed.connect(self.push_matrix)
         popup.changed.connect(self.refresh_settings_buttons)
+        popup.room_eq_requested.connect(lambda: self.open_fx_panel(strip, "room"))
         popup.move(pos)
         popup.show()
 
     def refresh_settings_buttons(self):
+        f = self.st["hw"].get("fx") if self.dev.fx is not None else None
         for s in self.strips.values():
-            if s.kind != "play":
-                s.set_settings_active(any(self.dev.channel_settings_active(self.st, s.kind, c)
-                                          for c in s.channels))
+            if s.kind == "play":
+                s.set_settings_active(bool(f) and any(f["send"]["play"][c] is not None
+                                                      for c in s.channels))
+                continue
+            on = any(self.dev.channel_settings_active(self.st, s.kind, c) for c in s.channels)
+            if f:
+                values = f["ret"] if s.kind == "out" else f["send"]["in"]
+                on = on or any(values[c] is not None for c in s.channels) or (
+                    s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
+                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in s.channels),
+                                any(fx.dyn_active(f, s.kind, c) for c in s.channels))
+            s.set_settings_active(on)
+
+    # ------------------------------------------------------------------ TotalMix FX effects
+    def open_fx_panel(self, strip, which):
+        """The strip's EQ, Dynamics or (UCX II outputs) Room EQ panel; one per strip, raised
+        if it is already open."""
+        key = (which, strip.key)
+        panel = self.fx_panels.get(key)
+        if panel is not None and panel.channels == strip.channels:
+            panel.show()
+            panel.raise_()
+            panel.activateWindow()
+            return
+        if panel is not None:
+            panel.close()
+        f, model = self.st["hw"]["fx"], self.dev.fx
+        if which == "room":
+            panel = RoomEqPanel(strip.name, f, model, strip.channels, self)
+        else:
+            cls = EqPanel if which == "eq" else DynamicsPanel
+            panel = cls(strip.name, f, model, strip.kind, strip.channels, self)
+        panel.setAttribute(Qt.WA_DeleteOnClose)
+        panel.changed.connect(self.fx_changed)
+        panel.destroyed.connect(lambda _=None, k=key, p=panel: self.fx_panels.get(k) is p and
+                                self.fx_panels.pop(k))
+        self.fx_panels[key] = panel
+        panel.adjustSize()
+        # beside the strip, kept on the screen
+        pos = strip.mapToGlobal(strip.rect().topRight())
+        screen = strip.screen().availableGeometry()
+        x = min(pos.x() + px(4), screen.right() - panel.width())
+        y = min(max(screen.top(), pos.y()), screen.bottom() - panel.height())
+        panel.move(max(screen.left(), x), y)
+        panel.show()
+
+    def close_stale_fx_panels(self):
+        """After a rebuild (stereo link, speed change): close panels whose strip is gone or now
+        covers other channels."""
+        for (which, key), panel in list(self.fx_panels.items()):
+            if which == "unit":
+                continue
+            strip = self.strips.get(key)
+            if strip is None or strip.channels != panel.channels:
+                panel.close()
+
+    def show_fx_unit(self, on):
+        panel = self.fx_panels.get(("unit", ""))
+        if not on:
+            if panel is not None:
+                panel.close()
+            return
+        if panel is None:
+            panel = FxUnitPanel(self.st["hw"]["fx"], self.dev.fx, self)
+            panel.setAttribute(Qt.WA_DeleteOnClose)
+            panel.changed.connect(self.fx_changed)
+            panel.closed.connect(lambda: (self.fx_panels.pop(("unit", ""), None),
+                                          self.fx_btn.setChecked(False)))
+            self.fx_panels[("unit", "")] = panel
+            panel.adjustSize()
+            g = self.geometry()
+            panel.move(g.right() - panel.width() - px(40), g.top() + px(80))
+        panel.show()
+        panel.raise_()
+
+    def fx_changed(self):
+        self.push_matrix()
+        self.refresh_settings_buttons()
+
+    def copy_effects(self, strip):
+        self.fx_clipboard = fx.copy_channel(self.st["hw"]["fx"], strip.kind, strip.channels[0])
+        self.notify(f"Copied the effects of {strip.name}")
+
+    def paste_effects(self, strip):
+        fx.paste_channel(self.st["hw"]["fx"], strip.kind, strip.channels, self.fx_clipboard,
+                         self.dev.fx)
+        for which in ("eq", "dyn"):
+            panel = self.fx_panels.get((which, strip.key))
+            if panel is not None:
+                panel.refresh()
+        self.fx_changed()
+        self.notify(f"Pasted effects into {strip.name}")
 
     def quit_app(self):
         """Quit for real: the close event saves the mix and the window, then the loop ends."""
@@ -742,6 +855,13 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, n=g: self.set_group(strip, n))
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
+        if self.dev.fx is not None and strip.kind in ("in", "out"):
+            menu.addSeparator()
+            menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
+            menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
+            menu.addAction("Copy effects", lambda: self.copy_effects(strip))
+            paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
+            paste.setEnabled(self.fx_clipboard is not None)
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)

@@ -22,6 +22,8 @@ Channel layout (the same numbering for meters and the mixer):
   playback 0-29, named like the outputs (mixer sources 0x20 + n)
 """
 
+from . import fx as fxmod
+
 N_LINE_IN, N_MIC_IN, N_AES, N_ADAT = 8, 4, 2, 16
 N_LINE_OUT, N_PHONES_OUT = 8, 4
 N_PHYS_IN = N_LINE_IN + N_MIC_IN + N_AES + N_ADAT          # 30
@@ -40,9 +42,8 @@ IN_TO_FX, IN_STEREO_LINK, IN_PHASE, IN_LINE_GAIN, IN_LINE_LEVEL = 0x01, 0x02, 0x
 IN_MIC_POWER, IN_MIC_INST = 0x08, 0x09
 # output commands
 OUT_VOL, OUT_FROM_FX, OUT_PHASE, OUT_LINE_LEVEL = 0x00, 0x03, 0x07, 0x08
-# channel strip effects (inputs and outputs) and FX unit: only their on/off switches are used
-HPF_ON, EQ_ON, DYN_ON, AUTOLEVEL_ON = 0x20, 0x40, 0x60, 0x80
-REVERB_ON, ECHO_ON = 0x00, 0x20
+# channel strip effects (inputs and outputs) and the FX unit: see fx.py
+FX = fxmod.MODELS["ff802"]
 VOL_MIN = -650                  # -65.0 dB, in 0.1 dB
 
 IN_LEVELS = ("Lo Gain", "+4 dBu")                     # AN 1-8
@@ -53,6 +54,7 @@ LINE_GAIN_MAX_DB = 12.0
 CFG_MIDI_LOW_OFFSET_0000 = 0x00002000   # MIDI goes to offset 0 of the driver's address space
 CFG_AES_IN_OPTICAL = 0x00000200
 CFG_OPT_OUT_SPDIF = 0x00000100
+CFG_DSP_EFFECT_ON_INPUT = 0x00000040   # input channel effects processed (ctl-services: on)
 CFG_AES_OUT_PRO = 0x00000020
 CFG_WORD_OUT_SINGLE = 0x00000010
 CLOCK_SOURCES = (                       # (key, label, config bits), TotalMix's order
@@ -158,15 +160,18 @@ def default_settings():
             "phase": [False] * N_PHYS_OUT,
             "level": [1] * N_LINE_OUT,        # index into OUT_LEVELS
         },
+        "fx": fxmod.default_settings(FX),     # TotalMix FX effects (fx.py)
     }
 
 
-def upgrade_settings(s, base=None):
+def upgrade_settings(s, base=None, fx_model=FX):
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
     for k, v in base.items():
-        if k in ("in", "out"):
+        if k == "fx":
+            s[k] = fxmod.upgrade_settings(s.get(k), fx_model)
+        elif k in ("in", "out"):
             part = s.get(k) if isinstance(s.get(k), dict) else {}
             for kk, vv in v.items():
                 cur = part.get(kk)
@@ -191,13 +196,10 @@ def with_parity(word):
     return word if bin(word).count("1") % 2 else word | 0x80000000
 
 
-def commands(s):
-    """All DSP setting commands for settings s, in the order they are sent.
-
-    The channel strip effects (low cut, EQ, dynamics, auto level) and the FX unit (reverb,
-    echo, FX sends and returns) are switched off: Openface Mixer has no controls for them yet,
-    and the device keeps whatever TotalMix last stored, which the mix could not show.
-    """
+def commands(s, play_stereo=None, usb=False):
+    """All DSP setting commands for settings s, in the order they are sent: the channel
+    settings, then the effects (fx.commands: channel strip effects, FX sends and returns, reverb
+    and echo). play_stereo: the playback pairs' stereo flags, for the playback FX sends."""
     cmds = []
     i, o = s["in"], s["out"]
     for c in range(N_PHYS_IN):
@@ -215,32 +217,18 @@ def commands(s):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_PHASE, o["phase"][c]))
     for c in range(N_LINE_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_LINE_LEVEL, o["level"][c]))
-
-    # effects off
-    for ch in list(range(N_PHYS_IN)) + [OUT_CH_OFFSET + c for c in range(N_PHYS_OUT)]:
-        for cmd in (HPF_ON, EQ_ON, DYN_ON, AUTOLEVEL_ON):
-            cmds.append(phys_cmd(ch, cmd, 0))
-    for c in range(N_PHYS_IN):
-        cmds.append(phys_cmd(c, IN_TO_FX, VOL_MIN))
-    for p in range(N_PLAY):
-        for mixer in FX_MIXERS:
-            cmds.append(virt_cmd(mixer, STREAM_OFFSET + p, 0))
-    for c in range(N_PHYS_OUT):
-        cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_FROM_FX, VOL_MIN))
-    cmds.append(phys_cmd(FX_CH, REVERB_ON, 0))
-    cmds.append(phys_cmd(FX_CH, ECHO_ON, 0))
-    return cmds
+    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb)
 
 
 def reg_cmd(reg, value):
     return (reg << 16) | (int(value) & 0xFFFF)
 
 
-def usb_commands(s):
+def usb_commands(s, play_stereo=None):
     """commands(s), plus the clock and option registers that FireWire sets with config_word()."""
     keys = [k for k, _, _ in CLOCK_SOURCES]
     clock = keys.index(s["clock"]) if s["clock"] in keys else 0
-    return commands(s) + [
+    return commands(s, play_stereo, usb=True) + [
         reg_cmd(USB_REG_CLOCK, clock),
         reg_cmd(USB_REG_WORD_SINGLE, s["word_single"]),
         reg_cmd(USB_REG_OPT_IN_SPDIF, s["aes_in"] == "optical"),
@@ -250,7 +238,7 @@ def usb_commands(s):
 
 
 def config_word(s):
-    word = CFG_MIDI_LOW_OFFSET_0000
+    word = CFG_MIDI_LOW_OFFSET_0000 | CFG_DSP_EFFECT_ON_INPUT
     word |= dict((k, bits) for k, _, bits in CLOCK_SOURCES).get(s["clock"], 0)
     if s["aes_in"] == "optical":
         word |= CFG_AES_IN_OPTICAL

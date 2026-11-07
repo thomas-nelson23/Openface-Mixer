@@ -20,9 +20,9 @@
 #define OFM_N_OUT   36                      /* hardware outputs */
 
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
-#define OFM_N_DEV_CMD 512                   /* device setting command slots */
+#define OFM_N_DEV_CMD 4096                  /* device setting command slots (802/UCX II effects) */
 
-#define OFM_SHM_VERSION 5
+#define OFM_SHM_VERSION 6
 
 /* Header is exactly 64 bytes; all fields are written by the engine. */
 struct ofm_shm {

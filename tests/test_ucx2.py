@@ -1,6 +1,6 @@
 import unittest
 
-from openface_mixer import devices, model as m, ucx2
+from openface_mixer import config, devices, model as m, ucx2
 
 
 class CommandTest(unittest.TestCase):
@@ -17,9 +17,9 @@ class CommandTest(unittest.TestCase):
         cmds = ucx2.usb_commands(s)
         for word in (0x02470001, 0x000802EE, 0x0108007D, 0x00490001, 0x00890001, 0x00CB0001,
                      0x06890001, 0x30640003, 0x30780001, 0x307B0000, 0x30000000, 0x30140000,
-                     0x0503FD76, 0x35D10000, 0x05020000, 0x004F0000):
+                     0x0503FD76, 0x34010000, 0x05020000, 0x004F0000):
             self.assertIn(word, cmds, hex(word))
-        self.assertLessEqual(len(cmds), 512)          # the engine's dev_cmd slots
+        self.assertLessEqual(len(cmds), config.N_DEV_CMD)   # the engine's dev_cmd slots
 
     def test_status(self):
         st = ucx2.decode_usb_status(0x80000000 | 5 << 8 | 4)

@@ -10,7 +10,14 @@ class CommandTest(unittest.TestCase):
     def test_commands_fit_the_engine(self):
         cmds = ff.commands(ff.default_settings())
         self.assertLessEqual(len(cmds), config.N_DEV_CMD)
-        self.assertNotIn(0, cmds)              # 0 marks an unused slot
+        used = [c for c in cmds if c]          # 0 marks an unused slot (an effect that is off)
+        self.assertEqual(len(used), len(set(used)))
+        s = ff.default_settings()              # everything on: every slot in use, none twice
+        for ch in s["fx"]["in"] + s["fx"]["out"]:
+            ch.update(lc=True, eq=True, dyn=True, al=True)
+        s["fx"]["reverb"]["on"] = s["fx"]["echo"]["on"] = True
+        cmds = ff.commands(s)
+        self.assertNotIn(0, cmds)
         self.assertEqual(len(cmds), len(set(cmds)))
 
     def test_slots_are_stable(self):
@@ -53,10 +60,10 @@ class CommandTest(unittest.TestCase):
 
     def test_effects_off(self):
         cmds = ff.commands(ff.default_settings())
-        self.assertIn((ff.FX_CH << 24) | (ff.REVERB_ON << 16), cmds)
-        self.assertIn((ff.FX_CH << 24) | (ff.ECHO_ON << 16), cmds)
-        self.assertIn((5 << 24) | (ff.EQ_ON << 16), cmds)                     # AN 6 EQ off
-        self.assertIn(((30 + 9) << 24) | (ff.DYN_ON << 16), cmds)             # PH 10 dyn off
+        self.assertIn((ff.FX_CH << 24) | (0x00 << 16), cmds)                  # reverb off
+        self.assertIn((ff.FX_CH << 24) | (0x20 << 16), cmds)                  # echo off
+        self.assertIn((5 << 24) | (0x40 << 16), cmds)                         # AN 6 EQ off
+        self.assertIn(((30 + 9) << 24) | (0x60 << 16), cmds)                  # PH 10 dyn off
         self.assertIn(((30 + 1) << 24) | (ff.OUT_FROM_FX << 16) | (-650 & 0xFFFF), cmds)
         self.assertIn(ff.virt_cmd(0x1E, 0x20, 0), cmds)                      # play 1 -> FX off
 
@@ -69,13 +76,13 @@ class CommandTest(unittest.TestCase):
 
 class ConfigTest(unittest.TestCase):
     def test_default(self):
-        self.assertEqual(ff.config_word(ff.default_settings()), 0x2000)
+        self.assertEqual(ff.config_word(ff.default_settings()), 0x2000 | 0x40)   # + effects on inputs
 
     def test_options(self):
         s = ff.default_settings()
         s.update(clock="adat_b", aes_in="optical", opt_out="spdif", aes_pro=True,
                  word_single=True)
-        self.assertEqual(ff.config_word(s), 0x2000 | 0x1000 | 0x200 | 0x100 | 0x20 | 0x10)
+        self.assertEqual(ff.config_word(s), 0x2040 | 0x1000 | 0x200 | 0x100 | 0x20 | 0x10)
 
     def test_clock_sources(self):
         s = ff.default_settings()
@@ -108,7 +115,7 @@ class UsbTest(unittest.TestCase):
         self.assertIn(0x3D460001, cmds)                  # optical out: S/PDIF
         self.assertIn(0x3D420001, cmds)                  # AES out: professional
         self.assertIn(0x3D400000, cmds)                  # AES in: XLR
-        self.assertNotIn(0, cmds)
+        self.assertNotIn(0, cmds[len(ff.commands(s)):])
 
     def test_registers_are_the_firewire_commands(self):
         # oscmix's 802 register map: AN 1 gain 0x0007, Mic 9 48V 0x0808, AN 1 out level 0x1E08
@@ -209,11 +216,11 @@ class FileTest(unittest.TestCase):
         st["hw"]["clock"] = "aes"
         data = config.matrix_file_bytes(st, dev)
         base = 4 + (m.N_OUT * m.N_SRC + m.N_OUT) * 4
-        self.assertEqual(len(data), base + 8 + config.N_DEV_CMD * 4)
+        self.assertEqual(len(data), base + 12 + config.N_DEV_CMD * 4)
         magic, cfg = struct.unpack_from("<II", data, base)
         self.assertEqual(magic, config.DEVICE_MAGIC)
-        self.assertEqual(cfg, 0x2000 | 0x800)
-        first, = struct.unpack_from("<I", data, base + 8)
+        self.assertEqual(cfg, 0x2040 | 0x800)
+        first, = struct.unpack_from("<I", data, base + 12)
         self.assertEqual(first, ff.commands(st["hw"])[0])
 
     def test_digiface_matrix_file_unchanged(self):

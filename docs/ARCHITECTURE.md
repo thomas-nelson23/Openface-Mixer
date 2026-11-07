@@ -67,7 +67,7 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 | `out_gain[36]` | GUI | output master per channel, 0 when muted |
 | `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
-| `dev_config`, `dev_cmd[512]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
+| `dev_config`, `dev_cmd[4096]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
 
 No locks are used: 32-bit float stores are atomic on the supported platforms, and a torn meter
 reset costs at most one missed peak. The engine never blocks on the GUI.
@@ -80,6 +80,7 @@ app.MainWindow
  ├─ presets.py      PresetBank (8 slots) + mix file import/export
  ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
  ├─ matrix_view.py  grid editor for the same sends
+ ├─ fx.py / fx_panels.py  TotalMix FX effects (802, UCX II): model and commands / EQ, D, FX panels
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
  ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
  └─ config.py       state.json / matrix.bin / presets.json
@@ -95,7 +96,9 @@ app.MainWindow
   `ucx2.usb_commands()`) turns them into the DSP command list the engine sends, in a fixed slot
   order so only changed slots go out; `fireface800.config_words()` (and `fireface400`'s) into the
   three configuration quadlets, which are written only after the first status read has filled in
-  the options the device reports. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
+  the options the device reports. On the 802 and UCX II the command list ends with the TotalMix FX effects
+  (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
+  parameters stay 0 (unused slots) while their effect is off. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
   and written live. The settings panel picks its layout by `Device.family` ("latter", "former",
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The

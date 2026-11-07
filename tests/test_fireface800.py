@@ -142,9 +142,9 @@ class FileTest(unittest.TestCase):
         self.assertEqual(len(config.matrix_file_bytes(st, dev)), base)
         st["hw"]["known"] = True
         data = config.matrix_file_bytes(st, dev)
-        self.assertEqual(len(data), base + 8 + config.N_DEV_CMD * 4)
-        magic, flag, q0, q1, q2, unused = struct.unpack_from("<6I", data, base)
-        self.assertEqual((magic, flag, unused), (config.DEVICE_MAGIC, 1, 0))
+        self.assertEqual(len(data), base + 12 + config.N_DEV_CMD * 4)
+        magic, flag, n, q0, q1, q2, unused = struct.unpack_from("<7I", data, base)
+        self.assertEqual((magic, flag, n, unused), (config.DEVICE_MAGIC, 1, config.N_DEV_CMD, 0))
         self.assertEqual([q0, q1, q2], ff.config_words(st["hw"]))
 
 

@@ -45,6 +45,16 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   Inst on inputs AN 9–12, and level on outputs AN 1–8.
 - **Channel settings (Fireface UCX II):** phase invert on every channel, gain on AN 1–8, 48V on
   AN 1/2, level on AN 3–8, Hi-Z on AN 3/4, and level on outputs AN 1–6 and the phones.
+- **TotalMix FX effects (Fireface 802 and UCX II):** the **EQ** and **D** buttons on every
+  hardware input and output strip open TotalMix's EQ panel (Low Cut and a 3-band parametric EQ
+  with its response curve) and Dynamics panel (compressor, expander and Auto Level); they light
+  while an effect is on. **FX** in the top bar (Ctrl+E) opens Reverb and Echo, fed by the **FX
+  Send** in each input and playback channel's settings and heard through each output's **FX
+  Return**. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
+  bands) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
+  to reuse settings.
+
+  ![EQ, Dynamics, Reverb and Echo panels beside a UCX II input strip](docs/screenshots/effects.png)
 - **Input options (Fireface 800):** the ⚙ on inputs AN 1 and AN 7–10: front or rear jack on
   AN 1, 7 and 8, 48V on AN 7–10, and Drive, Limiter and Speaker Emulation on the AN 1
   instrument input.
@@ -135,6 +145,7 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
 | Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
 | Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
+| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click to type a value |
 | Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
 
 ### Control room and ARC USB
@@ -217,8 +228,8 @@ playback channels (AN 1–8, PH 9–12, AES, ADAT 1–8); all 30 hardware inputs
 mix.
 
 Openface Mixer is the source of truth for the 802's DSP, as TotalMix is: when it connects it
-sends the whole mix and all settings, and it switches the DSP's EQ, dynamics, low cut, auto level
-and reverb/echo off, because it has no controls for them yet. Don't run
+sends the whole mix and all settings, including the effects (low cut, EQ, dynamics, auto level,
+FX sends and returns, reverb and echo; all off until you switch them on). Don't run
 `snd-fireface-ctl-service` alongside it.
 
 ### Fireface UCX II
@@ -228,8 +239,8 @@ connect it over USB and pick **RME Fireface UCX II** under **Device** (or run
 `openface-mixer --device ucx2`); its engine is `openface-mixer-engine@ucx2`. All 20 inputs (AN 1–8,
 S/PDIF, AES, ADAT), 20 playback channels and 20 outputs (AN 1–6, phones PH 7/8, S/PDIF, AES,
 ADAT) are in the mix. Openface Mixer sets the UCX II's *CC Mix* option to TotalMix so its DSP
-mixer is what you hear, and, as on the 802, switches the channel effects, room EQ and
-reverb/echo off. The MIDI port rule of the 802 applies, and don't run oscmix alongside it.
+mixer is what you hear, and, as on the 802, sends the effects as set in Openface Mixer (channel
+effects, room EQ, reverb and echo; all off until you switch them on). The MIDI port rule of the 802 applies, and don't run oscmix alongside it.
 
 ### Fireface 800
 
@@ -326,8 +337,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   2x/4x channel counts, but that path is untested.
 - Fireface 802 support follows the protocol documented by snd-firewire-ctl-services and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#not-verified-on-hardware-yet)).
-  It has no EQ, dynamics, auto level or reverb/echo controls yet; those DSP effects are
-  switched off. Over USB the 802 follows the Class Compliant protocol documented by oscmix,
+  The TotalMix FX effects (on the 802 and the UCX II) follow the same sources and haven't been
+  heard on a unit yet either; see [docs/HARDWARE.md](docs/HARDWARE.md#totalmix-fx-effects).
+  They are not part of presets, and the dynamics and auto level gain-reduction meters aren't
+  shown. Over USB the 802 follows the Class Compliant protocol documented by oscmix,
   also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys both select the one Phones pair set in the
   Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has

@@ -87,6 +87,11 @@ class Device:
         """True if channel c has a setting worth flagging on its strip."""
         return False
 
+    @property
+    def fx(self):
+        """The interface's TotalMix FX effects (fx.Model), or None if it has none."""
+        return None
+
 
 class Digiface(Device):
     key = "digiface"
@@ -159,6 +164,10 @@ class FireWireDevice(Device):
     def channel_settings_active(self, st, kind, c):
         return self.proto.channel_settings_active(st["hw"], kind, c)
 
+    @property
+    def fx(self):
+        return getattr(self.proto, "FX", None)
+
 
 class Fireface802(FireWireDevice):
     key = "ff802"
@@ -168,7 +177,8 @@ class Fireface802(FireWireDevice):
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
-        return fireface802.config_word(st["hw"]), fireface802.commands(st["hw"])
+        return (fireface802.config_word(st["hw"]),
+                fireface802.commands(st["hw"], st.get("stereo", {}).get("play")))
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
@@ -191,7 +201,7 @@ class ClassCompliantUSB:
         return card is not None and Hardware.card_driver(card) == "USB-Audio"
 
     def device_words(self, st):
-        return 0, self.proto.usb_commands(st["hw"])
+        return 0, self.proto.usb_commands(st["hw"], st.get("stereo", {}).get("play"))
 
     def missing_hint(self):
         return (f"Over USB the {self.name.replace('RME ', '').replace(' (USB)', '')} works on "
