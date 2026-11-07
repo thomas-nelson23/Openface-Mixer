@@ -50,7 +50,9 @@
 #define MATRIX_FILE_MAGIC    0x344d464fu
 #define MATRIX_FILE_MAGIC_V3 0x334d464fu /* "OFM3": gains at the old 34 x 66 size */
 #define MATRIX_FILE_MAGIC_V2 0x324d464fu /* "OFM2": mixer mode, then as OFM3 */
-#define DEVICE_BLOCK_MAGIC   0x3144464fu /* "OFD1": dev_config, dev_cmd[], after out_gain[] */
+#define DEVICE_BLOCK_MAGIC   0x3244464fu /* "OFD2": dev_config, count, dev_cmd[count] */
+#define DEVICE_BLOCK_MAGIC_V1 0x3144464fu /* "OFD1": dev_config, dev_cmd[512] */
+#define DEVICE_BLOCK_V1_CMDS 512
 
 /* matrix sizes before version 4 (32 inputs, 34 playback, 34 outputs) */
 #define OLD_N_IN    32
@@ -150,8 +152,8 @@ static int load_old_gains(struct ofm_shm *s, FILE *f, bool with_out)
 }
 
 /*
- * matrix.bin is "OFM4", gain[][] and out_gain[], then for devices with settings "OFD1",
- * dev_config and dev_cmd[]. "OFM3" files hold the same at the old 34 x 66 size, which is
+ * matrix.bin is "OFM4", gain[][] and out_gain[], then for devices with settings "OFD2",
+ * dev_config, the number of command slots and dev_cmd[] ("OFD1" files: 512 slots, no count). "OFM3" files hold the same at the old 34 x 66 size, which is
  * moved into place; "OFM2" files carry a mixer mode word before that, which is skipped.
  * Version 1 files hold only an old-size gain matrix with the output masters folded in; they
  * load at unity masters.
@@ -179,12 +181,19 @@ static int load_matrix(struct ofm_shm *s, const char *path)
 			return 0;
 		}
 	}
-	uint32_t dmagic;
-	if (ret == 0 && fread(&dmagic, sizeof(dmagic), 1, f) == 1 && dmagic == DEVICE_BLOCK_MAGIC &&
-	    (fread(&s->dev_config, sizeof(s->dev_config), 1, f) != 1 ||
-	     fread(s->dev_cmd, sizeof(s->dev_cmd), 1, f) != 1)) {
-		s->dev_config = 0;
+	uint32_t dmagic, n = 0;
+	if (ret == 0 && fread(&dmagic, sizeof(dmagic), 1, f) == 1 &&
+	    (dmagic == DEVICE_BLOCK_MAGIC || dmagic == DEVICE_BLOCK_MAGIC_V1)) {
+		bool ok = fread(&s->dev_config, sizeof(s->dev_config), 1, f) == 1;
+		if (ok && dmagic == DEVICE_BLOCK_MAGIC)
+			ok = fread(&n, sizeof(n), 1, f) == 1 && n <= OFM_N_DEV_CMD;
+		else
+			n = DEVICE_BLOCK_V1_CMDS;
 		memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
+		if (!ok || fread(s->dev_cmd, sizeof(uint32_t), n, f) != n) {
+			s->dev_config = 0;
+			memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
+		}
 	}
 	fclose(f);
 	return ret;

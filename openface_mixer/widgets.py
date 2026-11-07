@@ -365,6 +365,26 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
     return b
 
 
+def fx_button_style(on):
+    """EQ / D: quiet when the effect is off, lit when it is on (they are not toggles: a click
+    opens the panel)."""
+    lit = "background:#2ad4ff;color:#021012;border-color:#2ad4ff;" if on else ""
+    return (f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid "
+            f"rgba(255,255,255,0.09);border-radius:{px(3)}px;{lit}}}"
+            "QToolButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
+            "QToolButton:focus{border-color:rgba(42,212,255,0.8)}")
+
+
+def fx_button(text, tip):
+    b = QToolButton()
+    b.setText(text)
+    b.setFixedSize(QSize(px(26), px(18)))
+    b.setToolTip(f"{tip} — click to open (lit while on)")
+    b.setCursor(Qt.PointingHandCursor)
+    b.setFont(font(SANS, 9, QFont.DemiBold))
+    return b
+
+
 def label_style(col, sel):
     """Channel name tag: dark tag, white text, a bar in the channel's colour underneath; the
     selected submix turns white."""
@@ -413,10 +433,12 @@ class Strip(QFrame):
     rename_requested = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
     settings_requested = Signal(object)  # global QPoint below the settings button
+    eq_requested = Signal()              # the EQ button (TotalMix FX: Low Cut and EQ)
+    dyn_requested = Signal()             # the D button (Dynamics and Auto Level)
 
     def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
                  show_solo=False, show_settings=False, standard=None, color=None, icon=None,
-                 parent=None):
+                 show_fx=False, parent=None):
         super().__init__(parent)
         self.key = key
         self.name = title                    # shown name (custom or standard), unshortened
@@ -494,6 +516,24 @@ class Strip(QFrame):
         btns.addStretch()
         lay.addLayout(btns)
 
+        # TotalMix FX: EQ and D open the strip's effect panels and light while an effect is on
+        self.eq_btn = fx_button("EQ", "Low Cut and EQ")
+        self.eq_btn.clicked.connect(self.eq_requested.emit)
+        self.dyn_btn = fx_button("D", "Dynamics and Auto Level")
+        self.dyn_btn.clicked.connect(self.dyn_requested.emit)
+        if show_fx:
+            fx_row = QHBoxLayout()
+            fx_row.setSpacing(px(2))
+            fx_row.addStretch()
+            fx_row.addWidget(self.eq_btn)
+            fx_row.addWidget(self.dyn_btn)
+            fx_row.addStretch()
+            lay.addLayout(fx_row)
+        else:
+            self.eq_btn.hide()
+            self.dyn_btn.hide()
+        self.set_fx_active(False, False)
+
         mid = QHBoxLayout()
         mid.setSpacing(1)
         mid.setContentsMargins(0, 0, 0, 0)
@@ -551,6 +591,11 @@ class Strip(QFrame):
             f"border-radius:{px(3)}px;font-size:{px(10)}px;"
             f"color:{RED.name() if on else '#7d9299'}}}"
             "QToolButton:hover{background:#12293a;color:white}")
+
+    def set_fx_active(self, eq, dyn):
+        for b, on in ((self.eq_btn, eq), (self.dyn_btn, dyn)):
+            b.setProperty("on", on)
+            b.setStyleSheet(fx_button_style(on))
 
     def set_fader(self, db):
         self.fader.set_db(db)

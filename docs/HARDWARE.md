@@ -163,9 +163,9 @@ number of ones).
   returns, 32–61 playback. Gain: 0 = off, else `0x8000 | linear × 0x1000`, so `0x9000` = unity
   and `0xa000` = +6 dB, the same encoding as the Digiface's gains of −6 dB and up.
 
-Openface Mixer has controls for phase, gain, level, 48V and Inst, and switches low cut, EQ,
-dynamics, auto level, FX sends and returns, reverb and echo off, since it can't show them yet.
-Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
+Openface Mixer has controls for phase, gain, level, 48V and Inst, and for all of the effects
+(see [TotalMix FX effects](#totalmix-fx-effects)). The configuration word always has `0x40`
+(effects on inputs) set, as snd-firewire-ctl-services does. Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
 
 ## Meters
 
@@ -238,12 +238,53 @@ are the inputs and `0x20`–`0x33` playback, output volumes are register `0x0500
 `0x3e04 = 0x67cd` asks for every register. The GUI's settings (`openface_mixer/ucx2.py`) are
 register writes `(channel << 6) | setting`, channels 0–19 inputs and 20–39 outputs: phase `0x07`
 (inputs) / `0x08` (outputs), gain `0x08` (0.1 dB; 0–75 dB on AN 1/2, 0–24 dB on AN 3–8), 48V or
-level `0x09`, Hi-Z `0x0b`, output level `0x09`; the channel effects (`0x0c`, `0x0f`, `0x1b`,
-`0x23`), room EQ (`0x35d1 + 0x20 × output`) and reverb/echo (`0x3000`, `0x3014`) are switched
-off, input and output mute (`0x00`, `0x02`) cleared, and *CC mix* (`0x307b`) set to 0 =
+level `0x09`, Autoset `0x0a` (AN 1–4), Hi-Z `0x0b`, output level `0x09`; the effects are below
+([TotalMix FX effects](#totalmix-fx-effects)). Input and output mute (`0x00`, `0x02`) cleared, and *CC mix* (`0x307b`) set to 0 =
 TotalMix so the DSP mixer is used rather than one of the fixed Class Compliant routings. Options:
 word clock single speed `0x3067`, optical out S/PDIF `0x3078`, S/PDIF professional `0x3079`.
 Not checked on a unit with Openface Mixer yet.
+
+## TotalMix FX effects
+
+The Fireface 802 and the UCX II have the same TotalMix FX effects, with the parameters in the
+same order: `openface_mixer/fx.py` holds both. The settings live in `st["hw"]["fx"]` in display
+units; a switched-off effect sends only its switch and leaves its parameter slots empty (0), so
+the engine sends them when the effect is switched on. Every value is a signed 16-bit integer.
+
+| Effect | 802 command (channel 0–29 in, 30–59 out) | UCX II register `(channel << 6) \|` | Parameters, in order |
+| --- | --- | --- | --- |
+| Low Cut | `0x20`–`0x22` | `0x0c`–`0x0e` | on, frequency 20–500 Hz, slope 0–3 (6/12/18/24 dB/oct) |
+| EQ | `0x40`–`0x4b` | `0x0f`–`0x1a` | on, band 1 type, gain (0.1 dB, ±20 dB), frequency (Hz), Q (×10); band 2 gain, frequency, Q; band 3 type, gain, frequency, Q |
+| Dynamics | `0x60`–`0x67` | `0x1b`–`0x22` | on, gain (0.1 dB, ±30), attack 0–200 ms, release 100–999 ms, compressor threshold (0.1 dB, −60–0) and ratio (×10, 1–10), expander threshold (0.1 dB, −99.9–−20) and ratio |
+| Auto Level | `0x80`–`0x83` | `0x23`–`0x26` | on, max gain (0.1 dB, 0–18), headroom (0.1 dB, 3–12), rise time (0.1 s, 0.1–9.9) |
+| FX send (inputs) | `0x01` | `0x01` | 0.1 dB, −650 = off |
+| FX return (outputs) | `0x03` | `0x03` | 0.1 dB, −650 = off |
+| Reverb | FX channel `0x3c`, `0x00`–`0x0d` | `0x3000`–`0x300d` | on, type, pre-delay (ms), low cut (Hz), room scale (×100), attack, hold, release (ms), high cut (Hz), time (0.1 s), high damp (Hz), smooth (%), volume (0.1 dB), width (×100) |
+| Echo | FX channel `0x3c`, `0x20`–`0x26` | `0x3014`–`0x301a` | on, type, delay (802: 0.01 s, UCX II: ms; 0–2 s), feedback (%), high cut (0 off, 16/12/8/4/2 kHz), volume (0.1 dB), width (×100) |
+
+EQ types: band 1 Peak, Low Shelf, High Pass (UCX II also Low Pass); band 3 Peak, High Shelf, Low
+Pass (UCX II also High Pass). Q runs 0.7–5.0 on the 802 and 0.4–9.9 on the UCX II. Reverb types:
+Small Room, Medium Room, Large Room, Walls, Shorty, Attack, Swagger, Old School, Echoistic, 8plus9,
+Grand Wide, Thicker (room scale applies to these), Envelope (attack, hold, release), Gated (hold,
+release), Space (time, high damp).
+
+Playback channels reach the FX unit through mixers 30 (left) and 31 (right) of the DSP matrix,
+on both interfaces: register `0x4000 + 0x40 × mixer + 0x20 + playback` (the UCX II's `0x47a0` /
+`0x47e0` in oscmix's notes), in the mixer's gain encoding. A stereo-linked playback pair sends its
+left channel to the left FX input and its right channel to the right one; a mono channel feeds
+both.
+
+UCX II only: Room EQ per output at `0x3400 + 0x20 × output`: delay (0.1 ms, 0–42.5 ms), on, then
+the 9 bands (gain, frequency, Q; bands 1, 8 and 9 first have a type, as the EQ's bands 1 and 3),
+and volume calibration in the output's register `0x0b` (0.01 dB, −24–+3 dB). The device reports
+Room EQ at `0x35d0 + 0x20 × output`, which is read-only: earlier versions of Openface Mixer wrote
+the switch there.
+
+Not checked on a unit with Openface Mixer yet. Worth checking first: that the 802's reverb types
+are the 15 listed (oscmix's 802 page lists seven older ones: Room 1–4, Envelope, Gated, Classic),
+the 802's echo delay unit (0.01 s per oscmix's notes; snd-firewire-ctl-services gives 0–100), the
+Room EQ delay unit, the playback FX sends' gain encoding over FireWire, and whether the 802 needs
+an equivalent of the `0x40` configuration bit over USB for effects on inputs.
 
 # RME Fireface 800
 

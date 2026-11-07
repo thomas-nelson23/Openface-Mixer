@@ -17,6 +17,7 @@ Channel layout (the same numbering for meters and the mixer):
   playback 0-19, named like the outputs
 """
 from . import fireface802 as ff802
+from . import fx as fxmod
 
 N_IN = N_OUT = 20
 N_ANALOG_IN = 8
@@ -26,6 +27,7 @@ PHONES_PAIRS = (3,)             # PH 7/8
 MIC_INPUTS = (0, 1)             # 48V, gain 0-75 dB
 LEVEL_INPUTS = (2, 3, 4, 5, 6, 7)   # reference level, gain 0-24 dB
 HIZ_INPUTS = (2, 3)
+AUTOSET_INPUTS = (0, 1, 2, 3)   # AN 1-4: Autoset lowers the gain before the input clips
 MIC_GAIN_MAX_DB, LINE_GAIN_MAX_DB = 75.0, 24.0
 OUT_CH = 20                     # register channel of output 0
 USB_CARD_NAME = "Fireface UCX II"
@@ -35,12 +37,10 @@ OUT_LEVELS = ("+4 dBu", "+13 dBu", "+19 dBu")     # AN 1-6
 PHONES_LEVELS = ("Low", "High")                   # PH 7/8
 
 # channel settings (register = channel << 6 | setting)
-IN_MUTE, IN_FX_SEND, IN_PHASE, IN_GAIN, IN_48V_LEVEL, IN_HIZ = 0x00, 0x01, 0x07, 0x08, 0x09, 0x0B
-OUT_BALANCE, OUT_MUTE, OUT_FX_RETURN, OUT_PHASE, OUT_LEVEL = 0x01, 0x02, 0x03, 0x08, 0x09
-LOWCUT, EQ, DYNAMICS, AUTOLEVEL = 0x0C, 0x0F, 0x1B, 0x23
-# global
-REG_REVERB, REG_ECHO = 0x3000, 0x3014
-REG_ROOM_EQ = 0x35D1            # + 0x20 * output
+IN_MUTE, IN_PHASE, IN_GAIN, IN_48V_LEVEL, IN_AUTOSET, IN_HIZ = 0x00, 0x07, 0x08, 0x09, 0x0A, 0x0B
+OUT_BALANCE, OUT_MUTE, OUT_PHASE, OUT_LEVEL = 0x01, 0x02, 0x08, 0x09
+# effects (low cut, EQ, dynamics, auto level, FX send/return, reverb, echo, room EQ): fx.py
+FX = fxmod.MODELS["ucx2"]
 REG_CLOCK, REG_WORD_SINGLE = 0x3064, 0x3067
 REG_OPT_OUT_SPDIF, REG_SPDIF_PRO = 0x3078, 0x3079
 REG_CC_MIX = 0x307B             # 0 = TotalMix (the DSP mixer), else fixed routings
@@ -100,16 +100,18 @@ def default_settings():
             "p48": [False] * len(MIC_INPUTS),
             "level": [0] * len(LEVEL_INPUTS),  # index into IN_LEVELS
             "hiz": [False] * len(HIZ_INPUTS),
+            "autoset": [False] * len(AUTOSET_INPUTS),
         },
         "out": {
             "phase": [False] * N_OUT,
             "level": [0] * (N_LINE_OUT + 2),   # OUT_LEVELS index for AN 1-6, PHONES_LEVELS for PH
         },
+        "fx": fxmod.default_settings(FX),     # TotalMix FX effects (fx.py)
     }
 
 
 def upgrade_settings(s):
-    return ff802.upgrade_settings(s, default_settings())
+    return ff802.upgrade_settings(s, default_settings(), FX)
 
 
 def reg(ch, setting, value):
@@ -120,10 +122,10 @@ def gain_max(c):
     return MIC_GAIN_MAX_DB if c in MIC_INPUTS else LINE_GAIN_MAX_DB
 
 
-def usb_commands(s):
-    """All register writes for settings s. As on the 802, the channel effects (low cut, EQ,
-    dynamics, auto level, room EQ) and the FX unit are switched off, TotalMix's own mute and
-    balance are cleared, and CC mix is set to TotalMix so the DSP mixer is what is heard."""
+def usb_commands(s, play_stereo=None):
+    """All register writes for settings s: the channel settings, the effects (fx.commands), and
+    TotalMix's own mute and balance cleared and CC mix set to TotalMix so the DSP mixer is what
+    is heard."""
     i, o = s["in"], s["out"]
     cmds = []
     for c in range(N_IN):
@@ -136,6 +138,8 @@ def usb_commands(s):
         cmds.append(reg(c, IN_48V_LEVEL, i["level"][n]))
     for n, c in enumerate(HIZ_INPUTS):
         cmds.append(reg(c, IN_HIZ, i["hiz"][n]))
+    for n, c in enumerate(AUTOSET_INPUTS):
+        cmds.append(reg(c, IN_AUTOSET, i["autoset"][n]))
     for c in range(N_OUT):
         cmds.append(reg(OUT_CH + c, OUT_PHASE, o["phase"][c]))
     for c in range(N_LINE_OUT + 2):
@@ -143,24 +147,18 @@ def usb_commands(s):
 
     for c in range(N_IN):
         # (input 1's mute is register 0 = 0, which the engine skips like any empty command)
-        cmds += [reg(c, IN_MUTE, 0), reg(c, IN_FX_SEND, VOL_MIN)]
-        cmds += [reg(c, fx, 0) for fx in (LOWCUT, EQ, DYNAMICS, AUTOLEVEL)]
+        cmds.append(reg(c, IN_MUTE, 0))
     for c in range(N_OUT):
-        cmds += [reg(OUT_CH + c, OUT_MUTE, 0), reg(OUT_CH + c, OUT_BALANCE, 0),
-                 reg(OUT_CH + c, OUT_FX_RETURN, VOL_MIN),
-                 ff802.reg_cmd(REG_ROOM_EQ + 0x20 * c, 0)]
-        cmds += [reg(OUT_CH + c, fx, 0) for fx in (LOWCUT, EQ, DYNAMICS, AUTOLEVEL)]
+        cmds += [reg(OUT_CH + c, OUT_MUTE, 0), reg(OUT_CH + c, OUT_BALANCE, 0)]
     clock = dict((k, v) for k, _, v in CLOCK_SOURCES).get(s["clock"], 0)
     cmds += [
-        ff802.reg_cmd(REG_REVERB, 0),
-        ff802.reg_cmd(REG_ECHO, 0),
         ff802.reg_cmd(REG_CC_MIX, 0),
         ff802.reg_cmd(REG_CLOCK, clock),
         ff802.reg_cmd(REG_WORD_SINGLE, s["word_single"]),
         ff802.reg_cmd(REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
         ff802.reg_cmd(REG_SPDIF_PRO, s["spdif_pro"]),
     ]
-    return cmds
+    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb=True)
 
 
 def decode_usb_status(word):
@@ -176,5 +174,6 @@ def channel_settings_active(s, kind, c):
         i = s["in"]
         return bool(i["phase"][c] or (c < N_ANALOG_IN and i["gain"][c]) or
                     (c in MIC_INPUTS and i["p48"][MIC_INPUTS.index(c)]) or
-                    (c in HIZ_INPUTS and i["hiz"][HIZ_INPUTS.index(c)]))
+                    (c in HIZ_INPUTS and i["hiz"][HIZ_INPUTS.index(c)]) or
+                    (c in AUTOSET_INPUTS and i["autoset"][AUTOSET_INPUTS.index(c)]))
     return bool(s["out"]["phase"][c])

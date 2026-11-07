@@ -10,22 +10,28 @@ Emulation on the AN 1 instrument input.
 Fireface 400: 48V and gain on AN 1/2, instrument, pad and gain on AN 3/4.
 
 Fireface UCX II: phase invert on every input and output, gain on AN 1-8, 48V on AN 1/2, Level on
-AN 3-8, Hi-Z on AN 3/4, and Level on AN 1-6 and the phones outputs.
+AN 3-8, Hi-Z on AN 3/4, Autoset on AN 1-4, and Level on AN 1-6 and the phones outputs.
+
+With TotalMix FX effects (802, UCX II): FX Send on inputs and playback channels, FX Return on
+outputs, and on the UCX II's outputs a button for the Room EQ.
 """
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QLabel, QVBoxLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout,
 )
 
 from . import fireface400 as ff400
 from . import fireface800 as ff800
 from . import fireface802 as ff
 from . import ucx2
+from .fx_panels import LevelKnob
 from .theme import key_label, px
 
 
 class ChannelSettings(QFrame):
     changed = Signal()
+    room_eq_requested = Signal()
 
     def __init__(self, dev, settings, kind, channels, title, parent=None):
         """settings: the device settings dict (st["hw"]), edited in place."""
@@ -44,8 +50,35 @@ class ChannelSettings(QFrame):
         grid.setHorizontalSpacing(px(10))
         grid.setVerticalSpacing(px(5))
         lay.addLayout(grid)
-        {ff800: self._build_ff800, ff400: self._build_ff400, ucx2: self._build_ucx2}.get(
-            dev.proto, self._build_ff802)(grid)
+        if kind != "play":
+            {ff800: self._build_ff800, ff400: self._build_ff400, ucx2: self._build_ucx2}.get(
+                dev.proto, self._build_ff802)(grid)
+        if dev.fx is not None:
+            self._build_fx(lay, dev.fx)
+
+    def _build_fx(self, lay, model):
+        """FX Send (inputs, playback) or FX Return (outputs), as in TotalMix's channel settings;
+        on the UCX II's outputs, the Room EQ button."""
+        f = self.s["fx"]
+        values = f["ret"] if self.kind == "out" else f["send"][self.kind]
+        row = QHBoxLayout()
+        knob = LevelKnob("FX Return" if self.kind == "out" else "FX Send",
+                         values[self.channels[0]])
+        knob.setToolTip(("How much of the reverb and echo this output hears"
+                         if self.kind == "out" else "Level into the reverb and echo")
+                        + " · " + knob.toolTip().split("\n", 1)[1])
+        knob.changed.connect(lambda _v: self._set(values, self.channels, knob.level()))
+        row.addWidget(knob)
+        if self.kind == "out" and model.room_eq:
+            room = QPushButton("Room EQ…")
+            room.setCheckable(True)
+            room.setChecked(f["room"][self.channels[0]]["on"])
+            room.setToolTip("Delay, volume calibration and a 9-band EQ for this output")
+            room.clicked.connect(lambda: (room.setChecked(f["room"][self.channels[0]]["on"]),
+                                          self.room_eq_requested.emit(), self.close()))
+            row.addWidget(room, 0, Qt.AlignVCenter)
+        row.addStretch(1)
+        lay.addLayout(row)
 
     def _phase(self, grid, part):
         """Phase invert per side; returns the next grid row."""
@@ -163,6 +196,11 @@ class ChannelSettings(QFrame):
             hiz = [ucx2.HIZ_INPUTS.index(c) for c in channels if c in ucx2.HIZ_INPUTS]
             if hiz:
                 row = self._check(grid, row, "Hi-Z (instrument)", part["hiz"], hiz)
+            auto = [ucx2.AUTOSET_INPUTS.index(c) for c in channels if c in ucx2.AUTOSET_INPUTS]
+            if auto:
+                row = self._check(grid, row, "Autoset", part["autoset"], auto)
+                grid.itemAtPosition(row - 1, 0).widget().setToolTip(
+                    "Lowers the gain automatically before the input clips")
         else:
             analog = [c for c in channels if c < ucx2.N_LINE_OUT + 2]
             if analog:
