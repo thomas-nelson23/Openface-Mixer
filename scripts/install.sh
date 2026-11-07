@@ -32,6 +32,8 @@ if commit=$(git rev-parse HEAD 2>/dev/null); then
     printf '%s\n%s\n' "$PWD" "$commit" > "$SHARE/install-source"
 fi
 install -Dm644 packaging/openface-mixer.desktop "$PREFIX/share/applications/openface-mixer.desktop"
+install -Dm644 openface_mixer/openface-mixer.svg "$PREFIX/share/icons/hicolor/scalable/apps/openface-mixer.svg"
+gtk-update-icon-cache -q -t "$PREFIX/share/icons/hicolor" 2>/dev/null || true
 install -Dm644 packaging/openface-mixer-engine.service "$UNIT_DIR/openface-mixer-engine.service"
 install -Dm644 packaging/openface-mixer-engine@.service "$UNIT_DIR/openface-mixer-engine@.service"
 cat > "$PREFIX/bin/openface-mixer" <<SH

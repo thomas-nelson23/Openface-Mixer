@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QProcess, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
@@ -1244,6 +1245,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
+    app.setWindowIcon(QIcon(str(Path(__file__).parent / "openface-mixer.svg")))
     args = app.arguments()[1:]
     if "--device" in args and args.index("--device") + 1 < len(args):
         dev = DEVICES.get(args[args.index("--device") + 1])
