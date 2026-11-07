@@ -10,6 +10,7 @@ for unit in $(systemctl --user list-units --all --plain --no-legend 'openface-mi
 done
 rm -f "$PREFIX/bin/openface-mixer" "$PREFIX/bin/openface-mixer-engine" \
       "$PREFIX/share/applications/openface-mixer.desktop" \
+      "$PREFIX/share/icons/hicolor/scalable/apps/openface-mixer.svg" \
       "$UNIT_DIR/openface-mixer-engine.service" "$UNIT_DIR/openface-mixer-engine@.service" \
       /dev/shm/openface-mixer-*"$(id -u)"
 rm -rf "$PREFIX/share/openface-mixer"
