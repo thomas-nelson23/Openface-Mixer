@@ -4,14 +4,14 @@ All sizes go through theme.px(), so the strips are laid out at the chosen UI sca
 import math
 import time
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
-    QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
-from .model import FADER_MAX_DB, FADER_MIN_DB, NEG_INF, db2pos, fmt_db, lin2db, pos2db
+from .model import FADER_MIN_DB, NEG_INF, db2pos, fader_db, fmt_db, lin2db, parse_db, pos2db
 from .theme import (
     CYAN, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, caption_html,
     font, icon_pixmap, px,
@@ -103,8 +103,54 @@ class Meter(QWidget):
             p.drawLine(0, y, self.width(), y)
 
 
+class LevelEdit(QLineEdit):
+    """A value typed in place, over a rect of parent (a strip's readouts, a matrix cell, a knob's
+    value). Enter hands the text to on_enter, which returns False to keep typing (not a
+    number); Esc or a click elsewhere leaves the value alone. Either key gives the keyboard
+    back to owner."""
+
+    def __init__(self, parent, rect, text, on_enter, owner=None):
+        super().__init__(text, parent)
+        self.on_enter, self.owner = on_enter, owner or parent
+        self.setAlignment(Qt.AlignCenter)
+        self.setContextMenuPolicy(Qt.PreventContextMenu)   # a right-click that opens it stops here
+        self.setStyleSheet(f"background:#01070b;color:#eef6f8;border:1px solid "
+                           f"rgba(42,212,255,0.8);border-radius:{px(3)}px;padding:0;"
+                           f"font-family:{MONO_STACK};font-size:{px(9)}px")
+        self.setGeometry(rect)
+        self.selectAll()
+        self.show()
+        self.setFocus()
+
+    def event(self, e):
+        # while typing, Esc belongs to the editor, not to a shortcut of the window
+        if e.type() == QEvent.ShortcutOverride and e.key() == Qt.Key_Escape:
+            e.accept()
+            return True
+        return super().event(e)
+
+    def keyPressEvent(self, e):
+        enter = e.key() in (Qt.Key_Return, Qt.Key_Enter)
+        if enter and self.on_enter(self.text()) is False:
+            self.selectAll()
+        elif enter or e.key() == Qt.Key_Escape:
+            self.owner.setFocus()
+            self._end()
+        else:
+            super().keyPressEvent(e)
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self._end()
+
+    def _end(self):
+        self.hide()
+        self.deleteLater()
+
+
 class Fader(QWidget):
     changed = Signal(float)
+    type_requested = Signal()      # Enter: type the level (the strip shows the editor)
     SCALE = (6, 0, -5, -10, -15, -20, -30, -40, -60)
 
     def __init__(self, parent=None):
@@ -118,7 +164,7 @@ class Fader(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)    # arrow keys move the fader that was clicked
         self.setToolTip("Drag, scroll or use the arrow keys · Ctrl = fine\n"
-                        "Double-click, Alt-click or Home = 0 dB · End = -∞")
+                        "Double-click, Alt-click or Home = 0 dB · End = -∞ · Enter = type a level")
 
     def db(self):
         return pos2db(self.pos)
@@ -172,6 +218,8 @@ class Fader(QWidget):
             self._set_pos(db2pos(0.0))
         elif e.key() == Qt.Key_End:
             self._set_pos(db2pos(NEG_INF))
+        elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.type_requested.emit()
         else:
             super().keyPressEvent(e)
 
@@ -190,9 +238,11 @@ class Fader(QWidget):
             db = FADER_MIN_DB if step > 0 else NEG_INF
         else:
             db = db + step
-            if db < FADER_MIN_DB:
-                db = NEG_INF
-        self._set_pos(db2pos(min(FADER_MAX_DB, db)))
+        self.move_to(db)
+
+    def move_to(self, db):
+        """Go to db, kept to the fader's range, as a drag there would (emits changed)."""
+        self._set_pos(db2pos(fader_db(db)))
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -554,7 +604,7 @@ class Strip(QFrame):
         readouts = QHBoxLayout()
         readouts.setSpacing(px(2))
         self.value = lcd_label("0.0")
-        self.value.setToolTip("Fader level (dB)")
+        self.value.setToolTip("Fader level (dB) · double-click to type a level")
         self.peak = lcd_label("-∞")
         self.peak.setToolTip("Peak level (dBFS) — click the meter to reset")
         readouts.addWidget(self.value)
@@ -562,6 +612,7 @@ class Strip(QFrame):
         lay.addLayout(readouts)
 
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
+        self.fader.type_requested.connect(self.type_level)
         self.meter.peak_changed.connect(self._show_peak)
         self._set_title(show_settings)
         self.set_selected(False)
@@ -606,6 +657,23 @@ class Strip(QFrame):
     def set_fader(self, db):
         self.fader.set_db(db)
         self.value.setText(fmt_db(db))
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton and self.value.geometry().contains(e.position().toPoint()):
+            self.type_level()
+        else:
+            super().mouseDoubleClickEvent(e)
+
+    def type_level(self):
+        """Type the fader's level over the readouts; it is applied as a drag to it would be."""
+        def enter(text):
+            db = parse_db(text)
+            if db is None:
+                return False
+            self.fader.move_to(db)
+
+        LevelEdit(self, self.value.geometry() | self.peak.geometry(), self.value.text(), enter,
+                  self.fader)
 
     def contextMenuEvent(self, e):
         self.context_requested.emit(e.globalPos())

@@ -137,6 +137,7 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Fine fader move | Ctrl + drag (or Ctrl + scroll) |
 | Fader from the keyboard | Click a fader (or Tab to it), then Up/Down (1 dB, Ctrl = 0.5 dB), Page Up/Down (6 dB), Home (0 dB), End (-∞) |
 | Fader to 0 dB | Double-click or Alt-click |
+| Type a fader level | Double-click the level under the fader (or press Enter on the fader), type `-12`, `+3` or `off`, then Enter. Esc cancels |
 | Centre pan | Double-click the knob (or Home); Left/Right move it |
 | Reset peak / clip | Click the meter |
 | Solo | **S** on a strip: solo-in-place in the current submix |
