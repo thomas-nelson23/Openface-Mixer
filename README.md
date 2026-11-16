@@ -80,6 +80,9 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   or UCX II over USB the interface in Class Compliant mode (`snd-usb-audio`, any recent kernel),
   or for the HDSPe cards the `snd-hdspm` driver (in the kernel; cards before 2022) or the
   `snd-hdspe` driver (cards from 2022 on, see below)
+- The Digiface USB on its standard firmware, **not** Class Compliant mode. Its Class Compliant
+  firmware has no hardware mixer (no TotalMix), so there is nothing for Openface Mixer to
+  control; switch back with RME's Firmware Update Tool (Windows or macOS)
 - PipeWire with WirePlumber
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
