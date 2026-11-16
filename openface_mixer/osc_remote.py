@@ -52,12 +52,13 @@ def remote_settings(st):
     """st["remote"], created with defaults: off until the user switches it on. host/out_port is
     where state is sent besides the controllers' own addresses (TotalMix's "IP or Host Name" and
     "Port outgoing"); an empty host sends only to the controllers."""
-    r = st.setdefault("remote", {})
-    r.setdefault("enabled", False)
-    r.setdefault("port", DEFAULT_PORT)
-    r.setdefault("host", "")
-    r.setdefault("out_port", DEFAULT_OUT_PORT)
-    r.setdefault("levels", True)
+    r = st.get("remote")
+    if not isinstance(r, dict):
+        r = st["remote"] = {}
+    for k, default in (("enabled", False), ("port", DEFAULT_PORT), ("host", ""),
+                       ("out_port", DEFAULT_OUT_PORT), ("levels", True)):
+        if type(r.get(k)) is not type(default):     # missing, or damaged in the state file
+            r[k] = default
     return r
 
 
