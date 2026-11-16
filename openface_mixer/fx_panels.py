@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from . import fx
 from .theme import CYAN, DIM, MONO, SANS, TEXT, font, px
+from .wheel import Wheel
 
 PANEL_STYLE = ("QWidget#fxpanel{background:#040e16}"
                "QFrame#fxbox{background:rgba(255,255,255,0.02);"
@@ -45,6 +46,7 @@ class ValueKnob(QWidget):
         self.fmt = fmt or (lambda v: f"{v:.{self._decimals()}f}")
         self.value = self._snap(value)
         self._drag = None
+        self._wheel = Wheel()
         self.setFixedSize(px(52), px(62))
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.SizeVerCursor)
@@ -107,7 +109,9 @@ class ValueKnob(QWidget):
             self.set_value(self.default, True)
 
     def wheelEvent(self, e):
-        self.nudge(1 if e.angleDelta().y() > 0 else -1, e.modifiers() & Qt.ShiftModifier)
+        n = self._wheel.steps(e)
+        if n:
+            self.nudge(n, e.modifiers() & Qt.ShiftModifier)
 
     def keyPressEvent(self, e):
         fine = e.modifiers() & Qt.ShiftModifier

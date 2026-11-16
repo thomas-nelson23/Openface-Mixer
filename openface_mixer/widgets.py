@@ -16,6 +16,7 @@ from .theme import (
     CYAN, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, caption_html,
     font, icon_pixmap, px,
 )
+from .wheel import Wheel
 from PySide6.QtGui import QIcon
 from PySide6.QtGui import QFont
 
@@ -113,6 +114,7 @@ class Fader(QWidget):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.setFixedWidth(px(34))
         self._drag = None
+        self._wheel = Wheel()
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)    # arrow keys move the fader that was clicked
         self.setToolTip("Drag, scroll or use the arrow keys · Ctrl = fine\n"
@@ -156,8 +158,9 @@ class Fader(QWidget):
         self._set_pos(db2pos(0.0))
 
     def wheelEvent(self, e):
-        step = 0.5 if e.modifiers() & Qt.ControlModifier else 1.0
-        self.step(step if e.angleDelta().y() > 0 else -step)
+        n = self._wheel.steps(e)
+        if n:
+            self.step(n * (0.5 if e.modifiers() & Qt.ControlModifier else 1.0))
 
     def keyPressEvent(self, e):
         fine = e.modifiers() & Qt.ControlModifier
@@ -253,6 +256,7 @@ class Knob(QWidget):
         self.value = 0.0
         self.setFixedSize(px(26), px(26))
         self._drag = None
+        self._wheel = Wheel()
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self.set_value(0.0)
@@ -294,7 +298,9 @@ class Knob(QWidget):
         self.changed.emit(0.0)
 
     def wheelEvent(self, e):
-        self.nudge(1 if e.angleDelta().y() > 0 else -1)
+        n = self._wheel.steps(e)
+        if n:
+            self.nudge(n)
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Right, Qt.Key_Up):

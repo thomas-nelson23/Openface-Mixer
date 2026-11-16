@@ -34,6 +34,7 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   engine.py             shared-memory client + starting/stopping the engine
   hardware.py           Digiface and HDSPe ALSA controls via amixer, PipeWire card profile via pactl
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
+  wheel.py              mouse wheel and touchpad steps for faders, knobs and matrix cells (no Qt)
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
   theme.py              colours, bundled fonts and the Qt stylesheet
