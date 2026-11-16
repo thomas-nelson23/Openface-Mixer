@@ -120,6 +120,18 @@ app.MainWindow
 - **Presets** store `extract_mix(state)`: stereo links, mutes, sends, output levels and groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
+- **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's
+  shape and raises `ValueError` if any part of it is damaged; presets, imported mixes and
+  `apply_mix()` all go through it, so a damaged file is refused whole and the live mix is never
+  left half-changed. `config.load_state()` reads `state.json` the same strict way, falls back
+  to `state.json.bak` (the save before it, kept by `atomic_write`), and only then repairs what
+  it can; the window says once which of the two happened. Everything outside the mix (names,
+  control room, remote, device and effect settings) is put back to its default where its type
+  or range is wrong, so no file can stop the window from opening.
+- **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
+  which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
+  for *Restore previous mix*, then clears the sends on channels the device doesn't have at any
+  sample rate (`model.clear_sends_outside`, also run when the state is loaded).
 
 ### Updating flow
 
