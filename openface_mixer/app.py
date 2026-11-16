@@ -367,6 +367,8 @@ class MainWindow(QMainWindow):
     def _fill_presets_menu(self):
         """The Presets menu of a narrow window: recall a slot, or store into one."""
         menu = self.presets_menu
+        for old in menu.findChildren(QMenu):     # the last Store submenu
+            old.deleteLater()
         menu.clear()
         active = self.st.get("active_slot")
         for i in range(N_SLOTS):
@@ -446,6 +448,7 @@ class MainWindow(QMainWindow):
         else:       # a context menu shows only what can be done (HIG: hide, don't dim)
             menu.addAction("No hidden channels").setEnabled(False)
         menu.exec(pos)
+        menu.deleteLater()
 
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
@@ -863,6 +866,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
+        menu.deleteLater()
 
     @staticmethod
     def _swatch(hexcol):
@@ -957,6 +961,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             menu.addAction("Clear", lambda: (self.presets.clear(i), self.refresh_slots()))
         menu.exec(self.slot_btns[i].mapToGlobal(self.slot_btns[i].rect().bottomLeft()))
+        menu.deleteLater()
 
     def _rename_slot(self, i):
         name, ok = QInputDialog.getText(self, "Rename preset", f"Name for slot {i + 1}:",
