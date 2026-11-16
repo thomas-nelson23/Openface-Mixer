@@ -43,8 +43,10 @@ the engine is the same for all of them.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
-  to date; files from before the 36-channel layout are moved into place. When it exits, the
-  interface keeps mixing with the last mix.
+  to date; files from before the 36-channel layout are moved into place. A file it does not
+  recognise (another format, cut short, or with anything left over) is ignored as a whole
+  (`matrix_file.c`): the engine logs that and starts with the default routing, playback n to
+  output n, as on a fresh install. When it exits, the interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
   mix and all settings, about 2,300 transactions (over USB, the same as register writes, spread
   over the ticks the MIDI output buffer needs). The 800 takes its mixer as one block write

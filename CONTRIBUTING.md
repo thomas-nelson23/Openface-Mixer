@@ -7,6 +7,7 @@ Thanks for helping! This document covers how the project is laid out and how to 
 ```
 engine/                 C engine that drives the interface's DSP mixer. Builds to engine/openface-mixer-engine
   openface-mixer-engine.c
+  matrix_file.c         reads matrix.bin, the mix the engine starts with; refuses unknown files
   backend.h             what a device backend provides (open, status, sync, meters)
   backend_digiface.c    the Digiface backend, on top of digiface_usb.c
   digiface_usb.c        libusb: mixer nodes, output faders, status, level meters
