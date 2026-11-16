@@ -7,16 +7,18 @@ mixer like TotalMix's, one per strip and kind.
 """
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget,
 )
 
 from . import fx
+from .model import parse_db
 from .theme import CYAN, DIM, MONO, SANS, TEXT, font, px
 from .wheel import Wheel
+from .widgets import LevelEdit
 
 PANEL_STYLE = ("QWidget#fxpanel{background:#040e16}"
                "QFrame#fxbox{background:rgba(255,255,255,0.02);"
@@ -34,8 +36,8 @@ def fmt_level(v, lo):
 # ------------------------------------------------------------------ knob
 class ValueKnob(QWidget):
     """A TotalMix-style rotary control: label above, value below. Drag up/down (Shift for fine
-    steps), scroll, or use the arrow keys; double-click resets to the default, right-click types a
-    value."""
+    steps), scroll, or use the arrow keys; double-click resets to the default, right-click or
+    Enter types a value."""
     changed = Signal(float)
 
     def __init__(self, label, lo, hi, value, default, step=1.0, fmt=None, log=False, unit="",
@@ -144,10 +146,15 @@ class ValueKnob(QWidget):
         return 1 if span <= 100 else 5 if span <= 600 else 10
 
     def _type_value(self):
-        v, ok = QInputDialog.getDouble(self, self.label, f"{self.label} ({self.unit or 'value'})",
-                                       self.value, self.lo, self.hi, self._decimals())
-        if ok:
-            self.set_value(v, True)
+        """Type the value in place (a dialog would close the channel settings popup)."""
+        def enter(text):
+            v = parse_db(text)
+            if v is None:
+                return False
+            self.set_value(v, True)     # kept to the knob's range; "off" is its lowest value
+
+        LevelEdit(self, QRect(0, px(44), self.width(), px(18)),
+                  f"{self.value:.{self._decimals()}f}", enter)
 
     def changeEvent(self, e):
         super().changeEvent(e)
