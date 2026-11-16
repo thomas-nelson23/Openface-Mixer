@@ -12,7 +12,15 @@ from .hardware import DIGIFACE_CARD, Hardware
 from .model import chan_label as digiface_chan_label, pair_label as digiface_pair_label
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
+USB_DEVICES = Path("/sys/bus/usb/devices")
 RME_OUI = 0x000A35
+RME_USB_VENDOR = 0x2a39
+# The Digiface USB product IDs with the vendor interface the kernel quirk and the engine's
+# hardware mixer use (engine/digiface_usb.c). Any other Digiface ID is its Class Compliant
+# firmware, which has no hardware mixer (0x3fb2 is reported for it), or a revision we don't
+# know yet.
+DIGIFACE_USB_PIDS = (0x3f8c, 0x3fa0)
+DIGIFACE_CC_PID = 0x3fb2
 
 
 class Device:
@@ -134,6 +142,16 @@ class Digiface(Device):
 
     def present(self):
         return Hardware.find_card(self.alsa_card) is not None
+
+    def missing_hint(self):
+        pid = find_other_digiface()
+        if pid is None:
+            return ""
+        return (f"A Digiface with USB ID 2a39:{pid:04x} is connected. That is most likely "
+                "Class Compliant mode, which has no hardware mixer, so Openface Mixer can't "
+                "control it. Switch it back to the standard firmware with RME's Firmware Update "
+                "Tool (Windows or macOS), then reconnect it. If it isn't in Class Compliant "
+                "mode, please open a GitHub issue with this USB ID.")
 
 
 class FireWireDevice(Device):
@@ -324,6 +342,37 @@ def find_firewire_unit(specifier_id, version, root=FIREWIRE_DEVICES):
     for u in units:
         if _read_hex(u / "specifier_id") == specifier_id and _read_hex(u / "version") == version:
             return u.name.split(".")[0]
+    return None
+
+
+def usb_devices(vendor, root=USB_DEVICES):
+    """[(product ID, product string)] of the USB devices from this vendor."""
+    try:
+        devs = sorted(p for p in root.iterdir() if (p / "idVendor").exists())
+    except OSError:
+        return []
+    found = []
+    for d in devs:
+        if _read_hex(d / "idVendor") != vendor:
+            continue
+        pid = _read_hex(d / "idProduct")
+        try:
+            product = (d / "product").read_text().strip()
+        except OSError:
+            product = ""
+        if pid is not None:
+            found.append((pid, product))
+    return found
+
+
+def find_other_digiface(root=USB_DEVICES):
+    """The product ID of a connected Digiface USB that the hardware mixer can't drive (Class
+    Compliant mode), or None."""
+    for pid, product in usb_devices(RME_USB_VENDOR, root):
+        if pid in DIGIFACE_USB_PIDS:
+            continue
+        if pid == DIGIFACE_CC_PID or "digiface" in product.lower():
+            return pid
     return None
 
 
