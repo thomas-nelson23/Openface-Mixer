@@ -37,13 +37,15 @@ def fmt_level(v, lo):
 class ValueKnob(QWidget):
     """A TotalMix-style rotary control: label above, value below. Drag up/down (Shift for fine
     steps), scroll, or use the arrow keys; double-click resets to the default, right-click or
-    Enter types a value."""
+    Enter types a value. name is what a screen reader calls it where the label alone is not
+    enough ("Band 2 gain")."""
     changed = Signal(float)
 
     def __init__(self, label, lo, hi, value, default, step=1.0, fmt=None, log=False, unit="",
-                 parent=None):
+                 name=None, parent=None):
         super().__init__(parent)
         self.label, self.lo, self.hi, self.step = label, lo, hi, step
+        self.name = name or label
         self.default, self.log, self.unit = default, log, unit
         self.fmt = fmt or (lambda v: f"{v:.{self._decimals()}f}")
         self.value = self._snap(value)
@@ -73,10 +75,12 @@ class ValueKnob(QWidget):
         return self.lo + pos * (self.hi - self.lo)
 
     def _tip(self):
-        self.setToolTip(f"{self.label}: {self.fmt(self.value)} {self.unit}".rstrip() +
-                        "\nDrag or scroll (Shift: fine) · double-click: default · "
-                        "right-click: type a value")
-        self.setAccessibleName(f"{self.label} {self.fmt(self.value)} {self.unit}".rstrip())
+        value = self.fmt(self.value)
+        if not value.endswith(self.unit):      # "1.5s" already says it
+            value += f" {self.unit}"
+        self.setToolTip(f"{self.label}: {value}\nDrag or scroll (Shift: fine) · "
+                        "double-click: default · right-click: type a value")
+        self.setAccessibleName(f"{self.name} {value}")
 
     def set_value(self, v, emit=False):
         v = self._snap(v)
@@ -356,15 +360,18 @@ class FxPanel(QWidget):
         for w in self.findChildren(CurveView) + self.findChildren(DynCurve):
             w.update()
 
-    def knob(self, label, spec, value, on_change, fmt=None, log=False, unit="", step=None):
+    def knob(self, label, spec, value, on_change, fmt=None, log=False, unit="", step=None,
+             name=None):
         """spec: (scale, low, high, default) as in fx.py."""
         scale, lo, hi, default = spec
-        k = ValueKnob(label, lo, hi, value, default, step or 1 / scale, fmt, log, unit)
+        k = ValueKnob(label, lo, hi, value, default, step or 1 / scale, fmt, log, unit, name)
         k.changed.connect(on_change)
         return k
 
-    def combo(self, items, index, on_change):
+    def combo(self, name, items, index, on_change):
+        """name: what a screen reader calls the list."""
         c = QComboBox()
+        c.setAccessibleName(name)
         c.addItems(list(items))
         c.setCurrentIndex(max(0, min(len(items) - 1, int(index))))
         c.currentIndexChanged.connect(on_change)
@@ -450,8 +457,9 @@ class EqPanel(StripPanel):
         lc, lcl, head = box(lc_btn)
         knobs = QHBoxLayout()
         knobs.addWidget(self.param_knob(fx.LOWCUT, "freq", "Freq", log=True, fmt=fmt_hz,
-                                        unit="Hz"))
-        slope = self.combo(fx.SLOPES, self.ch["lc_slope"], lambda i: self.set("lc_slope", i))
+                                        unit="Hz", name="Low Cut frequency"))
+        slope = self.combo("Low Cut slope", fx.SLOPES, self.ch["lc_slope"],
+                           lambda i: self.set("lc_slope", i))
         self.combos["lc_slope"] = slope
         sl = QVBoxLayout()
         sl.addWidget(caption("Slope"))
@@ -475,7 +483,7 @@ class EqPanel(StripPanel):
             top = QHBoxLayout()
             top.addWidget(caption(f"Band {b}"))
             if types:
-                t = self.combo(types, self.ch[f"eq_t{b}"],
+                t = self.combo(f"Band {b} type", types, self.ch[f"eq_t{b}"],
                                lambda i, k=f"eq_t{b}": (self.set(k, i), self._enable()))
                 self.combos[f"eq_t{b}"] = t
                 top.addWidget(t)
@@ -483,10 +491,11 @@ class EqPanel(StripPanel):
             col.addLayout(top)
             knobs = QHBoxLayout()
             knobs.setSpacing(0)
-            knobs.addWidget(self.param_knob(fx.EQ, f"g{b}", "Gain", fmt=db_fmt, unit="dB"))
+            knobs.addWidget(self.param_knob(fx.EQ, f"g{b}", "Gain", fmt=db_fmt, unit="dB",
+                                            name=f"Band {b} gain"))
             knobs.addWidget(self.param_knob(fx.EQ, f"f{b}", "Freq", log=True, fmt=fmt_hz,
-                                            unit="Hz"))
-            knobs.addWidget(self.param_knob(fx.EQ, f"q{b}", "Q"))
+                                            unit="Hz", name=f"Band {b} frequency"))
+            knobs.addWidget(self.param_knob(fx.EQ, f"q{b}", "Q", name=f"Band {b} Q"))
             col.addLayout(knobs)
             bands.addLayout(col)
         eql.addLayout(bands)
@@ -526,13 +535,13 @@ class DynamicsPanel(StripPanel):
         grid.setSpacing(0)
         ms = lambda v: f"{round(v)}"   # noqa: E731
         items = (
-            (0, 0, "cthr", "Comp Thr", dict(fmt=db_fmt, unit="dB")),
-            (0, 1, "cratio", "Ratio", dict(fmt=lambda v: f"{v:.1f}:1")),
-            (0, 2, "gain", "Gain", dict(fmt=db_fmt, unit="dB")),
-            (1, 0, "ethr", "Exp Thr", dict(fmt=db_fmt, unit="dB")),
-            (1, 1, "eratio", "Ratio", dict(fmt=lambda v: f"1:{v:.1f}")),
-            (1, 2, "attack", "Attack", dict(fmt=ms, unit="ms")),
-            (1, 3, "release", "Release", dict(fmt=ms, unit="ms")),
+            (0, 0, "cthr", "Comp Thr", dict(fmt=db_fmt, unit="dB", name="Compressor threshold")),
+            (0, 1, "cratio", "Ratio", dict(fmt=lambda v: f"{v:.1f}:1", name="Compressor ratio")),
+            (0, 2, "gain", "Gain", dict(fmt=db_fmt, unit="dB", name="Dynamics gain")),
+            (1, 0, "ethr", "Exp Thr", dict(fmt=db_fmt, unit="dB", name="Expander threshold")),
+            (1, 1, "eratio", "Ratio", dict(fmt=lambda v: f"1:{v:.1f}", name="Expander ratio")),
+            (1, 2, "attack", "Attack", dict(fmt=ms, unit="ms", name="Dynamics attack")),
+            (1, 3, "release", "Release", dict(fmt=ms, unit="ms", name="Dynamics release")),
         )
         for r, c, key, label, kw in items:
             grid.addWidget(self.param_knob(fx.DYNAMICS, key, label, **kw), r, c)
@@ -549,11 +558,13 @@ class DynamicsPanel(StripPanel):
         knobs = QGridLayout()
         knobs.setSpacing(0)
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "maxgain", "Max Gain", fmt=db_fmt,
-                                        unit="dB"), 0, 0)
+                                        unit="dB", name="Auto Level max gain"), 0, 0)
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "headroom", "Headroom",
-                                        fmt=lambda v: f"{v:.1f}", unit="dB"), 0, 1)
+                                        fmt=lambda v: f"{v:.1f}", unit="dB",
+                                        name="Auto Level headroom"), 0, 1)
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "rise", "Rise Time",
-                                        fmt=lambda v: f"{v:.1f}s", unit="s"), 1, 0)
+                                        fmt=lambda v: f"{v:.1f}s", unit="s",
+                                        name="Auto Level rise time"), 1, 0)
         all_.addLayout(knobs)
         all_.addStretch(1)
         self.al_box = al
@@ -590,7 +601,7 @@ class RoomEqPanel(FxPanel):
         _, scale, lo, hi, default = fx.VOLUME_CAL
         top.addWidget(self.knob("Vol. Cal.", (scale, lo, hi, default), self.room["volcal"],
                                 lambda v: self.set("volcal", v), fmt=db_fmt, unit="dB",
-                                step=0.05))
+                                step=0.05, name="Volume calibration"))
         top.addStretch(1)
         self.lay.addLayout(top)
         self.bands = QFrame()
@@ -610,7 +621,7 @@ class RoomEqPanel(FxPanel):
             grid.addWidget(band, 0, col, Qt.AlignHCenter)
             if b in fx.ROOM_TYPE_BANDS:
                 items = types1 if b == 1 else types3
-                t = self.combo([short[n] for n in items], self.room[f"t{b}"],
+                t = self.combo(f"Band {b} type", [short[n] for n in items], self.room[f"t{b}"],
                                lambda i, k=f"t{b}": self.set(k, i))
                 t.setToolTip("Filter type")
                 t.setFont(font(SANS, 9))
@@ -618,14 +629,14 @@ class RoomEqPanel(FxPanel):
                                 "QComboBox::drop-down{width:0px;border:none}")
                 t.setFixedWidth(px(62))
                 grid.addWidget(t, 1, col, Qt.AlignHCenter)
-            for r, (kind, label, kw) in enumerate((
-                    ("g", "Gain", dict(fmt=db_fmt, unit="dB")),
-                    ("f", "Freq", dict(fmt=fmt_hz, log=True, unit="Hz")),
-                    ("q", "Q", {}))):
+            for r, (kind, label, name, kw) in enumerate((
+                    ("g", "Gain", "gain", dict(fmt=db_fmt, unit="dB")),
+                    ("f", "Freq", "frequency", dict(fmt=fmt_hz, log=True, unit="Hz")),
+                    ("q", "Q", "Q", {}))):
                 key = f"{kind}{b}"
                 grid.addWidget(self.knob(label, fx.room_param(self.m, key), self.room[key],
-                                         lambda v, k=key: self.set(k, v), **kw), r + 2, col,
-                               Qt.AlignHCenter)
+                                         lambda v, k=key: self.set(k, v), name=f"Band {b} {name}",
+                                         **kw), r + 2, col, Qt.AlignHCenter)
         self.lay.addWidget(self.bands)
         self._enable()
 
@@ -661,7 +672,7 @@ class FxUnitPanel(FxPanel):
         self.rv_on = on_button("Reverb", rv["on"])
         self.rv_on.toggled.connect(lambda on: self.set("reverb", "on", on))
         box_r, rl, head = box(self.rv_on)
-        rtype = self.combo(fx.REVERB_TYPES, rv["type"],
+        rtype = self.combo("Reverb type", fx.REVERB_TYPES, rv["type"],
                            lambda i: self.set("reverb", "type", i))
         head.addWidget(rtype)
         grid = QGridLayout()
@@ -694,7 +705,7 @@ class FxUnitPanel(FxPanel):
         self.ec_on = on_button("Echo", ec["on"])
         self.ec_on.toggled.connect(lambda on: self.set("echo", "on", on))
         box_e, el, head = box(self.ec_on)
-        head.addWidget(self.combo(fx.ECHO_TYPES, ec["type"],
+        head.addWidget(self.combo("Echo type", fx.ECHO_TYPES, ec["type"],
                                   lambda i: self.set("echo", "type", i)))
         grid = QGridLayout()
         grid.setSpacing(0)
@@ -708,7 +719,7 @@ class FxUnitPanel(FxPanel):
                                       fmt=lambda v: fmt_level(v, fx.FX_MIN_DB), unit="dB"), 1, 1)
         hc = QHBoxLayout()
         hc.addWidget(caption("High Cut"))
-        hc.addWidget(self.combo(fx.ECHO_HIGHCUTS, ec["highcut"],
+        hc.addWidget(self.combo("Echo high cut", fx.ECHO_HIGHCUTS, ec["highcut"],
                                 lambda i: self.set("echo", "highcut", i)))
         el.addLayout(grid)
         el.addLayout(hc)
@@ -727,7 +738,8 @@ class FxUnitPanel(FxPanel):
         for k, scale, lo, hi, default in self.m.params(section):
             if k == key:
                 w = self.knob(label, (scale, lo, hi, default), self.fx[which][key],
-                              lambda v, u=which, kk=key: self.set(u, kk, v), **kw)
+                              lambda v, u=which, kk=key: self.set(u, kk, v),
+                              name=f"{which.capitalize()} {label.lower()}", **kw)
                 self.knobs[(which, key)] = w
                 return w
         raise KeyError(key)

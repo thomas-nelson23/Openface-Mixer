@@ -635,6 +635,9 @@ class Strip(QFrame):
         self.solo.setAccessibleName(f"Solo {self.name}")
         self.mute.setAccessibleName(f"Mute {self.name}")
         self.stereo.setAccessibleName(f"Stereo-link {self.name}")
+        self.settings_btn.setAccessibleName(f"{self.name} settings")
+        self.eq_btn.setAccessibleName(f"{self.name} EQ")
+        self.dyn_btn.setAccessibleName(f"{self.name} dynamics")
 
     def _show_peak(self, db):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")
