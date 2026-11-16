@@ -9,8 +9,8 @@ from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap,
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from . import APP_ID, APP_NAME
@@ -98,12 +98,9 @@ class MainWindow(QMainWindow):
         for r in (self.row_in, self.row_play, self.row_out):
             rows.addWidget(r, 1)
         self.matrix = MatrixView(self)
-        mscroll = QScrollArea()
-        mscroll.setWidget(self.matrix)
-        mscroll.setFrameShape(QFrame.NoFrame)
         self.tabs = QStackedWidget()
         self.tabs.addWidget(mixer_page)
-        self.tabs.addWidget(mscroll)
+        self.tabs.addWidget(self.matrix.scroll)
         self.tabs.currentChanged.connect(self._tab_changed)
         body.addWidget(self.tabs, 1)
         self.settings = SettingsPanel(self.hw, dev, self.st, self.ui_scale)
