@@ -306,6 +306,16 @@ def _levels(cur, n):
     return [v if isinstance(v, (int, float)) and not isinstance(v, bool) else None for v in cur]
 
 
+def _hold(cur, params, prefix=""):
+    """Keep cur's values inside their parameters' ranges, and whole-number ones (list choices
+    such as a filter type, Hz, ms) whole: a damaged or hand-edited 1.5 or 99 would otherwise
+    reach a combo box and its panel could not open."""
+    for key, _scale, lo, hi, _default in params:
+        v = max(lo, min(hi, cur[prefix + key]))
+        cur[prefix + key] = round(v) if isinstance(lo, int) else float(v)
+    return cur
+
+
 def upgrade_settings(fx, m):
     base = default_settings(m)
     if not isinstance(fx, dict):
@@ -316,16 +326,23 @@ def upgrade_settings(fx, m):
         if not isinstance(cur, list) or len(cur) != n:
             cur = base[kind]
         fx[kind] = [_fill(c, b) for c, b in zip(cur, base[kind])]
+        for ch in fx[kind]:
+            for section in STRIP_SECTIONS:
+                _hold(ch, m.params(section), section[0] + "_")
     send = fx.get("send") if isinstance(fx.get("send"), dict) else {}
     fx["send"] = {k: _levels(send.get(k), len(v)) for k, v in base["send"].items()}
     fx["ret"] = _levels(fx.get("ret"), m.n_out)
-    for unit in ("reverb", "echo"):
-        fx[unit] = _fill(fx.get(unit), base[unit])
+    for section in (REVERB, ECHO):
+        unit = section[0]
+        fx[unit] = _hold(_fill(fx.get(unit), base[unit]), m.params(section))
     if m.room_eq:
         cur = fx.get("room")
         if not isinstance(cur, list) or len(cur) != m.n_out:
             cur = base["room"]
-        fx["room"] = [_fill(c, b) for c, b in zip(cur, base["room"])]
+        params = [ROOM_DELAY, VOLUME_CAL] + [(key, *room_param(m, key))
+                                             for b in range(1, ROOM_BANDS + 1)
+                                             for key in room_band_keys(b)]
+        fx["room"] = [_hold(_fill(c, b), params) for c, b in zip(cur, base["room"])]
     return fx
 
 

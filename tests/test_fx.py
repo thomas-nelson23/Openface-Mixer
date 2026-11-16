@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from openface_mixer import fireface802 as ff, fx, model as m, ucx2
@@ -126,6 +127,50 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(s["fx"]["send"]["in"], [None] * 20)
         self.assertEqual(len(s["fx"]["room"]), 20)
         self.assertEqual(s["fx"]["ret"][2], -10.0)
+
+    def test_list_choices_are_whole_and_in_range(self):
+        """A fractional or out-of-range filter type, slope or effect type in a state file
+        used to stop its panel from opening."""
+        for proto, model in ((ucx2, fx.MODELS["ucx2"]), (ff, fx.MODELS["ff802"])):
+            last_type = len(model.eq_types[0]) - 1
+            s = proto.default_settings()
+            s["fx"]["in"][0].update(eq_t1=1.5, eq_t3=99, lc_slope=2.6, eq_f1=440.4)
+            s["fx"]["out"][3].update(eq_t1=-7, lc_slope=-1, eq_g1=99.0, eq_q2=3)
+            s["fx"]["reverb"].update(type=3.3, smooth=1000)
+            s["fx"]["echo"].update(type=99, highcut=2.5, delay=1)
+            if model.room_eq:
+                s["fx"]["room"][0].update(t1=1.5, t8=-3, t9=44, g2=50.0, delay=99.0)
+            f = proto.upgrade_settings(s)["fx"]
+            self.assertEqual([f["in"][0][k] for k in ("eq_t1", "eq_t3", "lc_slope", "eq_f1")],
+                             [2, last_type, 3, 440])
+            self.assertEqual([f["out"][3][k] for k in ("eq_t1", "lc_slope", "eq_g1", "eq_q2")],
+                             [0, 0, 20.0, 3.0])
+            self.assertEqual((f["reverb"]["type"], f["reverb"]["smooth"]), (3, 100))
+            self.assertEqual((f["echo"]["type"], f["echo"]["highcut"], f["echo"]["delay"]),
+                             (2, 2, 1.0))
+            if model.room_eq:
+                self.assertEqual([f["room"][0][k] for k in ("t1", "t8", "t9", "g2", "delay")],
+                                 [2, 0, last_type, 20.0, 42.5])
+            for ch in f["in"] + f["out"] + [f["reverb"], f["echo"]] + f.get("room", []):
+                for key, value in ch.items():
+                    if isinstance(fx.default_channel(model).get(key, value), int):
+                        self.assertIsInstance(value, int, key)
+            # what the panels do with the choices
+            types1, types3 = model.eq_types
+            self.assertIn(types1[f["in"][0]["eq_t1"]], types1)
+            self.assertIn(types3[f["in"][0]["eq_t3"]], types3)
+            fx.SLOPES[f["in"][0]["lc_slope"]], fx.REVERB_TYPES[f["reverb"]["type"]]
+            fx.ECHO_TYPES[f["echo"]["type"]], fx.ECHO_HIGHCUTS[f["echo"]["highcut"]]
+            f["in"][0].update(eq=True, lc=True)
+            fx.eq_filters(f["in"][0], model)
+
+    def test_good_settings_are_not_changed(self):
+        for proto in (ucx2, ff):
+            s = proto.default_settings()
+            s["fx"]["in"][2].update(eq=True, eq_t1=1, eq_g2=-3.5, eq_f3=8000, dyn_cratio=4.0)
+            s["fx"]["reverb"].update(on=True, type=14, time=2.5)
+            before = json.dumps(s)        # as text, so that 1 and 1.0 differ
+            self.assertEqual(json.dumps(proto.upgrade_settings(s)), before)
 
     def test_802_eq_types(self):
         self.assertEqual(fx.MODELS["ff802"].param(fx.EQ, 0)[3], 2)    # Peak, Shelf, High Pass
