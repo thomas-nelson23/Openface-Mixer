@@ -600,8 +600,9 @@ class RoomEqPanel(FxPanel):
                                 unit="ms"))
         _, scale, lo, hi, default = fx.VOLUME_CAL
         top.addWidget(self.knob("Vol. Cal.", (scale, lo, hi, default), self.room["volcal"],
-                                lambda v: self.set("volcal", v), fmt=db_fmt, unit="dB",
-                                step=0.05, name="Volume calibration"))
+                                lambda v: self.set("volcal", v), unit="dB", step=0.05,
+                                fmt=lambda v: f"{v:+.2f}" if v else "0.00",
+                                name="Volume calibration"))
         top.addStretch(1)
         self.lay.addLayout(top)
         self.bands = QFrame()
@@ -709,8 +710,11 @@ class FxUnitPanel(FxPanel):
                                   lambda i: self.set("echo", "type", i)))
         grid = QGridLayout()
         grid.setSpacing(0)
+        # the 802 takes the delay in 1/100 s, the UCX II in ms: show the digits that are sent
+        digits = next(round(math.log10(scale)) for k, scale, *_ in self.m.params(fx.ECHO)
+                      if k == "delay")
         grid.addWidget(self.unit_knob("echo", fx.ECHO, "delay", "Delay",
-                                      fmt=lambda v: f"{v:.2f}s", unit="s"), 0, 0)
+                                      fmt=lambda v: f"{v:.{digits}f}s", unit="s"), 0, 0)
         grid.addWidget(self.unit_knob("echo", fx.ECHO, "feedback", "Feedback",
                                       fmt=ms, unit="%"), 0, 1)
         grid.addWidget(self.unit_knob("echo", fx.ECHO, "width", "Width",
