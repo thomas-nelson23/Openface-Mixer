@@ -49,6 +49,10 @@ class Device:
     def channels(self, kind, mode):
         raise NotImplementedError
 
+    def all_channels(self, kind):
+        """The channels of this kind the device has at any sample rate, as a set."""
+        return {c for mode in (1, 2, 4) for c in self.channels(kind, mode)}
+
     def chan_label(self, kind, c, mode):
         raise NotImplementedError
 

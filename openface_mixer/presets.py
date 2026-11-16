@@ -2,8 +2,8 @@
 import json
 from pathlib import Path
 
-from .config import atomic_write
-from .model import MIX_KEYS, N_SLOTS
+from .config import BAD_FILE, atomic_write
+from .model import N_SLOTS, checked_mix
 
 FILE_FORMAT = "openface-mixer-mix"
 
@@ -17,13 +17,24 @@ class PresetBank:
         self.load()
 
     def load(self):
+        """Read the slots. A file that can't be read or isn't a preset file gives eight empty
+        slots; a single slot whose mix is damaged is left empty."""
+        self.slots = [None] * N_SLOTS
         try:
             data = json.loads(self.path.read_text())
-            slots = data.get("slots", [])
-            self.slots = [s if isinstance(s, dict) and "mix" in s else None for s in slots][:N_SLOTS]
-            self.slots += [None] * (N_SLOTS - len(self.slots))
-        except (OSError, ValueError):
-            self.slots = [None] * N_SLOTS
+        except BAD_FILE:
+            return
+        slots = data.get("slots") if isinstance(data, dict) else None
+        for i, s in enumerate(slots[:N_SLOTS] if isinstance(slots, list) else ()):
+            if not isinstance(s, dict):
+                continue
+            try:
+                mix = checked_mix(s.get("mix"))
+            except ValueError:
+                continue
+            name = s.get("name")
+            self.slots[i] = {"name": name if name and isinstance(name, str) else f"Mix {i + 1}",
+                             "mix": mix}
 
     def save(self):
         atomic_write(self.path, json.dumps({"version": 1, "slots": self.slots}, indent=1))
@@ -46,15 +57,22 @@ class PresetBank:
 
 
 def export_mix(path, name, mix):
-    Path(path).write_text(json.dumps({"format": FILE_FORMAT, "version": 1, "name": name, "mix": mix},
-                                     indent=1))
+    atomic_write(Path(path), json.dumps({"format": FILE_FORMAT, "version": 1, "name": name,
+                                         "mix": mix}, indent=1))
 
 
 def import_mix(path):
-    """Returns (name, mix). Raises ValueError for files that aren't Openface Mixer mixes."""
-    data = json.loads(Path(path).read_text())
-    if data.get("format") != FILE_FORMAT or not isinstance(data.get("mix"), dict):
+    """Returns (name, mix), the mix checked and in today's shape (model.checked_mix). Raises
+    ValueError for files that aren't Openface Mixer mixes or are damaged, OSError for files that
+    can't be read."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (ValueError, RecursionError):
+        data = None
+    if not isinstance(data, dict) or data.get("format") != FILE_FORMAT:
         raise ValueError("not an Openface Mixer mix file")
-    if not any(k in data["mix"] for k in MIX_KEYS):
+    mix = checked_mix(data.get("mix"))
+    if not mix:
         raise ValueError("mix file contains no mixer settings")
-    return data.get("name") or Path(path).stem, data["mix"]
+    name = data.get("name")
+    return name if name and isinstance(name, str) else Path(path).stem, mix

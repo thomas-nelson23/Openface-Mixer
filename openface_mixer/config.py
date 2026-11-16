@@ -12,16 +12,18 @@ from pathlib import Path
 from . import APP_ID
 from . import control_room
 from .devices import DEFAULT, DEVICES
-from .model import compute_matrix, compute_out_gains, upgrade_state
+from .model import clear_sends_outside, compute_matrix, compute_out_gains, upgrade_state
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_ID
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
 
-MATRIX_MAGIC = 0x344D464F                   # "OFM4", see load_matrix() in the engine
+MATRIX_MAGIC = 0x344D464F                   # "OFM4", see engine/matrix_file.c
 DEVICE_MAGIC = 0x3244464F                   # "OFD2": device settings block after the gains
 N_DEV_CMD = 4096                            # OFM_N_DEV_CMD in engine/shm_layout.h
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last
 UI_FILE = CONFIG_DIR / "ui.json"            # UI scale, shared by all devices
+# what reading and parsing a missing, unreadable or damaged JSON file can raise
+BAD_FILE = (OSError, ValueError, RecursionError)
 
 UI_SCALE_DEFAULT = 1.0
 UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
@@ -44,25 +46,66 @@ def presets_file(dev=DEFAULT):
     return device_dir(dev) / "presets.json"       # the 8 snapshot slots
 
 
-def atomic_write(path, data):
+def previous_mix_file(dev=DEFAULT):
+    return device_dir(dev) / "previous-mix.json"  # the mix before the last recall, import or reset
+
+
+def backup_file(path):
+    return path.with_suffix(path.suffix + ".bak")
+
+
+def atomic_write(path, data, keep_backup=False):
+    """Write data to path so that a crash or power cut leaves either the old file or the new
+    one, never a part of one: to a temporary file, synced to disk, then renamed over path.
+    keep_backup first moves the file being replaced to backup_file(path)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    if isinstance(data, str):
-        tmp.write_text(data)
-    else:
-        tmp.write_bytes(data)
-    tmp.replace(path)
+    try:
+        with open(tmp, "w" if isinstance(data, str) else "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        if keep_backup and path.exists():
+            path.replace(backup_file(path))
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _read_state(path, phones, strict):
+    """The state in path, or None if it can't be read (strict: or its mix is damaged)."""
+    try:
+        return upgrade_state(json.loads(path.read_text()), phones, strict)
+    except BAD_FILE:
+        return None
 
 
 def load_state(dev=DEFAULT):
+    """(state, problem). The state comes from state.json or, if that can't be read or its mix
+    is damaged, from state.json.bak, the save before it. With no usable backup, what can be
+    kept of state.json is repaired and the rest is the default mix. problem is None, or
+    "backup" or "reset" for those two cases, so the window can say what happened."""
     phones = dev.phones_pair(1)
-    try:
-        st = upgrade_state(json.loads(state_file(dev).read_text()), phones)
-    except (OSError, ValueError):
-        st = upgrade_state(None, phones)
-    control_room.control_room(st, phones)["talkback"] = False   # never survives a restart
+    path = state_file(dev)
+    bak = backup_file(path)
+    problem = None
+    st = _read_state(path, phones, True)
+    if st is None:
+        st = _read_state(bak, phones, True)
+        if st is not None:
+            problem = "backup"
+            try:
+                bak.replace(path)   # or the next save would keep the damaged file as the backup
+            except OSError:
+                pass
+        else:
+            problem = "reset" if path.exists() else None
+            st = _read_state(path, phones, False) or upgrade_state(None, phones)
+    control_room.load(st, phones)
     dev.upgrade_settings(st)
-    return st
+    clear_sends_outside(st, dev.all_channels)
+    return st, problem
 
 
 def device_block(st, dev=DEFAULT):
@@ -91,7 +134,8 @@ def matrix_file_bytes(st, dev=DEFAULT):
 
 
 def save_state(st, dev=DEFAULT):
-    atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}))
+    atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}),
+                 keep_backup=True)
     atomic_write(matrix_file(dev), matrix_file_bytes(st, dev))
 
 
@@ -99,7 +143,7 @@ def load_ui():
     """ui.json: the UI scale, plus the window size and whether the settings sidebar is open."""
     try:
         ui = json.loads(UI_FILE.read_text())
-    except (OSError, ValueError):
+    except BAD_FILE:
         return {}
     return ui if isinstance(ui, dict) else {}
 
