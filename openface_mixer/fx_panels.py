@@ -7,8 +7,8 @@ mixer like TotalMix's, one per strip and kind.
 """
 import math
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
     QWidget,
@@ -337,6 +337,19 @@ class FxPanel(QWidget):
     def closeEvent(self, e):
         self.closed.emit()
         super().closeEvent(e)
+
+    def event(self, e):
+        # with the keyboard in the panel, Esc closes it instead of going to a window shortcut
+        if e.type() == QEvent.ShortcutOverride and e.key() == Qt.Key_Escape:
+            e.accept()
+            return True
+        return super().event(e)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape or e.matches(QKeySequence.Close):     # Close is Ctrl+W
+            self.close()
+        else:
+            super().keyPressEvent(e)
 
     def emit(self):
         self.changed.emit()
