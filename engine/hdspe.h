@@ -67,4 +67,8 @@ uint32_t hdspe_hdspm_rate(uint32_t measured, uint32_t set);
 
 extern const struct hdspe_model hdspe_raydat, hdspe_aio, hdspe_aio_pro, hdspe_aes;
 
+/* How the backends reach the driver: ioctl() on the card's control and hwdep devices. Tests put
+ * their own function here and record the mixer writes. */
+extern int (*hdspe_ioctl)(int fd, unsigned long req, void *arg);
+
 #endif

@@ -100,4 +100,15 @@ void ff802usb_rx_feed(struct ff802usb_rx *rx, const uint8_t *data, size_t len,
 /* The free space of output substream sub in a /proc/asound/cardN/midiD text, or -1. */
 long ff802usb_proc_avail(const char *text, int sub);
 
+/* How the backends reach the unit's control port. Tests put their own functions here and record
+ * what is sent. */
+struct ff802usb;
+struct ffusb_port {
+	/* Sends one SysEx message to the unit. Returns 0 or -errno. */
+	int (*write)(struct ff802usb *f, const uint8_t *msg, size_t len);
+	/* How many bytes the port's MIDI output buffer can take now. */
+	long (*room)(struct ff802usb *f);
+};
+extern struct ffusb_port ffusb_port;
+
 #endif

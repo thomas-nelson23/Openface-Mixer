@@ -107,6 +107,13 @@ static int shm_source(const struct hdspe *r, int j)
 
 /* ---------- ALSA control and hwdep ---------- */
 
+static int sys_ioctl(int fd, unsigned long req, void *arg)
+{
+	return ioctl(fd, req, arg);
+}
+
+int (*hdspe_ioctl)(int fd, unsigned long req, void *arg) = sys_ioctl;
+
 static int mixer_io(struct hdspe *r, unsigned long req, int src, int dst, uint16_t *gain)
 {
 	struct snd_ctl_elem_value v;
@@ -116,7 +123,7 @@ static int mixer_io(struct hdspe *r, unsigned long req, int src, int dst, uint16
 	v.value.integer.value[1] = dst;
 	if (req == SNDRV_CTL_IOCTL_ELEM_WRITE)
 		v.value.integer.value[2] = *gain;
-	if (ioctl(r->ctl, req, &v) < 0)
+	if (hdspe_ioctl(r->ctl, req, &v) < 0)
 		return -errno;
 	if (req == SNDRV_CTL_IOCTL_ELEM_READ)
 		*gain = (uint16_t)v.value.integer.value[2];
@@ -151,7 +158,7 @@ static int find_card(const struct hdspe_model *m, const char *want, bool anyway,
 		}
 		struct snd_ctl_card_info info;
 		memset(&info, 0, sizeof(info));
-		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
+		if (hdspe_ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
 		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name) &&
 		    (!want[0] || strcmp((const char *)info.name, want) == 0)) {
 			if (anyway ||
@@ -225,7 +232,7 @@ static int open_dev(void *h)
 	memset(&info, 0, sizeof(info));
 	info.id.iface = SNDRV_CTL_ELEM_IFACE_HWDEP;
 	snprintf((char *)info.id.name, sizeof(info.id.name), "Mixer");
-	if (ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) < 0 || info.count != 3) {
+	if (hdspe_ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) < 0 || info.count != 3) {
 		fprintf(stderr, "openface-mixer: card %d has no hdspm Mixer control\n", card);
 		close_dev(r);
 		return DFU_STATE_ERROR;
@@ -238,7 +245,8 @@ static int open_dev(void *h)
 	memset(&info, 0, sizeof(info));
 	info.id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	snprintf((char *)info.id.name, sizeof(info.id.name), "System Sample Rate");
-	r->rate_numid = ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0 ? info.id.numid : 0;
+	bool has_rate = hdspe_ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0;
+	r->rate_numid = has_rate ? info.id.numid : 0;
 
 	char path[32];
 	snprintf(path, sizeof(path), "/dev/snd/hwC%dD0", card);
@@ -279,14 +287,14 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 	struct hdspe *r = h;
 	struct hdspm_config cfg;
 	memset(&cfg, 0, sizeof(cfg));
-	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_CONFIG, &cfg) < 0)
+	if (hdspe_ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_CONFIG, &cfg) < 0)
 		return -errno;
 	s->rate = cfg.system_sample_rate;
 	if (r->rate_numid) {
 		struct snd_ctl_elem_value v;
 		memset(&v, 0, sizeof(v));
 		v.id.numid = r->rate_numid;
-		if (ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) == 0 &&
+		if (hdspe_ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) == 0 &&
 		    v.value.integer.value[0] > 0)
 			s->rate = hdspe_hdspm_rate((uint32_t)v.value.integer.value[0],
 						   cfg.system_sample_rate);
@@ -345,7 +353,7 @@ static int meters(void *h, struct ofm_shm *s)
 {
 	struct hdspe *r = h;
 	struct hdspm_peak_rms m;
-	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_PEAK_RMS, &m) < 0)
+	if (hdspe_ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_PEAK_RMS, &m) < 0)
 		return -errno;
 	for (int c = 0; c < r->model->n_ch; c++) {
 		raise_peak(&s->peak_src[c], hdspe_peak(m.input_peaks[c]));
@@ -367,6 +375,7 @@ static void *create_aes(void) { return create(&hdspe_aes); }
 		.out_node_card = card_name,		\
 		.out_node = out_node,			\
 		.meter_us = 20000,			\
+		.meter_idle_us = 1000000,		\
 		.create = create_fn,			\
 		.attach = attach,			\
 		.destroy = destroy,			\

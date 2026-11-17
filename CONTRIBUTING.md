@@ -46,7 +46,8 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
 packaging/              .desktop file, systemd user units, udev rules; aur/ has the Arch package recipe
 scripts/                install.sh / uninstall.sh (user install to ~/.local, or staged for a package with DESTDIR)
 docs/                   ARCHITECTURE.md (how it fits together), HARDWARE.md (device notes)
-tests/                  unittest suite for the Qt-free modules, the install scripts, and an offscreen GUI smoke test
+tests/                  unittest suite for the Qt-free modules, the install scripts, and an offscreen GUI smoke test;
+                        test_*.c check what the engine and its backends send, without a device
 ```
 
 ## Getting started
@@ -112,3 +113,11 @@ and smoke tests. `tests/test_gui_smoke.py` does that for every device with a stu
 temporary HOME: it opens the window, both views, the settings and every effects panel, and
 fails on any exception or Qt warning. It runs with `make test` where PySide6 is installed, and
 in CI. When you add a window, a panel or a device, make the smoke test open it.
+
+What the engine sends to an interface is tested without one, by recording the writes where
+they leave the backend: `tests/test_digiface_usb.c` links the Digiface backend against its own
+stand-in for libusb, `tests/test_fireface_usb.c` replaces `ffusb_port` (the MIDI port's write
+and its free room), `tests/test_hdspe.c` replaces `hdspe_ioctl`, and `tests/test_fireface_fw.c`
+does the same for FireWire. `tests/test_engine_loop.c` runs the engine's own tick and meter
+thread with a stand-in backend. A change to what a backend sends should show up as a change
+to one of these tests.

@@ -35,7 +35,12 @@ the engine is the same for all of them.
 - Every 500 ms it reads the device status: the sample rate goes to the GUI (which adapts the
   channel count to 1x/2x/4x speed), and if the driver has reset the mixer (replug, resume) the
   whole mix is restored.
-- A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
+- A meter thread reads the device's levels and raises the shared-memory peaks: every 10 ms
+  on the Digiface (`meter_us`; 20 or 30 ms on the others) while a GUI reads them, which the engine
+  sees by the `gui_heartbeat` word the GUI counts up with every meter read. Half a second after
+  the last read it drops to `meter_idle_us`, once a second, only so that `hw_levels` stays
+  true (the USB Firefaces ten times a second: their meter request also keeps the device's
+  MIDI port awake). The first read of a GUI that comes back wakes the thread at the next tick.
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
   it to the Digiface's `playback_AUX0/1` (matched by node name prefix
   `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name,
@@ -51,6 +56,14 @@ the engine is the same for all of them.
   recognise (another format, cut short, or with anything left over) is ignored as a whole
   (`matrix_file.c`): the engine logs that and starts with the default routing, playback n to
   output n, as on a fresh install. When it exits, the interface keeps mixing with the last mix.
+- One engine runs per device and user: it holds a lock (`flock`) on the device's shared-memory
+  file for as long as it lives, so the kernel drops the lock however the engine ends. A second
+  engine waits a second for the first to go, then says so in one line and exits with status 3,
+  which the units list under `RestartPreventExitStatus`.
+- When PipeWire goes away the engine says so and exits with status 1 instead of running on
+  without its sink. `Restart=on-failure` starts it again every two seconds; each try ends at
+  the connect, before the device is opened, and the interface keeps mixing meanwhile. Once
+  PipeWire is back the new engine sends the whole mix again, as at every start.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
   mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
   heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
@@ -69,6 +82,7 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 | Field | Writer | Meaning |
 | --- | --- | --- |
 | header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, playback sink linked |
+| `gui_heartbeat` (header) | GUI | counted up with every meter read; while it moves, the engine reads the device's meters at full rate |
 | `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use, meters live |
 | `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
 | `out_gain[36]` | GUI | output master per channel, 0 when muted |
@@ -169,5 +183,14 @@ app.MainWindow
 3. `push_matrix()` recomputes the matrix, writes it to shared memory, and schedules a debounced
    save of `state.json` and `matrix.bin`.
 4. Timers poll the meters (30 Hz), engine status (2 Hz), ALSA controls (1 Hz) and the
-   PipeWire profile (every 3 s).
-5. Selecting another output pair re-pushes the matrix while anything is soloed.
+   PipeWire profile (every 3 s) while the window is shown (`MainWindow.pace_timers`). Hidden
+   in the background, only the engine status is polled, every 2 s: the ARC and the network
+   remote follow the interface through it. The meters are read 10 times a second if an OSC
+   controller or the Send to host gets levels, and not at all otherwise. Showing the window
+   polls everything once at that moment. The OSC and ARC links run on their own timers,
+   shown or not.
+5. Nothing sleeps on the interface thread: the engine is started and restarted through
+   timers (`start_engine`, `restart_engine`), `poll_engine` sends the mix to an engine that
+   has just come up, and the name of the Send to host is looked up on a thread
+   (`RemoteLink.set_target`).
+6. Selecting another output pair re-pushes the matrix while anything is soloed.
