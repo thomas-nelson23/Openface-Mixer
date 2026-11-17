@@ -4,8 +4,10 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import QProcess, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut,
+)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -36,8 +38,8 @@ from .presets import PresetBank, export_mix, import_mix
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import SettingsPanel, Sidebar, ask
 from .theme import (
-    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
-    icon_pixmap, px,
+    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, WARN, apply_theme,
+    compact_boxes, icon_pixmap, px,
 )
 from .widgets import Row, Strip
 
@@ -137,6 +139,7 @@ class MainWindow(QMainWindow):
         self.settings.reset_btn.clicked.connect(self.reset_mix)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
+        self.settings.update_waiting.connect(self.show_update_waiting)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
         self.settings.add_control_room(self.control)
@@ -280,18 +283,31 @@ class MainWindow(QMainWindow):
         self.settings_btn.setObjectName("gear")
         self.settings_btn.setCheckable(True)
         self.settings_btn.setChecked(True)
-        self.settings_btn.setToolTip("Show or hide settings (Ctrl+,)")
         self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setIconSize(QSize(px(14), px(14)))
+        self.show_update_waiting(False)
+        top.addWidget(self.settings_btn)
+        return top
+
+    def show_update_waiting(self, waiting):
+        """The gear button, with a dot while the Updates section has an update to install."""
         gear = QIcon()
         size = px(14)
         for color, state in (("#d9eef2", QIcon.Off), ("#2ad4ff", QIcon.On)):
             pm = icon_pixmap("settings", color, size)
+            if pm and waiting:
+                pm = QPixmap(pm)
+                p = QPainter(pm)
+                p.setRenderHint(QPainter.Antialiasing)
+                p.setPen(QPen(PANEL, px(1)))        # a dark rim, so it stands off the gear
+                p.setBrush(WARN)
+                p.drawEllipse(QRectF(size - px(6) - 0.5, 0.5, px(6), px(6)))
+                p.end()
             if pm:
                 gear.addPixmap(pm, QIcon.Normal, state)
         self.settings_btn.setIcon(gear)
-        self.settings_btn.setIconSize(QSize(size, size))
-        top.addWidget(self.settings_btn)
-        return top
+        self.settings_btn.setToolTip("Show or hide settings (Ctrl+,)"
+                                     + ("\nAn update is waiting under Updates" if waiting else ""))
 
     def _build_shortcuts(self):
         """The standard settings key and a few for what people do most."""

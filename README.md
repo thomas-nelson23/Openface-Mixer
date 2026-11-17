@@ -127,11 +127,27 @@ On Arch, [packaging/aur](packaging/aur) has a recipe for a system package
 (`openface-mixer-git`). A packaged copy is updated by the package manager, not by the
 **Updates** section.
 
-To update later, use **Updates** in the settings panel: it checks GitHub for new commits on
-`main` and, on **Update and restart**, backs up `~/.config/openface-mixer` (the newest three
-backups are kept), pulls the checkout you installed from, reinstalls and restarts. Keep that
-checkout where it is; if it has local changes or isn't on `main`, update by hand with
-`git pull && make install`.
+### Updates
+
+**Updates** in the settings panel shows which version is installed. A few seconds after the
+app starts it looks on GitHub for a newer one, without a word unless there is one: then the
+gear button gets a dot and the section lists what is new. Untick *Check when the app starts*
+to look only when you press **Check for updates**.
+
+*Update to* chooses what you get:
+
+- **Releases** (the default): versions that have been tried, tagged `vX.Y.Z` on `main`. A
+  copy that is already past the newest release stays as it is until the next one. Until the
+  first release is tagged, this follows `main`.
+- **Latest changes**: every change as soon as it is merged into `main`. For testers.
+
+**Update and restart** backs up `~/.config/openface-mixer` (the newest three backups are
+kept), fast-forwards the checkout you installed from, reinstalls and restarts. Keep that
+checkout where it is and on `main`; if it has local changes or commits of its own, update by
+hand with `git pull && make install`.
+
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md), with a list of fixes that
+still need a tester with the hardware.
 
 ## First run
 
@@ -347,7 +363,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale, shared by all devices |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size and the Updates choices, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
