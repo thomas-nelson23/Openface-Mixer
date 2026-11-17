@@ -205,6 +205,21 @@ class UpdatesWindowTest(WindowCase):
         self.choose_channel(0)
         self.assertEqual(self.saved()["update_channel"], "releases")
 
+    def test_the_wheel_scrolls_past_the_channel_and_leaves_it(self):
+        from PySide6.QtWidgets import QScrollArea
+        area = self.w.sidebar.findChild(QScrollArea)
+        area.ensureWidgetVisible(self.panel.channel)
+        self.settle()
+        at = area.verticalScrollBar().value()
+        self.assertGreater(at, 0)
+        self.panel.channel.setCurrentIndex(1)
+        self.wheel(self.panel.channel, 0, 120)      # up: a plain box would go to Releases
+        self.settle()
+        self.assertEqual(self.panel.channel.currentIndex(), 1)
+        self.assertLess(area.verticalScrollBar().value(), at)
+        self.check.assert_not_called()
+        self.assertEqual(self.saved()["update_channel"], "releases")
+
     def test_a_new_window_checks_by_itself_after_a_moment(self):
         self.check.return_value = (None, ["Tray icon"])
         with mock.patch.object(self.SettingsPanel, "STARTUP_CHECK_MS", 1):

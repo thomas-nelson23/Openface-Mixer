@@ -206,6 +206,14 @@ class Sidebar(QFrame):
         self._anim.start()
 
 
+class ChannelBox(QComboBox):
+    """What updates follow. The wheel scrolls the settings past it and never changes it, so
+    nobody lands on the testers' channel by scrolling."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface) changed in st["hw"]
@@ -382,7 +390,7 @@ class SettingsPanel(QWidget):
         at_start, latest = load_update_prefs()
         channel_key = key_label("Update to")
         ul.addWidget(channel_key, 2, 0)
-        self.channel = QComboBox()
+        self.channel = ChannelBox()
         self.channel.addItem("Releases", "releases")
         self.channel.addItem("Latest changes", "latest")
         self.channel.setCurrentIndex(int(latest))
