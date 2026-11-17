@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
         self.toast.setObjectName("toast")
         self.toast.hide()
+        self.toast.mousePressEvent = lambda _e: self.toast.hide()
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
         self._build_shortcuts()
 
@@ -306,9 +307,10 @@ class MainWindow(QMainWindow):
             if b.focusPolicy() != Qt.NoFocus:
                 b.setFocusPolicy(Qt.TabFocus)
 
-    def notify(self, text):
+    def notify(self, text, stay=False):
         """Brief feedback over the bottom of the mixer, gone after a few seconds. Only for
-        things that are also visible elsewhere (nothing has to be read in time)."""
+        things that are also visible elsewhere (nothing has to be read in time); anything else
+        is shown with stay, until it is clicked or the next message comes."""
         self.toast.setText(text)
         self.toast.adjustSize()
         area = self.centralWidget().width() - (self.sidebar.width() if self.sidebar.is_open()
@@ -317,12 +319,15 @@ class MainWindow(QMainWindow):
                         self.centralWidget().height() - self.toast.height() - px(24))
         self.toast.raise_()
         self.toast.show()
-        self._toast_timer.start()
+        if stay:
+            self._toast_timer.stop()
+        else:
+            self._toast_timer.start()
 
     def showEvent(self, e):
         super().showEvent(e)
         if self._load_notice:
-            QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text))
+            QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
             self._load_notice = None
 
     @staticmethod

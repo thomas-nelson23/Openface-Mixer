@@ -125,7 +125,9 @@ class MixWindowTest(unittest.TestCase):
         self.qt.processEvents()
         self.assertTrue(w.toast.isVisible())
         self.assertIn("last good copy", w.toast.text())
-        w.toast.hide()
+        self.assertFalse(w._toast_timer.isActive())     # it stays until clicked
+        w.toast.mousePressEvent(None)
+        self.assertFalse(w.toast.isVisible())
         w.hide()
         w.show()
         self.qt.processEvents()
