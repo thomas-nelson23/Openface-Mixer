@@ -63,6 +63,30 @@ class PresetBankTest(unittest.TestCase):
                 bank = PresetBank(self.path)
                 self.assertEqual(bank.slots, [None, good] + [None] * (m.N_SLOTS - 2))
 
+    def test_a_file_that_was_not_used_in_full_is_kept_as_the_backup(self):
+        mix = m.extract_mix(m.default_state())
+        bak = self.path.with_name(self.path.name + ".bak")
+        damaged = json.dumps({"slots": [{"name": "Lost", "mix": dict(mix, out=[5])},
+                                        {"name": "Good", "mix": mix}]})
+        for content in (damaged, "{not json", "[1, 2]"):
+            with self.subTest(content=content[:20]):
+                bak.unlink(missing_ok=True)
+                self.path.write_text(content)
+                bank = PresetBank(self.path)
+                self.assertFalse(bak.exists())              # nothing is written by loading
+                bank.store(2, "New", mix)
+                self.assertEqual(bak.read_text(), content)
+                bank.store(3, "Newer", mix)                 # later saves leave the backup alone
+                self.assertEqual(bak.read_text(), content)
+
+    def test_a_good_file_leaves_no_backup(self):
+        mix = m.extract_mix(m.default_state())
+        PresetBank(self.path).store(0, "A", mix)
+        bank = PresetBank(self.path)
+        bank.store(1, "B", mix)
+        bank.clear(0)
+        self.assertEqual([f.name for f in self.path.parent.iterdir()], [self.path.name])
+
     def test_slot_without_a_usable_name_gets_one(self):
         mix = m.extract_mix(m.default_state())
         self.path.write_text(json.dumps({"slots": [None, {"mix": mix}, {"name": 5, "mix": mix},

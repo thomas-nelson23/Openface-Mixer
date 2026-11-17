@@ -18,26 +18,34 @@ class PresetBank:
 
     def load(self):
         """Read the slots. A file that can't be read or isn't a preset file gives eight empty
-        slots; a single slot whose mix is damaged is left empty."""
+        slots; a single slot whose mix is damaged is left empty. The next save() then keeps
+        that file as presets.json.bak, so what it held is not lost for good."""
         self.slots = [None] * N_SLOTS
+        self.damaged = False
         try:
             data = json.loads(self.path.read_text())
-        except BAD_FILE:
+        except FileNotFoundError:
             return
+        except BAD_FILE:
+            data = None
         slots = data.get("slots") if isinstance(data, dict) else None
-        for i, s in enumerate(slots[:N_SLOTS] if isinstance(slots, list) else ()):
-            if not isinstance(s, dict):
+        self.damaged = not isinstance(slots, list)
+        for i, s in enumerate(() if self.damaged else slots[:N_SLOTS]):
+            if s is None:
                 continue
             try:
-                mix = checked_mix(s.get("mix"))
+                mix = checked_mix(s.get("mix") if isinstance(s, dict) else None)
             except ValueError:
+                self.damaged = True
                 continue
             name = s.get("name")
             self.slots[i] = {"name": name if name and isinstance(name, str) else f"Mix {i + 1}",
                              "mix": mix}
 
     def save(self):
-        atomic_write(self.path, json.dumps({"version": 1, "slots": self.slots}, indent=1))
+        atomic_write(self.path, json.dumps({"version": 1, "slots": self.slots}, indent=1),
+                     keep_backup=self.damaged)
+        self.damaged = False
 
     def store(self, i, name, mix):
         self.slots[i] = {"name": name, "mix": mix}

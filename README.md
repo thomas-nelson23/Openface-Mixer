@@ -314,6 +314,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/state.json` | Current mix and UI state (Digiface) |
 | `~/.config/openface-mixer/state.json.bak` | The save before the current one, loaded if `state.json` can't be read (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
+| `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
 | `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import or reset, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |

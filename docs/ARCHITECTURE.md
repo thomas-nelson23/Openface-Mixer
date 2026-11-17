@@ -127,7 +127,8 @@ app.MainWindow
   to `state.json.bak` (the save before it, kept by `atomic_write`), and only then repairs what
   it can; the window says once which of the two happened. Everything outside the mix (names,
   control room, remote, device and effect settings) is put back to its default where its type
-  or range is wrong, so no file can stop the window from opening.
+  or range is wrong, so no file can stop the window from opening. A preset slot that is
+  damaged shows as empty; the next save keeps that `presets.json` as `presets.json.bak`.
 - **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
   which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
   for *Restore previous mix*, then clears the sends on channels the device doesn't have at any
