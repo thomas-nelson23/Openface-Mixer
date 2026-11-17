@@ -15,6 +15,8 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The settings show the installed version, and the app looks for an update a few seconds after it starts. A dot on the gear button says one is waiting. Untick *Check when the app starts* to switch this off.
 - Updates follow releases by default. Choose *Update to: Latest changes* to get every change as soon as it is made (for testers).
 - Arch: a package recipe (`openface-mixer-git`) in `packaging/aur`.
+- Click a row's title (Hardware inputs, Playback, Hardware outputs) to fold that row to names and meters, so the other rows get longer faders. Click again to unfold. A folded row still shows what is soloed, muted or clipped, and which rows are folded is remembered per device.
+- A *Keyboard shortcuts* list at the bottom of the settings, and the same list in the README.
 - Control room: set the Dim amount and the Talkback dim amount, send talkback to further outputs with *Talkback to*, and set Main Out to a stored listening level with *Recall*.
 - Control room: up to four Phones outputs. With two or more, the ARC USB's two Phones keys select the first and the second.
 
@@ -22,6 +24,8 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 
 - Matrix view: a click on a cell that has a level selects it instead of clearing it. Double-click or Delete clears it. The wheel scrolls the grid, and Ctrl + wheel changes a level.
 - Clearing a preset slot asks first.
+- Status lights are a filled dot in one of three colours: cyan for on, red for a fault, grey for off or not known yet. The empty rings and amber lights are gone, and the top bar says "Engine stopped".
+- 802, UCX II: EQ, Dynamics and Reverb / Echo open inside the mixer row, next to their strip, instead of in floating windows. A second click on EQ, D or FX closes the panel. The UCX II Room EQ is still a window of its own.
 - Pan: a mono channel panned to the centre is 3 dB down on each side, as in TotalMix. Saved mixes, presets and mix files are converted once and sound the same; a centred mono fader reads about 3 dB higher than before. Going back to an older version afterwards needs the config backup the update made.
 - Linking two channels to a stereo pair keeps what each had on its own. Unlinking brings back both channels' levels, pans and mutes, and the right channel's fader group.
 - Hiding a channel or a channel group switches its solo off, so nothing out of sight can silence a mix.
@@ -67,6 +71,7 @@ people who have one can try them. Please try the points for your interface and
 
 **Fireface 802**
 
+- EQ and Dynamics open inside the row: open them on an input and on the last output, open two strips at once, press FX, rename a channel with a panel open, and try a small window.
 - Talkback with Phones set to PH 11/12 lands there only, and on both PH 9/10 and PH 11/12 once both are ticked as Phones.
 - Mute or solo a channel that has an FX send: it leaves the reverb and echo and returns at its old level.
 - Link and unlink a pair, and recall a preset that links one: both sides take the left channel's effects, and the right channel's own return on unlink.
@@ -79,6 +84,7 @@ people who have one can try them. Please try the points for your interface and
 
 **Fireface UCX II**
 
+- The effects panels inside the row, as for the 802. Room EQ is still its own window: on Wayland, check that it opens somewhere usable.
 - Mute, solo, stereo link and the effect knobs, as for the 802.
 - AN 1 passes audio after another controller muted it.
 - The status reaches "Active", the unit never reconnects by itself, and unplugging and replugging reconnects.
