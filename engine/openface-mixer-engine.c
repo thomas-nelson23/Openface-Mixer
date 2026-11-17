@@ -4,7 +4,8 @@
  * The mix (a gain matrix plus output faders, and device settings) lives in shared memory (see
  * shm_layout.h), written by the GUI. A 20 ms main-loop timer loads it into the interface's own
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
- * added latency, as with TotalMix. The device's level meters come back the same way. The
+ * added latency, as with TotalMix. The device's level meters come back the same way, read at
+ * full rate only while a GUI looks at them (it counts up gui_heartbeat as it reads). The
  * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c), the
  * Fireface 802, 800 or 400 over FireWire (fireface_fw.c), the Fireface 802 or UCX II over USB
  * in Class Compliant mode (fireface_usb.c), or an HDSPe RayDAT, AIO, AIO Pro or AES PCIe card
@@ -12,7 +13,9 @@
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
  * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
- * (systemd user service), and the interface keeps mixing with the last mix when it exits.
+ * (systemd user service), one engine per device (a lock on the shared memory file), and the
+ * interface keeps mixing with the last mix when it exits. It exits with 1 when PipeWire goes
+ * away, so that systemd starts it again, and with 3 when another engine has the device.
  *
  * Options:
  *   --device KEY    digiface (default), ff802, ff802usb, ucx2, ff800, ff400, raydat, aio,
