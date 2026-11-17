@@ -239,6 +239,19 @@ class StatusTest(unittest.TestCase):
         # TCO (no module: N/A) is left out; AES has no lock, so no rate
         self.assertEqual(st["inputs"], [("AES", "No Lock", None), ("ADAT 1", "Sync", "96 kHz")])
 
+    def test_rate_under_hdspm(self):
+        # the measured clock is at single speed; the rate that was set holds the speed
+        c = hardware.parse_amixer_contents(AMIXER)
+        c["Internal Clock"] = {"value": 5, "values": [5], "rw": True, "numid": 1,
+                               "items": [f"{r / 1000:g} kHz" for r in rd.HDSPM_RATES]}
+        for measured, item, rate in ((47998, 2, 48000), (48001, 5, 96000), (44099, 5, 88200),
+                                     (44100, 8, 176400), (44101, 2, 44100), (96003, 5, 96000),
+                                     (46000, 2, 46000), (0, 5, 0)):
+            c["System Sample Rate"]["value"] = measured
+            c["Internal Clock"]["value"] = item
+            self.assertEqual(rd.decode_status(c)["rate"], rate)
+        self.assertEqual(rd.hdspm_rate(47998, None), 48000)
+
     def test_decode_hdspe(self):
         c = hardware.parse_amixer_contents(AMIXER_HDSPE)
         self.assertEqual(c["AutoSync Status"]["values"], [0, 3, 1, 2, 0, 0, 0, 0])

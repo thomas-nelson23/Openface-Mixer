@@ -24,6 +24,7 @@ VENDOR_RME = 0x1d18                   # PCI vendor of the 2022-and-later cards (
 PCI_VENDORS = (0x10ee, VENDOR_RME)    # Xilinx, RME
 PCI_DEVICE = 0x3fc6                   # every card of the family; the PCI revision tells them apart
 GAIN_MAX = 65535 / 32768              # the mixer's highest gain, +6 dB (engine/hdspe.h)
+HDSPM_RATES = (32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400, 192000)   # Internal Clock
 
 
 class Model:
@@ -216,6 +217,15 @@ def limited(gains, out_gains, n_src):
             for k in range(n_src) if gains[o * n_src + k] * master > GAIN_MAX}
 
 
+def hdspm_rate(measured, set_item):
+    """The rate a card runs at under snd-hdspm, as the engine's hdspe_hdspm_rate: "System Sample
+    Rate" is its clock measured at single speed (47998, also at 96 and 192 kHz), and the
+    "Internal Clock" item is the rate that was set, which holds the speed."""
+    rate = next((r for r in HDSPM_RATES if abs(measured - r) < r / 50), measured)
+    speed = 4 if (set_item or 0) >= 6 else 2 if (set_item or 0) >= 3 else 1
+    return rate * speed if rate < 56000 else rate
+
+
 def profile(ctrls):
     """Which driver's controls these are: HDSPE, HDSPM, or None if neither."""
     if not ctrls:
@@ -300,7 +310,8 @@ def decode_status(ctrls, model=MODELS["raydat"]):
             f = item(ctrls, freq)
             inputs.append((label, state,
                            f if state in ("Lock", "Sync") and f != "No Lock" else None))
-        rate = ctrls.get("System Sample Rate", {}).get("value") or 0
+        rate = hdspm_rate(ctrls.get("System Sample Rate", {}).get("value") or 0,
+                          (control(ctrls, "internal")[1] or {}).get("value"))
         current = None
     if mode == "AutoSync":
         source = "AutoSync, prefers " + (_label(item(ctrls, control(ctrls, "pref")[0])) or "?")

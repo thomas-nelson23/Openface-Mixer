@@ -540,7 +540,8 @@ Sample Rate` control, the card's measured clock (47998), and takes the standard 
 2 % of it. The clock is measured at single speed: the control reads 48000 at 96 and 192 kHz
 too, and the driver's own `hdspm_rate_multiplier()` (as snd-hdspe's `hdspe_dds_sample_rate()`)
 multiplies it by the speed that was set, because the card can't tell double and quad speed
-from its clock. The engine does the same with the speed of the rate from the ioctl. So a card
+from its clock. The engine does the same with the speed of the rate from the ioctl, and the
+settings panel with the `Internal Clock` control, which holds that rate. So a card
 slaved to a 96 kHz source before any stream has run shows 48 kHz: it is in single-speed mode
 until a rate of 64 kHz or more is set, and the strips follow that.
 
