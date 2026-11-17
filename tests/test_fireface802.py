@@ -96,7 +96,7 @@ class ConfigTest(unittest.TestCase):
         dev = devices.DEVICES["ff802"]
         st = {"hw": ff.default_settings()}
         self.assertEqual(dev.device_words(st)[0], 0)
-        ff.settings_from_status(st["hw"], (0x2 << 28) | 0x200)     # running from word clock
+        ff.settings_from_status(st["hw"], (0x2 << 28) | 0x201)     # running from word clock
         self.assertEqual(st["hw"]["clock"], "word")
         self.assertEqual(dev.device_words(st)[0], 0)
         st["hw"].update(edited=True, aes_pro=True)                 # what the settings panel does
@@ -107,10 +107,15 @@ class ConfigTest(unittest.TestCase):
 
     def test_clock_from_status(self):
         s = ff.default_settings()
-        for bits, key in ((0xE00, "internal"), (0x200, "word"), (0x400, "aes"),
-                          (0x600, "adat_a"), (0x800, "adat_b")):
+        for bits, key in ((0xE00, "internal"), (0x201, "word"), (0x402, "aes"),
+                          (0x604, "adat_a"), (0x808, "adat_b"), (0x60C, "adat_a")):
             ff.settings_from_status(s, bits)
             self.assertEqual(s["clock"], key)
+        # the source codes of ADAT A and B are disputed: an input without lock can't be the
+        # source, so it is not taken for one (and never written)
+        for bits in (0x608, 0x804, 0x200, 0x401):
+            ff.settings_from_status(s, bits)
+            self.assertIsNone(s["clock"])
         ff.settings_from_status(s, 0xA00)                # no source we know: never written
         s["edited"] = True
         self.assertIsNone(s["clock"])

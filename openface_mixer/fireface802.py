@@ -247,9 +247,13 @@ def usb_commands(s, play_stereo=None):
 
 def settings_from_status(s, status):
     """Take the clock source the unit runs from (sync status register) into s and mark it
-    known. The register does not report the options."""
+    known. The register does not report the options. An input counts as the source only while
+    it has lock: the unit can't run from one that has none, and the kernel driver and
+    snd-firewire-ctl-services give ADAT A and B each other's source codes (not lock bits)."""
+    source = STATUS_SOURCES.get(status & 0xE00)
+    lock = {label: bit for label, bit, _sync, _shift in STATUS_INPUTS}.get(source)
     keys = {label: key for key, label, _ in CLOCK_SOURCES}
-    s["clock"] = keys.get(STATUS_SOURCES.get(status & 0xE00))
+    s["clock"] = keys.get(source) if lock is None or status & lock else None
     s["known"] = True
 
 
