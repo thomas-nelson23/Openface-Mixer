@@ -1219,6 +1219,7 @@ class MainWindow(QMainWindow):
     def restart_engine(self):
         self.engine_error = None
         self.engine.stop()
+        self._engine_up = False     # the next one to answer is new, and is sent the mix
         self._engine_due = time.monotonic() + 2.0
         self._start_timer.start()   # once the old engine has had time to go
 

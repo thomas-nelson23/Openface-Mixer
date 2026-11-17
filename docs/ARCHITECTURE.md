@@ -169,11 +169,13 @@ app.MainWindow
    save of `state.json` and `matrix.bin`.
 4. Timers poll the meters (30 Hz), engine status (2 Hz), ALSA controls (1 Hz) and the
    PipeWire profile (every 3 s) while the window is shown (`MainWindow.pace_timers`). Hidden
-   in the background, only the engine status is polled, every 2 s, so a stopped engine is
-   still started again; the meters are read 10 times a second if an OSC controller or the
-   Send to host gets levels, and not at all otherwise. Showing the window polls everything
-   once at that moment. The OSC and ARC links run on their own timers, shown or not.
-5. Nothing waits on the interface thread: the engine is started and restarted through
-   timers (`start_engine`, `restart_engine`, `poll_engine`), and the name of the Send to host
-   is looked up on a thread (`RemoteLink.set_target`).
+   in the background, only the engine status is polled, every 2 s: the ARC and the network
+   remote follow the interface through it. The meters are read 10 times a second if an OSC
+   controller or the Send to host gets levels, and not at all otherwise. Showing the window
+   polls everything once at that moment. The OSC and ARC links run on their own timers,
+   shown or not.
+5. Nothing sleeps on the interface thread: the engine is started and restarted through
+   timers (`start_engine`, `restart_engine`), `poll_engine` sends the mix to an engine that
+   has just come up, and the name of the Send to host is looked up on a thread
+   (`RemoteLink.set_target`).
 6. Selecting another output pair re-pushes the matrix while anything is soloed.

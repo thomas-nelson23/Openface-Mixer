@@ -179,10 +179,18 @@ class EngineStartTest(WindowCase):
     def test_the_restart_button(self):
         w = self.w
         w.engine_error = "an earlier failure"
+        w._engine_up = True                             # it was running
         w.settings.eng_btn.click()
         self.stop.assert_called_once_with()
         self.assertIsNone(w.engine_error)
         self.assertTrue(w._start_timer.isActive())
+        # the new engine is sent the mix, also when no poll saw the old one gone
+        status = {"processing": True, "rate": 48000, "sink_linked": True, "hw": "starting",
+                  "hw_nodes": 0, "hw_levels": False, "dev_status": 0, "dev_status2": 0}
+        with mock.patch.object(w.engine, "status", return_value=status), \
+                mock.patch.object(w, "push_matrix") as push:
+            w.poll_engine()
+            push.assert_called_once_with()
 
     def test_the_mix_is_sent_when_the_engine_comes_up(self):
         w = self.w
