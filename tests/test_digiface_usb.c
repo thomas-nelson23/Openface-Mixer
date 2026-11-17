@@ -451,6 +451,7 @@ static void check_route_limit(const struct ofm_backend *be, void *h)
 			s.gain[o][k] = 0.5f;
 	}
 	forget();
+	expect("the mixer's nodes", N_NODES, 2048);
 	expect("too many routes", be->sync(h, &s, true), -ENOSPC);
 	expect("every node in use", be->routes(h), N_NODES);
 	expect("a route and a gain for each", n_words, N_NODES + 2 * N_NODES);
