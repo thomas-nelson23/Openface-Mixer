@@ -44,7 +44,7 @@
 #define FF802USB_MSG_LEN     12                 /* one register write */
 #define FF802USB_REG_SERIAL  0x3f00             /* host keep-alive, cycling 0-15 */
 #define FF802USB_STATUS_VALID 0x80000000u       /* dev_status: rate (8-15) and clock (0-7) known */
-#define FFUSB_REPLY_TIMEOUT_MS 3000             /* no SysEx from the unit for this long: reopen */
+#define FFUSB_REPLY_TIMEOUT_MS 3000             /* levels stopped for this long: reopen */
 
 /* One interface. */
 struct ffusb_model {
@@ -76,11 +76,12 @@ struct ff802usb_info {
 	unsigned int replies;      /* SysEx messages from the unit, of any kind */
 };
 
-/* The state of an open link: DFU_STATE_NO_REPLY until the unit has sent anything (replies, since
- * the port was opened), then DFU_STATE_ACTIVE. -ENODATA once nothing has come for
- * FFUSB_REPLY_TIMEOUT_MS (silent_ms: since the last message, or since the port was opened): the
- * unit answers every level request, so the link is dead and has to be opened again. */
-int ffusb_link_state(unsigned int replies, long silent_ms);
+/* The state of an open link: DFU_STATE_NO_REPLY until the unit has sent anything since the port
+ * was opened, then DFU_STATE_ACTIVE. -ENODATA once a unit that was sending level packets has
+ * sent nothing for FFUSB_REPLY_TIMEOUT_MS (silent_ms: since its last message): the link is dead
+ * and has to be opened again. A unit that has sent no levels is not judged by silence: opening
+ * the port again resends the whole mix, which would then repeat every few seconds. */
+int ffusb_link_state(const struct ff802usb_info *info, long silent_ms);
 
 /* Handles one complete SysEx message (F0 .. F7): register notifications update info, level
  * packets raise the peaks in s. Returns the sub ID, or -1 if it isn't RME's. */

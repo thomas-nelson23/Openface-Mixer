@@ -92,11 +92,11 @@ uint32_t ffusb_vol_cmd(const struct ffusb_model *m, int out, int16_t vol)
 	return (uint32_t)(m->vol_reg + m->vol_step * out) << 16 | (uint16_t)vol;
 }
 
-int ffusb_link_state(unsigned int replies, long silent_ms)
+int ffusb_link_state(const struct ff802usb_info *info, long silent_ms)
 {
-	if (silent_ms >= FFUSB_REPLY_TIMEOUT_MS)
+	if (info->level_packets && silent_ms >= FFUSB_REPLY_TIMEOUT_MS)
 		return -ENODATA;
-	return replies ? DFU_STATE_ACTIVE : DFU_STATE_NO_REPLY;
+	return info->replies ? DFU_STATE_ACTIVE : DFU_STATE_NO_REPLY;
 }
 
 uint32_t ff802usb_rate(unsigned int value)
@@ -496,7 +496,7 @@ static long ms_since(const struct timespec *t)
 
 static int link_state(struct ff802usb *f)
 {
-	return ffusb_link_state(f->info.replies, ms_since(&f->last_reply));
+	return ffusb_link_state(&f->info, ms_since(&f->last_reply));
 }
 
 static bool answered(void *h)

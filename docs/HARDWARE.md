@@ -217,12 +217,13 @@ sends at most what `/proc/asound/cardN/midi0` says is free on each tick and carr
 over. A full send (every crosspoint and setting) is about 3,700 register writes, 45 KB.
 
 The engine reports the hardware mixer as active only once the unit has sent a SysEx message of
-its own (the register dump it is asked for on connect, or a level packet). Until then, and when
-nothing has come for 3 seconds although the unit answers every level request, the state is
-"connected, no reply from the DSP"; after those 3 seconds the engine closes the port, opens it
-again and resends everything. Silence does not count while a send is still going out. The
-engine also reopens the port when its subscription to it is gone, which is what is left when
-the port was removed and came back between two status polls.
+its own (the register dump it is asked for on connect, or a level packet). Until then the state
+is "connected, no reply from the DSP". Once level packets have come, 3 seconds without any
+message mean the link is dead: the engine closes the port, opens it again and resends
+everything. Silence does not count while a send is still going out, and a unit that has sent no
+levels is not reopened, because that would resend the whole mix every few seconds. The engine
+also reopens the port when its subscription to it is gone, which is what is left when the port
+was removed and came back between two status polls.
 
 ## Not verified on hardware yet
 
@@ -230,7 +231,8 @@ Everything above comes from snd-firewire-ctl-services, the kernel driver and osc
 from captures on an 802 with Openface Mixer. Over USB, worth checking first: that the mixer and
 settings take effect, the level packets' channel order, the clock option registers (`0x3d40`,
 `0x3d46` are oscmix's best guesses), whether the 802 needs the `0x3f00` keep-alive, and that it
-answers the level requests (if it did not, the engine would reopen the port every few seconds). oscmix's
+answers the register dump and the level requests (if not, the status stays at "connected, no
+reply" or the meters stay empty, and the mix is still sent). oscmix's
 notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
 follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
 the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
