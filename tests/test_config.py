@@ -357,6 +357,23 @@ class UiScaleTest(unittest.TestCase):
         config.UI_FILE.write_text(json.dumps({"window": "big"}))
         self.assertEqual(config.load_window(), (None, True))
 
+    def test_update_choices(self):
+        self.assertEqual(config.load_update_prefs(), (True, False))    # check, releases
+        config.save_ui_scale(1.25)
+        config.save_ui(update_check=False, update_channel="latest")
+        self.assertEqual(config.load_update_prefs(), (False, True))
+        self.assertEqual(config.load_ui_scale(), 1.25)
+        config.save_ui(update_check=True, update_channel="releases")
+        self.assertEqual(config.load_update_prefs(), (True, False))
+        # a damaged or hand-edited file: anything unclear is the default
+        for damaged in ("{not json", "[]", "null", '{"update_check": null}',
+                        '{"update_check": 0, "update_channel": 1}',
+                        '{"update_check": "no", "update_channel": "Latest"}',
+                        '{"update_check": [], "update_channel": ["latest"]}'):
+            config.UI_FILE.write_text(damaged)
+            self.assertEqual(config.load_update_prefs(), (True, False), damaged)
+        config.UI_FILE.write_bytes(b"\xff\xfe")
+        self.assertEqual(config.load_update_prefs(), (True, False))
 
 
 if __name__ == "__main__":
