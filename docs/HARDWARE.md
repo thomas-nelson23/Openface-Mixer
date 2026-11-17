@@ -131,6 +131,10 @@ A sync sends for at most 10 ms of each 20 ms engine tick and carries the rest ov
 full send after a connect (about 2,300 writes on the 802) takes a few seconds while the
 meters and the engine's heartbeat keep running.
 
+The playback sink is linked to the unit's own PipeWire node, `alsa_output.firewire-<GUID>…`,
+with the GUID from the node's `guid` attribute in sysfs (`0x000a35…`), so two RME FireWire
+units each get their own sink.
+
 ## Registers
 
 All values are little-endian quadlets.
@@ -236,7 +240,7 @@ settings take effect, the level packets' channel order, the clock option registe
 `0x3d46` are oscmix's best guesses), and whether the 802 needs the `0x3f00` keep-alive. oscmix's
 notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
 follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
-the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
+the PipeWire node name of the 802's playback device (`alsa_output.firewire-<GUID>…`), mixer
 and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
 
 ## Fireface UCX II over USB

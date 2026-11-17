@@ -155,6 +155,8 @@ static int fake_open(struct fwdev *f, unsigned long unit_version)
 {
 	f->fd = dup(2);   /* only ever closed: every request goes through fake_transact */
 	f->generation = bus_generation;
+	snprintf(f->out_node, sizeof(f->out_node), "alsa_output.firewire-0x000a3500%08lx",
+		 unit_version);
 	return DFU_STATE_ACTIVE;
 }
 
@@ -204,6 +206,7 @@ static int count_writes(uint64_t offset)
 static void *open_fake(const struct ofm_backend *be)
 {
 	void *h = be->create();
+	check("no node name before the unit is found", be->out_node(h) != NULL, 0);
 	check("open", be->open(h), DFU_STATE_ACTIVE);
 	n_rec = 0;
 	return h;
@@ -217,6 +220,8 @@ static void check_bus_reset(void)
 
 	bus_generation = 1;
 	void *h = open_fake(be);
+	check("node name carries the GUID",
+	      strcmp(be->out_node(h), "alsa_output.firewire-0x000a350000000005"), 0);
 	check("status", be->status(h, &s, &reset), 0);
 	check("one request", n_rec, 1);
 
@@ -330,6 +335,7 @@ static void check_former_sync(void)
 
 	bus_generation = 1;
 	void *h = open_fake(be);
+	check("400 node name", strcmp(be->out_node(h), "alsa_output.firewire-0x000a350000000002"), 0);
 	memset(&s, 0, sizeof(s));
 	s.gain[0][OFM_N_IN] = 1.0f;
 	s.out_gain[0] = 1.0f;

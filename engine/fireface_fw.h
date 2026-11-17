@@ -89,6 +89,7 @@ struct fwdev {
 	uint32_t generation;    /* bus generation requests are sent in */
 	uint64_t closure;
 	int64_t slice_end;      /* when the running sync has to stop sending (ms), 0 once it has */
+	char out_node[48];      /* its PipeWire playback node's name prefix, "" until found */
 };
 
 /* How the backends reach the bus. Tests put their own functions here and record what is sent. */

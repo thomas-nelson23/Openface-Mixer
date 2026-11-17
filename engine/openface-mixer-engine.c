@@ -369,8 +369,9 @@ static void make_link(struct data *d, struct obj *op, struct obj *ip)
 static void relink(struct data *d)
 {
 	struct obj *sink = node_by_prefix(d, d->sink_out_name, 1);
-	struct obj *dout = d->be->out_node_card ? node_by_card(d, d->be->out_node_card)
-					        : node_by_prefix(d, d->be->out_node_prefix, 0);
+	const char *prefix = d->be->out_node ? d->be->out_node(d->hw) : d->be->out_node_prefix;
+	struct obj *dout = d->be->out_node_card ? node_by_card(d, d->be->out_node_card) :
+			   prefix ? node_by_prefix(d, prefix, 0) : NULL;
 	struct obj *fl = NULL, *fr = NULL, *a0 = NULL, *a1 = NULL;
 
 	if (sink && dout) {
@@ -505,6 +506,8 @@ static void hw_tick_locked(struct data *d)
 		if (d->hw_ticks % HW_RETRY_TICKS != 1)
 			return;
 		s->hw_state = be->open(d->hw);
+		if (be->out_node)
+			relink(d);   /* its PipeWire node is known by name once the unit is found */
 		if (!be->is_open(d->hw))
 			return;
 		d->hw_need_full = true;

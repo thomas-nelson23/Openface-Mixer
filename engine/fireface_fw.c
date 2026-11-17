@@ -47,7 +47,7 @@
 #define UNSENT          0xffffffffu
 
 struct ff802 {
-	struct fwdev fw;
+	struct fwdev fw;   /* first: see out_node() */
 
 	uint32_t sent_gain[FF802_N_OUT][FF802_N_SRC];   /* encoded, or UNSENT */
 	uint32_t sent_vol[FF802_N_OUT];
@@ -372,13 +372,27 @@ static int find_node(unsigned long unit_version, char *node, size_t len)
 	return found;
 }
 
-/* Finds the unit with this version and opens its node. */
+/* Finds the unit with this version, notes its PipeWire node name and opens its node. */
 static int cdev_open(struct fwdev *f, unsigned long unit_version)
 {
-	char node[64], path[80];
+	char node[64], path[600], guid[24] = "";
 
 	if (find_node(unit_version, node, sizeof(node)) < 0)
 		return DFU_STATE_NO_DEVICE;
+	/* udev names the ALSA card "firewire-<guid>" after the node's guid attribute, and PipeWire
+	 * its nodes after that; RME's vendor prefix alone would also match a second unit */
+	snprintf(path, sizeof(path), "%s/%s/guid", FW_DEVICES, node);
+	FILE *fp = fopen(path, "r");
+	if (fp != NULL) {
+		if (fgets(guid, sizeof(guid), fp) == NULL)
+			guid[0] = '\0';
+		fclose(fp);
+	}
+	guid[strcspn(guid, "\n")] = '\0';
+	f->out_node[0] = '\0';
+	if (guid[0])
+		snprintf(f->out_node, sizeof(f->out_node), "alsa_output.firewire-%s", guid);
+
 	snprintf(path, sizeof(path), "/dev/%s", node);
 	int fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0)
@@ -404,6 +418,13 @@ static void fw_close(struct fwdev *f)
 	if (f->fd >= 0)
 		close(f->fd);
 	f->fd = -1;
+}
+
+/* The unit's PipeWire playback node (both backends' handles start with their fwdev). */
+static const char *out_node(void *h)
+{
+	const struct fwdev *f = h;
+	return f->out_node[0] ? f->out_node : NULL;
 }
 
 /* ---------- Fireface 802 backend ---------- */
@@ -539,8 +560,7 @@ static int meters(void *h, struct ofm_shm *s)
 const struct ofm_backend ofm_backend_ff802 = {
 	.key = "ff802",
 	.name = "Fireface 802",
-	/* snd-fireface's PCM device; PipeWire names firewire cards after the node GUID */
-	.out_node_prefix = "alsa_output.firewire-0x000a35",
+	.out_node = out_node,
 	.meter_us = 30000,
 	.create = create,
 	.destroy = destroy,
@@ -572,8 +592,8 @@ const struct ff_former_model ff400_model = {
 };
 
 struct former {
+	struct fwdev fw;   /* first: see out_node() */
 	const struct ff_former_model *m;
-	struct fwdev fw;
 
 	/* what was sent, all ones (no register value) while unsent */
 	uint32_t sent_mix[FORMER_MAX_CH][FORMER_MAX_BLOCK];
@@ -791,7 +811,7 @@ static int former_meters(void *h, struct ofm_shm *s)
 	{							\
 		.key = k,					\
 		.name = n,					\
-		.out_node_prefix = "alsa_output.firewire-0x000a35",	\
+		.out_node = out_node,				\
 		.meter_us = 30000,				\
 		.create = create_fn,				\
 		.destroy = former_destroy,			\

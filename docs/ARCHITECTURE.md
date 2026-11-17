@@ -38,7 +38,8 @@ the engine is the same for all of them.
 - A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
   it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name), re-linking on
+  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name,
+  the FireWire Firefaces by the unit's GUID in the node name), re-linking on
   hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
