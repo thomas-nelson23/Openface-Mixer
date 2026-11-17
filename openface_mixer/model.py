@@ -139,6 +139,12 @@ def is_index(v, n):
     return isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n
 
 
+def same_kind(v, default):
+    """True if v, read from a file, can stand in for default: a switch for a switch, text for
+    text, a number for a number."""
+    return isinstance(v, type(default)) if isinstance(default, (bool, str)) else is_num(v)
+
+
 def valid_key(key):
     """True for the strip key of a channel or output pair the model has ("in:4", "out:16")."""
     kind, _, idx = key.partition(":") if isinstance(key, str) else ("", "", "")

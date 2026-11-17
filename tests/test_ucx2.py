@@ -46,6 +46,18 @@ class LayoutTest(unittest.TestCase):
         self.assertIn(0x307B0000, cmds)
         self.assertIn("Class Compliant", dev.missing_hint())
 
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        s = ucx2.default_settings()
+        s.update(clock={}, spdif_pro=None)
+        s["in"].update(gain=["x"] + [9.5] * 7, level=[1.5, 1] + [0] * 4, hiz=[0, True])
+        s["out"]["level"] = [2, None] + [0] * 6
+        s = ucx2.upgrade_settings(s)
+        self.assertEqual((s["clock"], s["spdif_pro"]), ("internal", False))
+        self.assertEqual(s["in"]["gain"], [0.0] + [9.5] * 7)
+        self.assertEqual((s["in"]["level"][:2], s["in"]["hiz"]), ([0, 1], [False, True]))
+        self.assertEqual(s["out"]["level"][:2], [2, 0])
+        ucx2.usb_commands(s)                # what the damaged values used to break
+
 
 if __name__ == "__main__":
     unittest.main()
