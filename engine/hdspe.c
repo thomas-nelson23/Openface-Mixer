@@ -245,8 +245,8 @@ static int open_dev(void *h)
 	memset(&info, 0, sizeof(info));
 	info.id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	snprintf((char *)info.id.name, sizeof(info.id.name), "System Sample Rate");
-	r->rate_numid = hdspe_ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0 ? info.id.numid
-										    : 0;
+	bool has_rate = hdspe_ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0;
+	r->rate_numid = has_rate ? info.id.numid : 0;
 
 	char path[32];
 	snprintf(path, sizeof(path), "/dev/snd/hwC%dD0", card);
