@@ -1,0 +1,24 @@
+pkgbase = openface-mixer-git
+	pkgdesc = TotalMix-style mixer for RME audio interfaces (Digiface USB, Fireface, HDSPe)
+	pkgver = r61.41a8687
+	pkgrel = 1
+	url = https://github.com/thomas-nelson23/Openface-Mixer
+	arch = x86_64
+	license = MIT
+	makedepends = git
+	depends = python
+	depends = pyside6
+	depends = qt6-svg
+	depends = libpipewire
+	depends = pipewire-audio
+	depends = pipewire-pulse
+	depends = libusb
+	depends = alsa-utils
+	depends = libpulse
+	depends = hicolor-icon-theme
+	provides = openface-mixer
+	conflicts = openface-mixer
+	source = openface-mixer-git::git+https://github.com/thomas-nelson23/Openface-Mixer.git
+	sha256sums = SKIP
+
+pkgname = openface-mixer-git

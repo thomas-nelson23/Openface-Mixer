@@ -42,7 +42,10 @@ the engine is the same for all of them.
   the FireWire Firefaces by the unit's GUID in the node name), re-linking on
   hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
-  `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
+  `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. The GUI starts the
+  service of the device it opens and enables it for every login once the engine reports the
+  interface as active (`Engine.enable`), so no engine or sink runs for hardware that was never
+  connected. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
   to date; files from before the 36-channel layout are moved into place. A file it does not
   recognise (another format, cut short, or with anything left over) is ignored as a whole
@@ -120,8 +123,7 @@ app.MainWindow
 - **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
   unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
-  `upgrade_state` clears it) and is not part of a mix. The top bar's SOLO button clears all
-  solos and brings the same set back on the next click.
+  `upgrade_state` clears it) and is not part of a mix.
 - `compute_matrix()` folds sends, pan, source mutes and solo into the 36×72 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader

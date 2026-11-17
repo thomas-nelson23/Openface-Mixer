@@ -1,0 +1,36 @@
+# Maintainer: thomas-nelson23 <55816943+thomas-nelson23@users.noreply.github.com>
+pkgname=openface-mixer-git
+pkgver=r61.41a8687
+pkgrel=1
+pkgdesc="TotalMix-style mixer for RME audio interfaces (Digiface USB, Fireface, HDSPe)"
+arch=('x86_64')
+url="https://github.com/thomas-nelson23/Openface-Mixer"
+license=('MIT')
+depends=('python' 'pyside6' 'qt6-svg' 'libpipewire' 'pipewire-audio' 'pipewire-pulse'
+         'libusb' 'alsa-utils' 'libpulse' 'hicolor-icon-theme')
+makedepends=('git')
+provides=('openface-mixer')
+conflicts=('openface-mixer')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  # the last release tag once there is one, the commit count until then
+  ( set -o pipefail
+    git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' ||
+      printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  )
+}
+
+build() {
+  cd "$pkgname"
+  make engine
+}
+
+package() {
+  cd "$pkgname"
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+  python -m compileall -q -s "$pkgdir" -p / "$pkgdir/usr/share/openface-mixer"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,10 +1,11 @@
+# Installed by scripts/install.sh, which fills in the full path of the command.
 [Unit]
 Description=Openface Mixer engine (drives the RME Digiface USB hardware mixer)
 After=pipewire.service wireplumber.service
 Requires=pipewire.service
 
 [Service]
-ExecStart=%h/.local/bin/openface-mixer-engine
+ExecStart="@BINDIR@/openface-mixer-engine"
 Restart=on-failure
 RestartSec=2
 

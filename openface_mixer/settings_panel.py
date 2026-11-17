@@ -26,6 +26,10 @@ def udev_rule_hint(dev):
                 "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
                 "local login session).")
     rule = UDEV_RULES[dev.key]
+    if updater.packaged():
+        return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. The "
+                "package installed the udev rule for it. Reconnect the interface, or restart "
+                "the computer, so the rule applies.")
     return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. Install "
             f"the udev rule once:<br><tt>sudo install -m644 packaging/{rule} "
             "/etc/udev/rules.d/</tt><br>"
@@ -786,10 +790,10 @@ class SettingsPanel(QWidget):
         if not self._card_name:
             return
         if ask(self, "Switch profile",
-               "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-               "This lets apps record all 32 hardware inputs. The output device will be renamed "
-               "to '…pro-output-0' (your existing combine-stream config already matches it). "
-               "Audio may briefly drop out.", "Switch profile"):
+               "Switch the Digiface to the Pro Audio profile?\n\n"
+               "Apps can then record all of its hardware inputs. Its output device gets a new "
+               "name ending in pro-output-0, so apps that play to it directly may need it "
+               "chosen again. Audio may drop out for a moment.", "Switch profile"):
             self._report(set_card_profile(self._card_name, "pro-audio"), "pactl")
 
     def update_hw(self, ctrls):

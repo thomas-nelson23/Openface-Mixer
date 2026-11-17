@@ -3,7 +3,10 @@
 scripts/install.sh records that checkout and its commit in <share>/install-source. Checking
 fetches origin/main there; updating backs up the config directory, fast-forwards the checkout
 and runs the installer again, which also restarts the engines so they match the new GUI.
+A copy installed by a distribution package has "package" there and is left to its package
+manager.
 """
+import os
 import shutil
 import subprocess
 import time
@@ -29,7 +32,16 @@ def install_source():
     return (Path(path), commit) if (Path(path) / ".git").exists() else None
 
 
+def packaged():
+    try:
+        return SOURCE_FILE.read_text().strip() == "package"
+    except OSError:
+        return False
+
+
 def manual_hint():
+    if packaged():
+        return "This copy was installed as a package, so it is updated by your package manager."
     return ("This copy wasn't installed from a git checkout, so it can't update itself. To "
             "update: cd into your Openface-Mixer folder, then git pull && make install")
 
@@ -75,10 +87,12 @@ def update(src):
     _git(src, "merge", "--ff-only", f"origin/{BRANCH}")
     # A new session has no terminal, so sudo fails instead of waiting for a password nobody
     # can type; the installer only needs it for missing packages and changed udev rules.
+    # PREFIX: reinstall where this copy is (<prefix>/share/openface-mixer/install-source).
     try:
         r = subprocess.run([str(src / "scripts" / "install.sh")], cwd=src, capture_output=True,
                            text=True, timeout=600, stdin=subprocess.DEVNULL,
-                           start_new_session=True)
+                           start_new_session=True,
+                           env={**os.environ, "PREFIX": str(SOURCE_FILE.parents[2])})
     except (OSError, subprocess.TimeoutExpired) as e:
         raise UpdateError(f"install.sh: {e}") from e
     if r.returncode:

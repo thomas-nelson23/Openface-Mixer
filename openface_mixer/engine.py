@@ -137,8 +137,7 @@ class Engine:
 
     def start(self):
         if self.has_service():
-            # enable too, so the engine restores this device's mix at the next login
-            subprocess.run(["systemctl", "--user", "enable", "--now", self.dev.service],
+            subprocess.run(["systemctl", "--user", "start", self.dev.service],
                            capture_output=True)
             return True, "started via systemd"
         b = self.binary()
@@ -149,6 +148,19 @@ class Engine:
         subprocess.Popen([b, "--device", self.dev.key], stdout=log, stderr=log,
                          stdin=subprocess.DEVNULL, start_new_session=True)
         return True, f"started {b}"
+
+    def enable(self):
+        """Start the engine at every login from now on, so it restores the device's mix. For
+        once the interface has been seen: nobody gets an engine and a playback sink for a
+        device they don't have."""
+        def systemctl(verb):
+            return subprocess.run(["systemctl", "--user", verb, self.dev.service],
+                                  capture_output=True, timeout=5).returncode
+        try:
+            if systemctl("is-enabled"):     # enabling again would make systemd reload its units
+                systemctl("enable")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
     def stop(self):
         if self.has_service():

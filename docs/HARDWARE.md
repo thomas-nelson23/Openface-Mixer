@@ -417,7 +417,9 @@ commands in `dev_cmd[3..6]` with bit 31 set.
 
 Configuration differences from the 800: quadlet 0 holds phones level (`0x60000`: `0x40000` Hi
 Gain, `0x20000` −10 dBV, 0 +4 dBu), 48V on AN 1/2 (`0x01`, `0x80`), instrument and pad on AN 3
-(`0x200`, `0x100`) and AN 4 (`0x04`, `0x02`), and the line in/out levels with the 800's bits;
+(`0x200`, `0x100`) and AN 4 (`0x04`, `0x02`). The line out levels use the 800's bits. The line
+in levels do too, except that two are swapped in quadlet 0: Lo Gain is `0x10` and +4 dBu `0x08`
+(`fireface400.IN_LEVELS`; this is how snd-firewire-ctl-services has them, not a typo);
 quadlet 2 needs `0x04000000` (MIDI to the low address the kernel driver registered) and has no
 ADAT 2 or TCO clock (`0x1000` is word clock, `0x1400` LTC). Status quadlet 0 has one ADAT
 lock/sync pair (`0x1000`/`0x400`). In status quadlet 1 the clock source reads `0x1000` word
@@ -473,8 +475,9 @@ The ALSA control `Mixer` (iface HWDEP) takes three integers: source, destination
 | gain | 0–65535, linear, 32768 = unity (so at most +6 dB) |
 
 The hardware matrix is write only; the driver keeps a copy, which reads of the control return.
-The driver zeroes the whole mixer when it loads, so the card is silent until a mixer program
-sets it up. It answers writes with `EBUSY` while playback and capture are open in two different
+Both drivers zero the whole mixer when they load (snd-hdspm in `snd_hdspm_set_defaults`,
+snd-hdspe in `hdspe_init_mixer`), so the card is silent until a mixer program sets it up. Both
+answer writes with `EBUSY` while playback and capture are open in two different
 processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
 each send by its output's master level. The product stops at the mixer's +6 dB, so with an
 output above 0 dB its loudest sends are held there; the GUI marks those faders' level readouts

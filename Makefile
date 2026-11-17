@@ -17,7 +17,7 @@ ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/
 	     engine/shm_layout.h
 
 $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
-	$(CC) $(CFLAGS) -pthread -o $@ $(ENGINE_SRC) $(PW_FLAGS) -lm
+	$(CC) $(CFLAGS) $(LDFLAGS) -pthread -o $@ $(ENGINE_SRC) $(PW_FLAGS) -lm
 
 run: engine ## Run the GUI from the source tree (starts the local engine build if none is running)
 	python3 -m openface_mixer
@@ -40,10 +40,11 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	$(CC) $(CFLAGS) -o tests/test_matrix_file tests/test_matrix_file.c engine/matrix_file.c -lm
 	./tests/test_matrix_file
 
-lint: ## Byte-compile everything to catch syntax errors
+lint: ## Byte-compile and run pyflakes (syntax errors, unused imports, undefined names)
 	python3 -m compileall -q openface_mixer tests
+	python3 -m pyflakes openface_mixer tests
 
-install: ## Install for the current user (~/.local) and enable the engine service
+install: ## Install for the current user (~/.local, or PREFIX=...). Packages: DESTDIR=... PREFIX=/usr
 	./scripts/install.sh
 
 uninstall: ## Remove the user install (keeps saved mixes)
