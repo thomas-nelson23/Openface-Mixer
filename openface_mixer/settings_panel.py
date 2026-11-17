@@ -3,7 +3,7 @@ mixer status."""
 import html
 import threading
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import hdspe, updater
-from .config import UI_SCALES
+from .config import UI_SCALES, load_update_prefs, save_ui
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 from .theme import SANS, Section, caption_html, font, key_label, px
@@ -215,7 +215,10 @@ class SettingsPanel(QWidget):
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
+    update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
+    UPDATE_PROMPT = "Check GitHub for a newer Openface Mixer."
+    STARTUP_CHECK_MS = 5000          # the quiet check, once the window has settled
 
     def __init__(self, hw, dev, st, ui_scale=1.0, parent=None):
         super().__init__(parent)
@@ -365,35 +368,76 @@ class SettingsPanel(QWidget):
 
     def _build_updates(self, lay):
         box = Section("UPDATES")
-        ul = QVBoxLayout(box)
+        ul = QGridLayout(box)
         self._updates_box = box
-        self.update_label = QLabel("Check GitHub for a newer Openface Mixer.")
+        self._source = updater.install_source()
+        self._pending = None, []     # (release or None, its changes) the last check found
+        self.version_label = QLabel(updater.version_text(self._source))
+        self.version_label.setObjectName("head")
+        self.version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # for a bug report
+        ul.addWidget(self.version_label, 0, 0, 1, 2)
+        self.update_label = QLabel(self.UPDATE_PROMPT)
         self.update_label.setWordWrap(True)
-        ul.addWidget(self.update_label)
+        ul.addWidget(self.update_label, 1, 0, 1, 2)
+        at_start, latest = load_update_prefs()
+        channel_key = key_label("Update to")
+        ul.addWidget(channel_key, 2, 0)
+        self.channel = QComboBox()
+        self.channel.addItem("Releases", "releases")
+        self.channel.addItem("Latest changes", "latest")
+        self.channel.setCurrentIndex(int(latest))
+        self.channel.setToolTip("Releases are versions that have been tried. Latest changes "
+                                "brings every change as soon as it is made, for testers.")
+        self.channel.activated.connect(self._channel_chosen)
+        ul.addWidget(self.channel, 2, 1)
+        self.auto_check = QCheckBox("Check when the app starts")
+        self.auto_check.setChecked(at_start)
+        self.auto_check.toggled.connect(lambda on: save_ui(update_check=on))
+        ul.addWidget(self.auto_check, 3, 0, 1, 2)
         self.update_btn = QPushButton("Check for updates")
         self.update_btn.clicked.connect(self._update_clicked)
-        ul.addWidget(self.update_btn)
+        ul.addWidget(self.update_btn, 4, 0, 1, 2)
+        ul.setColumnStretch(1, 1)
         lay.addWidget(box)
-        self._source = updater.install_source()
-        self._pending = []
         self._update_result.connect(self._update_finished)
         if self._source is None:
             self.update_label.setText(updater.manual_hint())
-            self.update_btn.setVisible(False)
+            for w in (channel_key, self.channel, self.auto_check, self.update_btn):
+                w.setVisible(False)
+        else:
+            QTimer(self, singleShot=True, interval=self.STARTUP_CHECK_MS,
+                   timeout=self._startup_check).start()
+
+    def _startup_check(self):
+        """Look for an update once, saying nothing unless there is one."""
+        if self.auto_check.isChecked() and self.update_btn.isEnabled() and not self._pending[1]:
+            self._run_update_step("quiet")
+
+    def _channel_chosen(self, i):
+        save_ui(update_channel=self.channel.itemData(i))
+        self._show_pending(None, [], quiet=True)
+        self._run_update_step("check")      # what this channel has
 
     def _update_clicked(self):
+        release, changes = self._pending
+        what = f"version {release}" if release else f"{len(changes)} update(s)"
+        if not changes:
+            self._run_update_step("check")
+        elif ask(self, "Update Openface Mixer",
+                 f"Install {what} and restart? Your mixes are backed up first, and the engines "
+                 "restart with the new version.", "Update and restart"):
+            self._run_update_step("update")
+
+    def _run_update_step(self, step):
+        """Check ("quiet": the one at startup, which keeps a failure to itself) or update, on
+        a thread; _update_finished gets the result."""
         src, installed = self._source
-        if self._pending:
-            if not ask(self, "Update Openface Mixer",
-                       f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
-                       "up first, and the engines restart with the new version.",
-                       "Update and restart"):
-                return
-            step, job, text = "update", lambda: updater.update(src), "Updating…"
-        else:
-            step, job, text = "check", lambda: updater.check(src, installed), "Checking…"
+        releases = self.channel.currentData() != "latest"
+        job = ((lambda: updater.update(src, releases)) if step == "update" else
+               (lambda: updater.check(src, installed, releases, step == "quiet")))
         self.update_btn.setEnabled(False)
-        self.update_label.setText(text)
+        self.channel.setEnabled(False)
+        self.update_label.setText("Updating…" if step == "update" else "Checking…")
 
         def run():
             try:
@@ -408,7 +452,11 @@ class SettingsPanel(QWidget):
 
     def _update_finished(self, step, result):
         self.update_btn.setEnabled(True)
+        self.channel.setEnabled(True)
         if isinstance(result, updater.UpdateError):
+            if step == "quiet":
+                self.update_label.setText(self.UPDATE_PROMPT)
+                return
             self.update_label.setText(str(result).splitlines()[0])
             if step == "update":
                 QMessageBox.warning(self, "Update Openface Mixer", str(result))
@@ -416,14 +464,23 @@ class SettingsPanel(QWidget):
         if step == "update":
             self.restart_requested.emit()
             return
-        self._pending = result
-        if result:
-            latest = "<br>".join(f"• {html.escape(s)}" for s in result[:5])
-            more = f"<br>…and {len(result) - 5} more" if len(result) > 5 else ""
-            self.update_label.setText(f"{len(result)} update(s) on GitHub:<br>{latest}{more}")
-            self.update_btn.setText("Update and restart…")
+        self.version_label.setText(updater.version_text(self._source))  # a new tag may name it
+        self._show_pending(*result, quiet=step == "quiet")
+
+    def _show_pending(self, release, changes, quiet):
+        """What a check found: the update's changes, or nothing (said only when asked)."""
+        self._pending = release, changes
+        if changes:
+            head = (f"Version {release} is available:" if release else
+                    f"{len(changes)} update(s) on GitHub:")
+            latest = "<br>".join(f"• {html.escape(s)}" for s in changes[:5])
+            more = f"<br>…and {len(changes) - 5} more" if len(changes) > 5 else ""
+            self.update_label.setText(f"{head}<br>{latest}{more}")
         else:
-            self.update_label.setText("Openface Mixer is up to date.")
+            self.update_label.setText(self.UPDATE_PROMPT if quiet else
+                                      "Openface Mixer is up to date.")
+        self.update_btn.setText("Update and restart…" if changes else "Check for updates")
+        self.update_waiting.emit(bool(changes))
 
     # ------------------------------------------------------------------ Digiface USB
     def _build_digiface(self, lay):
