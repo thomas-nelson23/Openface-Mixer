@@ -17,3 +17,4 @@ tests/test_fireface_fw
 tests/test_fireface_usb
 tests/test_hdspe
 tests/test_matrix_file
+tests/test_engine_loop

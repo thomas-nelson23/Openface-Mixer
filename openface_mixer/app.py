@@ -35,7 +35,7 @@ from .model import (
     speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .remote_link import RemoteLink, RemotePanel, remote_settings
+from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, WARN, apply_theme,
@@ -78,7 +78,15 @@ class MainWindow(QMainWindow):
         self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
+        self._engine_up = False            # the engine answered the last poll
+        self._engine_due = 0.0             # until when a started engine may take to answer
+        self._start_timer = QTimer(self, singleShot=True, interval=300, timeout=self.start_engine)
         self._last_meter = time.monotonic()
+        self._shown = False                # the polls follow it, see pace_timers()
+        self._meter_timer = QTimer(self, timeout=self.update_meters)
+        self._engine_timer = QTimer(self, timeout=self.poll_engine)
+        self._hw_timer = QTimer(self, timeout=self.poll_hw)
+        self._profile_timer = QTimer(self, timeout=self.poll_profile)
 
         central = QWidget()
         outer = QHBoxLayout(central)          # the mixer, then the settings sidebar
@@ -145,6 +153,7 @@ class MainWindow(QMainWindow):
         self.remote.received.connect(self.remote_message)
         self.remote.status_changed.connect(
             lambda st: self.remote_panel.set_status(st, self.remote.target_error))
+        self.remote.status_changed.connect(lambda _st: self.pace_timers())
         self.remote_panel.changed.connect(self.apply_remote_settings)
         self._hw_active = False
         compact_boxes(self.settings)
@@ -169,18 +178,11 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
-        self.poll_hw()
         self.rebuild_all()
         self.refresh_slots()
         self.ensure_engine()
         self.push_matrix()
-        self.apply_remote_settings()
-
-        QTimer(self, interval=33, timeout=self.update_meters).start()
-        QTimer(self, interval=1000, timeout=self.poll_hw).start()
-        QTimer(self, interval=500, timeout=self.poll_engine).start()
-        QTimer(self, interval=3000, timeout=self.poll_profile).start()
-        self.poll_profile()
+        self.apply_remote_settings()    # also starts the polls a hidden window needs
         self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
         # reopen as it was left: window size and the settings sidebar
         size, sidebar_open = load_window()
@@ -359,9 +361,42 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, e):
         super().showEvent(e)
+        if not self._shown:
+            self._shown = True
+            self.engine.read_peaks()    # tells the engine to read the meters again, and
+            self._last_meter = time.monotonic()    # drops the peaks held while nobody looked
+            self.pace_timers()
+            for poll in (self.poll_engine, self.poll_hw, self.poll_profile):
+                poll()                  # what the window shows is as old as the last hide
         if self._load_notice:
             QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
             self._load_notice = None
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._shown = False
+        self.pace_timers()
+
+    def pace_timers(self):
+        """Nothing polls for a window nobody sees (closed with --background, never opened, or
+        minimised where the desktop says so). Shown: the meters 30 times a second, the engine
+        status twice, the ALSA controls every second (amixer) and the PipeWire profile every
+        3 s (pactl). Hidden: amixer and pactl stop. The engine status is still read, every 2 s:
+        it is also how the window follows the interface for the ARC and the network remote
+        (connected or not, sample rate, a FireWire unit's clock). The meters are only read
+        while the remote sends levels to a controller, at the rate it sends them; while
+        nobody reads them the engine reads the device's meters at its idle rate. An engine
+        that was just started is looked for every 50 ms, shown or not."""
+        levels = LEVEL_MS if self.remote.wants_levels() else 0
+        engine = 50 if self._engine_due else 500 if self._shown else 2000
+        for timer, ms in ((self._meter_timer, 33 if self._shown else levels),
+                          (self._engine_timer, engine),
+                          (self._hw_timer, 1000 if self._shown else 0),
+                          (self._profile_timer, 3000 if self._shown else 0)):
+            if not ms:
+                timer.stop()
+            elif not timer.isActive() or timer.interval() != ms:
+                timer.start(ms)
 
     @staticmethod
     def _caption(text):
@@ -1109,6 +1144,9 @@ class MainWindow(QMainWindow):
         if ask(self, "Clear preset", f"Clear “{self.presets.name(i)}” from slot {i + 1}? "
                "This can't be undone.", "Clear"):
             self.presets.clear(i)
+            if self.st.get("active_slot") == i:
+                self.st["active_slot"] = None       # nothing is recalled from an empty slot
+                self.schedule_save()
             self.refresh_slots()
 
     def export_mix(self):
@@ -1237,6 +1275,8 @@ class MainWindow(QMainWindow):
 
     def update_arc_leds(self):
         slot = self.st.get("active_slot")
+        if slot is not None and not self.presets.slots[slot]:
+            slot = None                 # an empty slot's key stays dark, whatever the state says
         self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
 
     def schedule_save(self):
@@ -1248,26 +1288,26 @@ class MainWindow(QMainWindow):
     def ensure_engine(self):
         if self.engine.outdated():
             self.restart_engine()   # an older engine from before an upgrade is still running
-            time.sleep(0.5)
-        if self.engine.status() is None:
-            self.save()   # so a freshly started engine loads our matrix
-            ok, msg = self.engine.start()
-            if not ok:
-                # shown in the Status section instead of an alert at launch
-                self.engine_error = msg
-                return
-            for _ in range(30):
-                time.sleep(0.05)
-                if self.engine.status() is not None:
-                    break
+        elif self.engine.status() is None:
+            self.start_engine()
+
+    def start_engine(self):
+        """Starts the engine and returns at once. poll_engine then looks for it every 50 ms, for
+        1.5 s at most, without calling it stopped meanwhile, and sends it the mix as it is by
+        then."""
+        self.save()   # so a freshly started engine loads our matrix
+        ok, msg = self.engine.start()
+        # shown in the Status section instead of an alert at launch
+        self.engine_error = None if ok else msg
+        self._engine_due = time.monotonic() + 1.5 if ok else 0.0
+        self.pace_timers()
 
     def restart_engine(self):
         self.engine_error = None
-        self.save()
         self.engine.stop()
-        time.sleep(0.3)
-        self.engine.start()
-        QTimer.singleShot(600, self.push_matrix)
+        self._engine_up = False     # the next one to answer is new, and is sent the mix
+        self._engine_due = time.monotonic() + 2.0
+        self._start_timer.start()   # once the old engine has had time to go
 
     # ------------------------------------------------------------------ network remote (OSC)
     def apply_remote_settings(self):
@@ -1279,6 +1319,7 @@ class MainWindow(QMainWindow):
             self.remote.stop()
         elif port != r["port"]:
             self.remote.start(r["port"])
+        self.pace_timers()
         self.schedule_save()
 
     def remote_snapshot(self):
@@ -1326,6 +1367,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
+        if self._engine_due:
+            if s is None and time.monotonic() < self._engine_due:
+                return                  # still starting
+            self._engine_due = 0.0
+            self.pace_timers()
+        if s is not None and not self._engine_up:
+            self.push_matrix()          # a (re)started engine: the mix as it is now
+        self._engine_up = s is not None
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:

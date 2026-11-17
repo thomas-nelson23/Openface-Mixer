@@ -9,6 +9,7 @@ decides what a received message does.
 """
 import os
 import socket
+import threading
 import time
 from pathlib import Path
 
@@ -55,13 +56,15 @@ def set_autostart(on, device_key, device_name):
         f.unlink(missing_ok=True)
 
 
-def resolve_target(host, port):
-    """(address text, port) for the Send to host, or None if it is empty or unknown."""
+def resolve_target(host, port, lookup=True):
+    """(address text, port) for the Send to host, or None if it is empty or unknown. Without
+    lookup only an address is taken: a name can take as long as the name server does."""
     host = (host or "").strip()
     if not host or not 0 < port < 65536:
         return None
     try:
-        return socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4][0], port
+        return socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM,
+                                  flags=0 if lookup else socket.AI_NUMERICHOST)[0][4][0], port
     except (OSError, IndexError, UnicodeError):     # UnicodeError: no host name ("a..b")
         return None
 
@@ -71,6 +74,7 @@ class RemoteLink(QObject):
     state requests through send_state() and publishes its changes with publish()."""
     received = Signal(str, list)
     status_changed = Signal(str)
+    _looked_up = Signal(str, int, object)  # a host name's lookup has finished on its thread
 
     def __init__(self, snapshot, parent=None):
         """snapshot: callable returning osc_remote.snapshot() for the current state."""
@@ -80,6 +84,8 @@ class RemoteLink(QObject):
         self.clients = {}                  # (address, port) -> time of last packet
         self.target = None                 # (address, port) everything is also sent to
         self.target_error = None           # the Send to host, if it could not be resolved
+        self._wanted = ("", 0)             # the Send to host and port as last set
+        self._looked_up.connect(self._lookup_done)
         self.sent = {}                     # what the clients were last told
         self.levels_on = True
         self._levels = {}                  # level address -> highest dB since the last send
@@ -141,9 +147,34 @@ class RemoteLink(QObject):
         return f"listening on UDP {port} · {n} controller{'s' if n != 1 else ''}"
 
     def set_target(self, host, port):
-        """Also send state and levels to host:port (empty host: only to the controllers)."""
+        """Also send state and levels to host:port (empty host: only to the controllers). An
+        address is used at once. A name is looked up on a thread of its own, so a slow name
+        server can't freeze the window; until the answer is in, a new name gets nothing and
+        an unchanged one keeps its address."""
+        host = (host or "").strip()
+        changed, self._wanted = (host, port) != self._wanted, (host, port)
+        target = resolve_target(host, port, lookup=False)
+        if target is None and host:
+            threading.Thread(target=self._lookup, args=(host, port), name="ofm-lookup",
+                             daemon=True).start()
+            if changed:
+                self._use_target(None, None)
+        else:
+            self._use_target(target, None)
+
+    def _lookup(self, host, port):
         target = resolve_target(host, port)
-        self.target_error = host.strip() if host.strip() and target is None else None
+        try:
+            self._looked_up.emit(host, port, target)
+        except RuntimeError:
+            pass                           # the window has gone meanwhile
+
+    def _lookup_done(self, host, port, target):
+        if (host, port) == self._wanted:   # not the answer to an older question
+            self._use_target(target, None if target else host)
+
+    def _use_target(self, target, error):
+        self.target_error = error
         if target != self.target:
             self.target = target
             self.sent = {}                 # the new target gets the whole state next
@@ -192,9 +223,14 @@ class RemoteLink(QObject):
         if diff:
             self._send(osc_remote.encode_bundles(osc_remote.messages(diff)), targets)
 
+    def wants_levels(self):
+        """True while peak levels go out to someone: the window keeps reading the meters for
+        that, shown or not."""
+        return self.sock is not None and self.levels_on and bool(self.clients or self.target)
+
     def add_peaks(self, kind, channels, peaks):
         """Linear peaks read from the engine; the highest per channel is kept until sent."""
-        if not self.levels_on or not (self.clients or self.target):
+        if not self.wants_levels():
             return
         seg = osc_remote.LEVEL_SEGS[kind]
         for c in channels:

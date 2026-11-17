@@ -108,6 +108,7 @@ const struct ofm_backend ofm_backend_digiface = {
 	.name = "Digiface",
 	.out_node_prefix = "alsa_output.usb-RME_Digiface_USB",
 	.meter_us = 10000,
+	.meter_idle_us = 1000000,
 	.create = create,
 	.destroy = destroy,
 	.open = open_dev,

@@ -254,7 +254,7 @@ static int write_reg(struct ff802usb *f, uint32_t word)
 {
 	uint8_t msg[FF802USB_MSG_LEN];
 	ff802usb_reg_msg(word, msg);
-	int r = seq_write_sysex(f, msg, sizeof(msg));
+	int r = ffusb_port.write(f, msg, sizeof(msg));
 	if (r == 0)
 		f->budget -= FF802USB_MSG_LEN;
 	return r;
@@ -347,6 +347,8 @@ static long output_room(struct ff802usb *f)
 	long avail = ff802usb_proc_avail(text, f->sub);
 	return avail < 0 ? DEFAULT_BUDGET : avail - BUDGET_MARGIN;
 }
+
+struct ffusb_port ffusb_port = { seq_write_sysex, output_room };
 
 /* ---------- backend ---------- */
 
@@ -528,7 +530,7 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 
 	if (full)
 		forget_sent(f);
-	long budget = f->budget = output_room(f);
+	long budget = f->budget = ffusb_port.room(f);
 	bool room = true;
 
 	/* the mix first, it's what is heard; then the channel settings */
@@ -588,7 +590,7 @@ static int meters(void *h, struct ofm_shm *s)
 
 	/* keep-alive and the next level request, as TotalMix for iPad and oscmix send them */
 	uint8_t req[] = { 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x02, 0xf7 };
-	int r = seq_write_sysex(f, req, sizeof(req));
+	int r = ffusb_port.write(f, req, sizeof(req));
 	if (r == 0) {
 		f->budget = FF802USB_MSG_LEN;
 		r = write_reg(f, (uint32_t)FF802USB_REG_SERIAL << 16 | (f->serial++ & 0xf));
@@ -598,13 +600,16 @@ static int meters(void *h, struct ofm_shm *s)
 	return ms_since(&f->last_levels) < LEVELS_TIMEOUT_MS ? 0 : -ETIMEDOUT;
 }
 
-/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)" */
+/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)". The
+ * meter read also carries the keep-alive and takes in what the unit reports, so with no GUI it
+ * only slows down to oscmix's rate, 10 a second. */
 #define FFUSB_BACKEND(k, n, card_name, create_fn)	\
 	{						\
 		.key = k,				\
 		.name = n,				\
 		.out_node_card = card_name,		\
 		.meter_us = 30000,			\
+		.meter_idle_us = 100000,		\
 		.create = create_fn,			\
 		.destroy = destroy,			\
 		.open = open_dev,			\

@@ -4,7 +4,8 @@
  * The mix (a gain matrix plus output faders, and device settings) lives in shared memory (see
  * shm_layout.h), written by the GUI. A 20 ms main-loop timer loads it into the interface's own
  * DSP mixer, sending only what changed, so monitoring happens inside the interface with no
- * added latency, as with TotalMix. The device's level meters come back the same way. The
+ * added latency, as with TotalMix. The device's level meters come back the same way, read at
+ * full rate only while a GUI looks at them (it counts up gui_heartbeat as it reads). The
  * device is a backend (backend.h): the Digiface USB over USB (digiface_usb.c), the
  * Fireface 802, 800 or 400 over FireWire (fireface_fw.c), the Fireface 802 or UCX II over USB
  * in Class Compliant mode (fireface_usb.c), or an HDSPe RayDAT, AIO, AIO Pro or AES PCIe card
@@ -12,7 +13,9 @@
  *
  * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
  * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
- * (systemd user service), and the interface keeps mixing with the last mix when it exits.
+ * (systemd user service), one engine per device (a lock on the shared memory file), and the
+ * interface keeps mixing with the last mix when it exits. It exits with 1 when PipeWire goes
+ * away, so that systemd starts it again, and with 3 when another engine has the device.
  *
  * Options:
  *   --device KEY    digiface (default), ff802, ff802usb, ucx2, ff800, ff400, raydat, aio,
@@ -27,8 +30,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <pipewire/pipewire.h>
@@ -52,6 +57,11 @@
 #define HW_RETRY_TICKS   50  /* look for the device every second */
 #define HW_LOG_EVERY     60  /* a device that keeps failing is logged once in this many rounds */
 #define HW_STABLE_TICKS  500 /* and counts as working again once it has stayed open for 10 s */
+#define HW_WATCH_TICKS   25  /* the meters count as watched for 500 ms after a GUI last read them */
+
+#define LOCK_TRIES       20  /* an engine on its way out gets a second to let go of the device */
+#define EXIT_RUNNING     3   /* another engine has the device; the service units tell systemd
+                              * not to try again (RestartPreventExitStatus) */
 
 #define MAX_OBJ 2048
 
@@ -77,6 +87,8 @@ struct data {
 	struct pw_main_loop *loop;
 	struct pw_context *context;
 	struct pw_core *core;
+	struct spa_hook core_listener;
+	bool pw_lost;         /* the connection to PipeWire is gone */
 	struct pw_registry *registry;
 	struct spa_hook registry_listener;
 	struct pw_impl_module *loopback;
@@ -92,16 +104,22 @@ struct data {
 	unsigned int hw_opened; /* hw_ticks when it was opened */
 
 	/* hardware meters are read on their own thread; usb_lock keeps device I/O on the main loop
-	 * and the meter reads apart */
+	 * and the meter reads apart. Between reads the thread waits on meter_wake: the backend's
+	 * meter interval while a GUI reads the meters (its heartbeat moves), the idle one otherwise */
 	pthread_mutex_t usb_lock;
+	pthread_cond_t meter_wake;
 	pthread_t meter_thread;
 	bool meter_thread_started;
-	volatile bool meter_quit;
+	bool meter_quit;
+	uint32_t gui_heartbeat;  /* the GUI's heartbeat as last seen */
+	unsigned int gui_seen;   /* hw_ticks when it last moved */
+	bool watched;
 
 	int no_autolink;
 	char sink_out_name[96];
 	struct obj objs[MAX_OBJ];
 	int n_objs;
+	bool objs_full;       /* said once */
 	struct spa_list links;
 };
 
@@ -125,6 +143,7 @@ static void matrix_path(const struct data *d, char *buf, size_t len)
 			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep);
 }
 
+/* Returns 0, -EBUSY if another engine runs for the device, or another error < 0. */
 static int shm_setup(struct data *d)
 {
 	char name[64];
@@ -137,15 +156,32 @@ static int shm_setup(struct data *d)
 		perror("shm_open");
 		return -1;
 	}
+	/* One engine per device: a lock on the segment, held through the descriptor for as long
+	 * as this process lives. The kernel drops it however the process ends, so an engine
+	 * that was killed leaves nothing behind. */
+	for (int tries = LOCK_TRIES; flock(fd, LOCK_EX | LOCK_NB) < 0;) {
+		bool busy = errno == EWOULDBLOCK;
+		if (busy && --tries > 0) {
+			usleep(50000);
+			continue;
+		}
+		if (busy)
+			fprintf(stderr, "openface-mixer: an engine for the %s is already running; "
+				"this one stops\n", d->be->name);
+		else
+			perror("flock");
+		close(fd);
+		return busy ? -EBUSY : -1;
+	}
 	if (ftruncate(fd, sizeof(struct ofm_shm)) < 0) {
 		perror("ftruncate");
 		close(fd);
 		return -1;
 	}
 	d->shm = mmap(NULL, sizeof(struct ofm_shm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	close(fd);
 	if (d->shm == MAP_FAILED) {
 		perror("mmap");
+		close(fd);
 		return -1;
 	}
 
@@ -355,8 +391,14 @@ static void registry_global(void *data, uint32_t id, uint32_t permissions,
 		return;
 	}
 
-	if (d->n_objs >= MAX_OBJ)
+	if (d->n_objs >= MAX_OBJ) {
+		if (!d->objs_full)
+			fprintf(stderr, "openface-mixer: PipeWire has more than %d nodes, ports and "
+				"links; the engine does not see the rest, so the playback sink "
+				"may stay unlinked\n", MAX_OBJ);
+		d->objs_full = true;
 		return;
+	}
 	d->objs[d->n_objs++] = o;
 	relink(d);
 }
@@ -403,16 +445,42 @@ static void *meter_thread(void *userdata)
 	struct data *d = userdata;
 	struct ofm_shm *s = d->shm;
 
+	pthread_mutex_lock(&d->usb_lock);
 	while (!d->meter_quit) {
 		int r = -1;
-		pthread_mutex_lock(&d->usb_lock);
 		if (d->be->is_open(d->hw) && !d->hw_need_full)
 			r = d->be->meters(d->hw, s);
-		pthread_mutex_unlock(&d->usb_lock);
 		s->hw_levels = r == 0;
-		usleep(d->be->meter_us);
+
+		/* the wait lets go of usb_lock; hw_tick ends it early when a GUI starts to look */
+		unsigned int us = d->watched ? d->be->meter_us : d->be->meter_idle_us;
+		struct timespec until;
+		clock_gettime(CLOCK_MONOTONIC, &until);
+		until.tv_sec += us / 1000000;
+		until.tv_nsec += us % 1000000 * 1000L;
+		if (until.tv_nsec >= 1000000000L) {
+			until.tv_sec++;
+			until.tv_nsec -= 1000000000L;
+		}
+		pthread_cond_timedwait(&d->meter_wake, &d->usb_lock, &until);
 	}
+	pthread_mutex_unlock(&d->usb_lock);
 	return NULL;
+}
+
+/* A GUI that reads the meters moves its heartbeat with every read. While it does, the meter
+ * thread reads the device at the full rate, and it is woken at once when the reading starts. */
+static void watch_gui(struct data *d)
+{
+	if (d->shm->gui_heartbeat != d->gui_heartbeat) {
+		d->gui_heartbeat = d->shm->gui_heartbeat;
+		d->gui_seen = d->hw_ticks;
+		if (!d->watched)
+			pthread_cond_signal(&d->meter_wake);
+		d->watched = true;
+	} else if (d->hw_ticks - d->gui_seen >= HW_WATCH_TICKS) {
+		d->watched = false;
+	}
 }
 
 static void hw_tick_locked(struct data *d)
@@ -424,6 +492,7 @@ static void hw_tick_locked(struct data *d)
 
 	d->hw_ticks++;
 	s->heartbeat++;
+	watch_gui(d);
 
 	if (!be->is_open(d->hw)) {
 		if (d->hw_ticks % HW_RETRY_TICKS != 1)
@@ -490,6 +559,24 @@ static void do_quit(void *userdata, int signal_number)
 	pw_main_loop_quit(d->loop);
 }
 
+/* PipeWire went away (it crashed or was restarted): the playback sink went with it and only a
+ * new connection brings it back. The engine stops with an error, so systemd starts it again;
+ * that start waits for PipeWire. The interface is not told anything and keeps mixing. */
+static void core_error(void *userdata, uint32_t id, int seq, int res, const char *message)
+{
+	struct data *d = userdata;
+	if (id != PW_ID_CORE || res != -EPIPE)
+		return;
+	fprintf(stderr, "openface-mixer: lost the connection to PipeWire, stopping\n");
+	d->pw_lost = true;
+	pw_main_loop_quit(d->loop);
+}
+
+static const struct pw_core_events core_events = {
+	PW_VERSION_CORE_EVENTS,
+	.error = core_error,
+};
+
 int main(int argc, char *argv[])
 {
 	struct data d = { 0 };
@@ -523,8 +610,15 @@ int main(int argc, char *argv[])
 	pw_init(&argc, &argv);
 	spa_list_init(&d.links);
 
-	if (shm_setup(&d) < 0)
-		return 1;
+	int shm = shm_setup(&d);
+	if (shm < 0)
+		return shm == -EBUSY ? EXIT_RUNNING : 1;
+
+	/* The signals go to the main loop. Set up before any thread exists (libusb starts one in
+	 * create), or SIGTERM would end the process through that thread with nothing cleaned up. */
+	d.loop = pw_main_loop_new(NULL);
+	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGINT, do_quit, &d);
+	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGTERM, do_quit, &d);
 
 	d.hw = d.be->create();
 	if (d.hw == NULL) {
@@ -533,11 +627,12 @@ int main(int argc, char *argv[])
 	}
 	if (d.be->attach)
 		d.be->attach(d.hw, d.shm);
+	d.gui_heartbeat = d.shm->gui_heartbeat;   /* where a GUI that has gone left it */
 	pthread_mutex_init(&d.usb_lock, NULL);
-
-	d.loop = pw_main_loop_new(NULL);
-	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGINT, do_quit, &d);
-	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGTERM, do_quit, &d);
+	pthread_condattr_t monotonic;
+	pthread_condattr_init(&monotonic);
+	pthread_condattr_setclock(&monotonic, CLOCK_MONOTONIC);
+	pthread_cond_init(&d.meter_wake, &monotonic);
 
 	d.context = pw_context_new(pw_main_loop_get_loop(d.loop), NULL, 0);
 	d.core = pw_context_connect(d.context, NULL, 0);
@@ -545,6 +640,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "openface-mixer: cannot connect to PipeWire: %m\n");
 		return 1;
 	}
+	pw_core_add_listener(d.core, &d.core_listener, &core_events, &d);
 
 	/* one sink per device, so several devices' engines can run side by side */
 	char sink_name[80], sink_desc[96], args[1024];
@@ -583,13 +679,19 @@ int main(int argc, char *argv[])
 
 	/* the hardware mixer keeps running with the last mix, like TotalMix's stored state */
 	if (d.meter_thread_started) {
+		pthread_mutex_lock(&d.usb_lock);
 		d.meter_quit = true;
+		pthread_cond_signal(&d.meter_wake);
+		pthread_mutex_unlock(&d.usb_lock);
 		pthread_join(d.meter_thread, NULL);
 	}
 	pw_loop_destroy_source(pw_main_loop_get_loop(d.loop), d.hw_timer);
 	d.be->destroy(d.hw);
 	d.shm->hw_levels = 0;
 	d.shm->hw_state = DFU_STATE_NO_DEVICE;
+	d.shm->engine_pid = 0;
+	if (d.pw_lost)
+		return 1;   /* nothing to hand back: the sink and the links went with PipeWire */
 
 	struct link_req *r, *t;
 	spa_list_for_each_safe(r, t, &d.links, link)
@@ -600,7 +702,6 @@ int main(int argc, char *argv[])
 	pw_core_disconnect(d.core);
 	pw_context_destroy(d.context);
 	pw_main_loop_destroy(d.loop);
-	d.shm->engine_pid = 0;
 	munmap(d.shm, sizeof(struct ofm_shm));
 	pw_deinit();
 	return 0;

@@ -151,8 +151,8 @@ class ArcPort:
     def write(self, data):
         try:
             os.write(self.fd, bytes(data))
-        except BlockingIOError:
-            pass
+        except OSError:
+            pass    # its buffer is full, or it was just unplugged: read() notices that
 
     def close(self):
         if self.fd is not None:

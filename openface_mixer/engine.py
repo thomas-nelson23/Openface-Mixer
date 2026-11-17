@@ -16,11 +16,11 @@ ENGINE_BINARY = "openface-mixer-engine"
 
 # Must match struct ofm_shm in engine/shm_layout.h
 SHM_MAGIC = 0x584D464F
-SHM_VERSION = 6
+SHM_VERSION = 7
 HDR_SIZE = 64
 HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
 HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED, HDR_DEV_STATUS = 7, 8, 9, 10, 11
-HDR_DEV_STATUS2 = 12
+HDR_DEV_STATUS2, HDR_GUI_HEARTBEAT = 12, 13
 OFF_GAIN = HDR_SIZE
 OFF_OUT_GAIN = OFF_GAIN + N_OUT * N_SRC * 4
 OFF_PEAK_SRC = OFF_OUT_GAIN + N_OUT * 4
@@ -73,14 +73,20 @@ class Engine:
             return None
         return struct.unpack_from("<16I", self.m, 0)
 
-    def pid_alive(self):
+    def pid(self):
+        """The process id of the engine that runs on the segment, whatever its layout version,
+        or 0 if none does."""
         h = self.header()
-        if not h or h[HDR_MAGIC] != SHM_MAGIC or h[HDR_VERSION] != SHM_VERSION or not h[HDR_PID]:
-            return False
+        if not h or h[HDR_MAGIC] != SHM_MAGIC or not h[HDR_PID]:
+            return 0
         try:  # /proc/<pid>/comm is truncated to 15 characters
-            return Path(f"/proc/{h[HDR_PID]}/comm").read_text().strip() == ENGINE_BINARY[:15]
+            comm = Path(f"/proc/{h[HDR_PID]}/comm").read_text().strip()
         except OSError:
-            return False
+            return 0
+        return h[HDR_PID] if comm == ENGINE_BINARY[:15] else 0
+
+    def pid_alive(self):
+        return bool(self.pid()) and self.header()[HDR_VERSION] == SHM_VERSION
 
     def status(self):
         """dict with the hardware mixer state and sample rate, or None if the engine isn't
@@ -115,9 +121,13 @@ class Engine:
             self.m[OFF_DEV_CONFIG:OFF_DEV_CONFIG + 4] = struct.pack("<I", config)
 
     def read_peaks(self):
-        """Returns (source peaks, output peaks) as linear floats and resets the max-hold."""
+        """Returns (source peaks, output peaks) as linear floats and resets the max-hold. Each
+        call moves the GUI heartbeat: the engine reads the device's meters at the full rate
+        only while someone keeps asking for them, so nothing else has to tell it."""
         if not self.attach():
             return None, None
+        beat, = struct.unpack_from("<I", self.m, 4 * HDR_GUI_HEARTBEAT)
+        struct.pack_into("<I", self.m, 4 * HDR_GUI_HEARTBEAT, (beat + 1) & 0xFFFFFFFF)
         src = array("f", self.m[OFF_PEAK_SRC:OFF_PEAK_SRC + N_SRC * 4])
         out = array("f", self.m[OFF_PEAK_OUT:OFF_PEAK_OUT + N_OUT * 4])
         self.m[OFF_PEAK_SRC:OFF_PEAK_OUT + N_OUT * 4] = bytes((N_SRC + N_OUT) * 4)
@@ -166,9 +176,9 @@ class Engine:
         if self.has_service():
             subprocess.run(["systemctl", "--user", "stop", self.dev.service])
             return
-        h = self.header()
-        if h and self.pid_alive():
+        pid = self.pid()    # also an older engine's: the new one can't start beside it
+        if pid:
             try:
-                os.kill(h[HDR_PID], 15)
+                os.kill(pid, 15)
             except OSError:
                 pass

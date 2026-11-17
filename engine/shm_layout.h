@@ -22,9 +22,9 @@
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
 #define OFM_N_DEV_CMD 4096                  /* device setting command slots (802/UCX II effects) */
 
-#define OFM_SHM_VERSION 6
+#define OFM_SHM_VERSION 7
 
-/* Header is exactly 64 bytes; all fields are written by the engine. */
+/* Header is exactly 64 bytes; all fields but gui_heartbeat are written by the engine. */
 struct ofm_shm {
 	uint32_t magic;
 	uint32_t version;
@@ -40,7 +40,10 @@ struct ofm_shm {
 	uint32_t dev_status;     /* device status word (Fireface 802: sync status register;
 	                          * Fireface 800: first status quadlet) */
 	uint32_t dev_status2;    /* Fireface 800: second status quadlet */
-	uint32_t reserved[3];
+	uint32_t gui_heartbeat;  /* written by the GUI: incremented each time it reads the meters.
+	                          * While it stands still nobody is looking, and the engine reads
+	                          * the device's meters at its idle rate */
+	uint32_t reserved[2];
 
 	/* Written by the GUI: linear gain from source k to output channel o.
 	 * Pan and source mute are folded in; the output master is separate. */

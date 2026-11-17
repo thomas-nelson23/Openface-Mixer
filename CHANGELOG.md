@@ -40,6 +40,8 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The engine starts with the default routing when its saved mix file is damaged or unknown. Files from the very first format are no longer read.
 - Uninstall also removes the start-at-login entries.
 - Updating keeps only the three newest config backups.
+- With the window hidden or closed to the background, the app stops polling and the engine reads the interface's meters once a second instead of about a hundred times. Meters are live again the moment the window is shown, and peak readouts start fresh.
+- If PipeWire crashes or is restarted, the engine stops with a clear log line and systemd starts it again, so the playback sink comes back by itself.
 
 ### Fixed
 
@@ -62,6 +64,11 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The "Record all inputs" question no longer mentions a config only the author has.
 - Screen readers get distinct names for the effect knobs and for each strip's buttons.
 - README: correct package names for Debian 13 and for Ubuntu 25.04 and later.
+- Opening the window and *Restart engine* no longer freeze the window for up to two seconds.
+- A second engine for the same interface stops with one clear line instead of fighting the first, and an older engine started by hand is replaced after an update.
+- The Digiface engine shuts down cleanly when it is stopped.
+- ARC USB: the snapshot key goes out when its preset is cleared, and unplugging the ARC at the wrong moment no longer raises an error.
+- Network remote: a *Send to* host given by name no longer freezes the window at startup when the name server is slow.
 
 ### Not yet tried on hardware
 
@@ -108,10 +115,13 @@ people who have one can try them. Please try the points for your interface and
 - After an engine restart the saved routing is back.
 - Update with the Digiface unplugged: `systemctl --user is-enabled openface-mixer-engine` still says `enabled`.
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
+- Hide the window to the background for a minute and show it again: the meters move at once.
+- Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
 
 **Every Fireface and HDSPe card**
 
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Talkback to further outputs, the Talkback dim amount and *Recall*.
 - ARC USB: with one Phones output both Phones keys light together as before; with two, each key lights alone and the encoder turns its own output.
+- With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
