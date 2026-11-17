@@ -32,7 +32,7 @@ def pump(app):
 def exercise(app, w, check):
     """Click through one device's window. check(condition, what) records a failure."""
     from PySide6.QtWidgets import QPushButton
-    from openface_mixer import engine
+    from openface_mixer import engine, updater
     from openface_mixer.channel_settings import ChannelSettings
     from openface_mixer.remote_link import autostart_file
 
@@ -60,8 +60,10 @@ def exercise(app, w, check):
     w.poll_profile()
     w.update_meters()
     status = w.engine.status()
-    for state in engine.HW_STATES:
-        w.settings.update_hw_mixer({**status, "hw": state})
+    for packaged in (True, False):                  # a package's hints differ from a checkout's
+        updater.packaged = lambda: packaged
+        for state in engine.HW_STATES:
+            w.settings.update_hw_mixer({**status, "hw": state})
     w.settings.update_hw_mixer(None)
     # the login entry names the command by its full path (or as found on PATH in a checkout)
     w.remote_panel.autostart.click()

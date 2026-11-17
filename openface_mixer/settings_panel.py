@@ -26,6 +26,10 @@ def udev_rule_hint(dev):
                 "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
                 "local login session).")
     rule = UDEV_RULES[dev.key]
+    if updater.packaged():
+        return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. The "
+                "package installed the udev rule for it. Reconnect the interface, or restart "
+                "the computer, so the rule applies.")
     return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. Install "
             f"the udev rule once:<br><tt>sudo install -m644 packaging/{rule} "
             "/etc/udev/rules.d/</tt><br>"
