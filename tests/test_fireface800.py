@@ -160,6 +160,14 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(s["p48"], [True, False, False, False])
         self.assertEqual((s["limiter"], s["out_level"]), (True, "low"))     # good ones stay
 
+    def test_an_unknown_clock_source_stays_unknown_when_loaded(self):
+        s = ff.default_settings()
+        s.update(known=True, edited=True, clock=None)
+        s = ff.upgrade_settings(s)
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+        self.assertEqual(ff.device_words(s), (0, []))
+
 
 class DeviceTest(unittest.TestCase):
     def test_device(self):

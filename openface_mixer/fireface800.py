@@ -172,8 +172,8 @@ def upgrade_settings(s, base=None):
             if not isinstance(cur, list) or len(cur) != len(v):
                 cur = v
             s[k] = [c if same_kind(c, d) else d for c, d in zip(cur, v)]
-        elif not same_kind(cur, v):
-            s[k] = v
+        elif not same_kind(cur, v) and not (k == "clock" and k in s and cur is None):
+            s[k] = v            # a clock of None (the unit reports a source we don't know) is kept
     return s
 
 

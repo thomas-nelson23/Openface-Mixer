@@ -192,8 +192,9 @@ def upgrade_settings(s, base=None, fx_model=FX):
                 part[kk] = [c if same_kind(c, d) and (kk != "level" or type(c) is int and c >= 0)
                             else d for c, d in zip(cur, vv)]
             s[k] = part
-        elif not same_kind(s.get(k), v):
-            s[k] = v
+        elif not same_kind(s.get(k), v) and not (k == "clock" and "edited" in base
+                                                 and k in s and s[k] is None):
+            s[k] = v            # FireWire: a clock of None (unknown source) is kept
     if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
         s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s

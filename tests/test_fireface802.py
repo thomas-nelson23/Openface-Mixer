@@ -263,6 +263,16 @@ class LayoutTest(unittest.TestCase):
         ff.usb_commands(s)
         ff.config_word(s)
 
+    def test_an_unknown_clock_source_stays_unknown_when_loaded(self):
+        # saved while the unit reported no source we know: loading must not make it Internal,
+        # or the next connect would write Internal to the unit
+        s = ff.default_settings()
+        s.update(known=True, edited=True, clock=None)
+        s = ff.upgrade_settings(s)
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+        ff.commands(s)
+
     def test_good_settings_are_kept(self):
         s = ff.default_settings()
         s.update(clock="adat_b", aes_in="optical", opt_out="spdif", aes_pro=True)
