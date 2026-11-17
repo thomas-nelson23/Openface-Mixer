@@ -191,27 +191,24 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(updater.check(self.src, self.installed), ("0.4.0", ["third", "second"]))
         self.assertEqual(self.update(), fixed)
 
-    def test_a_quiet_check_fails_without_asking_anything(self):
-        calls = []
-        run = subprocess.run
-
-        def spy(cmd, **kwargs):
-            calls.append((cmd[3], kwargs.get("env")))
-            return run(cmd, **kwargs)
-        with mock.patch.object(updater.subprocess, "run", spy):
-            updater.check(self.src, self.installed)
-            self.assertEqual(calls[0], ("fetch", None))
-            del calls[:]
-            self.assertEqual(updater.check(self.src, self.installed, quiet=True), (None, []))
-        step, env = calls[0]
-        self.assertEqual((step, env["GIT_TERMINAL_PROMPT"], env["GIT_ASKPASS"]), ("fetch", "0", ""))
-        self.assertIn("BatchMode=yes", env["GIT_SSH_COMMAND"])
-        self.assertEqual(env["PATH"], os.environ["PATH"])
-        # no network, or the remote is gone: the one error the Updates section keeps to itself
-        shutil.rmtree(self.origin)
-        with self.assertRaises(updater.UpdateError):
-            updater.check(self.src, self.installed, quiet=True)
-        # and a folder that is no checkout any more
+    def test_a_quiet_check_never_asks_and_fails_as_an_update_error(self):
+        # an ssh remote and a stand-in ssh that notes how it was called and can't connect
+        ssh, seen = self.tmp / "ssh", self.tmp / "seen"
+        ssh.write_text(f'#!/bin/sh\n{{ echo "$@"; env; }} >> "{seen}"\nexit 255\n')
+        ssh.chmod(0o755)
+        git(self.src, "remote", "set-url", "origin", "ssh://git@example.invalid/mixer.git")
+        with mock.patch.dict(os.environ, GIT_SSH_COMMAND=str(ssh)):
+            with self.assertRaises(updater.UpdateError):
+                updater.check(self.src, self.installed)         # the button: may ask
+            self.assertNotIn("BatchMode", seen.read_text())
+            seen.unlink()
+            with self.assertRaises(updater.UpdateError):        # what the panel keeps quiet
+                updater.check(self.src, self.installed, quiet=True)
+        seen = seen.read_text().splitlines()
+        self.assertIn("-oBatchMode=yes", seen[0])
+        self.assertIn("GIT_TERMINAL_PROMPT=0", seen)
+        self.assertIn("GIT_ASKPASS=", seen)
+        # a checkout that is gone
         with self.assertRaises(updater.UpdateError):
             updater.check(self.tmp / "gone", self.installed, quiet=True)
 
