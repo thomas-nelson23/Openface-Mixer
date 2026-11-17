@@ -153,9 +153,10 @@ class ValueKnob(QWidget):
         """Type the value in place (a dialog would close the channel settings popup)."""
         def enter(text):
             v = parse_db(text)
-            if v is None:
+            # "off" is only a value for a knob that reads -∞ at the bottom (FX Send, a volume)
+            if v is None or (math.isinf(v) and self.fmt(self.lo) != "-∞"):
                 return False
-            self.set_value(v, True)     # kept to the knob's range; "off" is its lowest value
+            self.set_value(v, True)     # kept to the knob's range
 
         LevelEdit(self, QRect(0, px(44), self.width(), px(18)),
                   f"{self.value:.{self._decimals()}f}", enter)

@@ -522,6 +522,10 @@ class EffectsTest(WindowCase):
         QTest.keyClick(knob, Qt.Key_Return)
         self.type_into(knob, "4,5")
         self.assertEqual(self.w.st["hw"]["fx"]["in"][strip.channels[0]]["eq_g2"], 4.5)
+        QTest.keyClick(knob, Qt.Key_Return)
+        self.type_into(knob, "off")                 # only a level has an off position
+        self.assertEqual(knob.value, 4.5)
+        self.type_into(knob, "", Qt.Key_Escape)
 
     def test_knobs_and_lists_have_names_of_their_own(self):
         from openface_mixer.fx_panels import ValueKnob
