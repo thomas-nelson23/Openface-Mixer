@@ -181,6 +181,15 @@ class EngineStartTest(WindowCase):
         self.start.return_value = (False, "openface-mixer-engine not found")
         type(self).ensure_engine(w)
         self.assertEqual(w.engine_error, "openface-mixer-engine not found")
+        # after Restart engine too, and at the next poll: there is no engine to wait for
+        w.status.setText("as it was")
+        w.restart_engine()
+        w.poll_engine()
+        self.assertEqual(w.status.text(), "as it was")
+        w._start_timer.timeout.emit()
+        w.poll_engine()
+        self.assertIn("ENGINE STOPPED", w.status.text())
+        self.assertEqual(w.engine_error, "openface-mixer-engine not found")
 
     def test_a_running_engine_is_left_alone(self):
         with mock.patch.object(self.w.engine, "status", return_value={"hw": "active"}):

@@ -1214,9 +1214,8 @@ class MainWindow(QMainWindow):
         ok, msg = self.engine.start()
         # shown in the Status section instead of an alert at launch
         self.engine_error = None if ok else msg
-        if ok:
-            self._engine_due = time.monotonic() + 1.5
-            self.pace_timers()
+        self._engine_due = time.monotonic() + 1.5 if ok else 0.0
+        self.pace_timers()
 
     def restart_engine(self):
         self.engine_error = None
