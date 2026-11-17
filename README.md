@@ -294,9 +294,9 @@ login. Everything below about the RayDAT applies to all four; their channels are
 On the RayDAT, pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
 (`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
 channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
-then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). `snd-hdspm`
-starts with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
-it up. `snd-hdspe` leaves the card's last routing in place until the engine sends the mix.
+then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). Both drivers
+start with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
+it up.
 
 Which driver the card needs depends on its age:
 

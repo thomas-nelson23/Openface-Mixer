@@ -399,10 +399,9 @@ The ALSA control `Mixer` (iface HWDEP) takes three integers: source, destination
 | gain | 0–65535, linear, 32768 = unity (so at most +6 dB) |
 
 The hardware matrix is write only; the driver keeps a copy, which reads of the control return.
-snd-hdspm zeroes the whole mixer when it loads, so the card is silent until a mixer program
-sets it up. snd-hdspe leaves the hardware mixer alone when it loads, so the card keeps its last
-routing until the engine's first sync, which writes every crosspoint. Both drivers answer
-writes with `EBUSY` while playback and capture are open in two different
+Both drivers zero the whole mixer when they load (snd-hdspm in `snd_hdspm_set_defaults`,
+snd-hdspe in `hdspe_init_mixer`), so the card is silent until a mixer program sets it up. Both
+answer writes with `EBUSY` while playback and capture are open in two different
 processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
 each send by its output's master level. The engine writes only changed crosspoints, reads one
 output's sends back from the driver every 500 ms, and sends everything again if they differ (the
