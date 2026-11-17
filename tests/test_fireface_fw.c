@@ -327,6 +327,38 @@ static void check_802_sync(void)
 	be->destroy(h);
 }
 
+/* Setting commands go out in slot order, across slices too: an effect's parameters sit in the
+ * slots before its switch and have to reach the unit first. */
+static void check_802_order(void)
+{
+	static struct ofm_shm s;
+	const struct ofm_backend *be = &ofm_backend_ff802;
+	const int n_cmd = 3 * FW_SLICE_MS + 5;
+
+	bus_generation = 1;
+	void *h = open_fake(be);
+	for (int i = 0; i < n_cmd; i++)
+		s.dev_cmd[2 * i] = 0x00410000u + (uint32_t)i;   /* every other slot unused */
+	write_ms = 1;
+	check("order: first slice", be->sync(h, &s, true), 0);
+	check("order: one slice of commands", n_rec, FW_SLICE_MS);
+	s.dev_cmd[0] = 0x00420000u;          /* a setting changes while the send is under way */
+	while (n_rec <= n_cmd + 1)
+		check("order: next slice", be->sync(h, &s, false), 0);
+	write_ms = 0;
+	for (int i = 0; i <= n_cmd; i++) {
+		uint32_t want = i < FW_SLICE_MS ? 0x00410000u + (uint32_t)i :
+				i == FW_SLICE_MS ? 0x00420000u : 0x00410000u + (uint32_t)i - 1;
+		if (rec[i].value != ff802_parity(want)) {
+			check("order: command in slot order", rec[i].value, ff802_parity(want));
+			break;
+		}
+	}
+	check("order: the mix only after the commands", rec[n_cmd + 1].value & 0x40000000u,
+	      0x40000000u);
+	be->destroy(h);
+}
+
 static void check_former_sync(void)
 {
 	static struct ofm_shm s;
@@ -405,6 +437,7 @@ int main(void)
 	check_former();
 	check_bus_reset();
 	check_802_sync();
+	check_802_order();
 	check_former_sync();
 	if (!failed)
 		printf("test_fireface_fw: ok\n");
