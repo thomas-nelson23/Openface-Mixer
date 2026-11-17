@@ -38,8 +38,9 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	$(CC) $(CFLAGS) -o tests/test_hdspe tests/test_hdspe.c engine/hdspe.c -lm
 	./tests/test_hdspe
 
-lint: ## Byte-compile everything to catch syntax errors
+lint: ## Byte-compile and run pyflakes (syntax errors, unused imports, undefined names)
 	python3 -m compileall -q openface_mixer tests
+	python3 -m pyflakes openface_mixer tests
 
 install: ## Install for the current user (~/.local) and enable the engine service
 	./scripts/install.sh
