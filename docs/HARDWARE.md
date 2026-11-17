@@ -128,7 +128,7 @@ and the response code, for example `FireWire write at 0xffff0000001c failed: add
 than asked for counts as a failure.
 
 A sync sends for at most 10 ms of each 20 ms engine tick and carries the rest over, so the
-full send after a connect (about 2,300 writes on the 802) takes a few seconds while the
+full send after a connect (about 3,700 writes on the 802) takes a few seconds while the
 meters and the engine's heartbeat keep running.
 
 The playback sink is linked to the unit's own PipeWire node, `alsa_output.firewire-<GUID>…`,

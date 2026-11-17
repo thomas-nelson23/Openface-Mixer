@@ -279,7 +279,7 @@ static int fw_request(struct fwdev *f, int tcode, uint64_t offset, void *data, s
 }
 
 /* A sync sends for FW_SLICE_MS and leaves the rest to the next tick, so a full resend (about
- * 2,300 writes on an 802) never holds up the heartbeat and the meters. */
+ * 3,700 writes on an 802) never holds up the heartbeat and the meters. */
 static void slice_start(struct fwdev *f)
 {
 	f->slice_end = fw_bus.now_ms() + FW_SLICE_MS;
