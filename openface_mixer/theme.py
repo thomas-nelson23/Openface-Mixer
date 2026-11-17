@@ -291,8 +291,11 @@ def stylesheet():
                     border-radius:0; margin-top:0; padding-top:{p(28)}px; }}
         QGroupBox::title {{ height:0; }}
         QFrame#sidebar QLabel {{ font-size:{p(11)}px; }}
-        QFrame#sidebar QComboBox, QFrame#sidebar QCheckBox, QFrame#sidebar QPushButton {{
-            font-size:{p(11)}px; }}
+        QFrame#sidebar QComboBox, QFrame#sidebar QCheckBox, QFrame#sidebar QPushButton,
+        QFrame#sidebar QDoubleSpinBox {{ font-size:{p(11)}px; }}
+        QFrame#sidebar QDoubleSpinBox {{ padding:{p(1)}px 0; }}
+        QFrame#sidebar QDoubleSpinBox::up-button, QFrame#sidebar QDoubleSpinBox::down-button {{
+            width:0; border:none; }}
         QFrame#sidebar QLabel#head {{ color:white; }}
         QGroupBox QPushButton {{ padding:{p(3)}px {p(10)}px; border-radius:{p(6)}px; }}
         QGroupBox QPushButton:checked {{ background:rgba(42,212,255,0.16); border-color:{c};

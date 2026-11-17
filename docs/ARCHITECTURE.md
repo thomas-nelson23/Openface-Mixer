@@ -109,7 +109,13 @@ app.MainWindow
 
 ### The mixer model
 
-- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked.
+- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked
+  (`model.set_stereo`): the pair then has one strip, and the right channel takes the left one's
+  level and mute. What the two channels had on their own (sends, mutes, the right channel's
+  fader group) is kept in `state["unlinked"]`, which is part of the mix, and comes back on
+  unlink; the right channel's name, colour, icon and effect settings simply stay stored. A
+  submix whose level or balance was changed while linked, and a pair with nothing kept, unlink
+  as in TotalMix: both channels at the pair's level, panned hard left and right.
 - **Outputs** are stereo pairs (0–17; on the Digiface pair 16 = phones at single speed).
 - The device decides which channels exist at the current rate and their names
   (`Device.channels()`, `chan_label()`, `pair_label()`); the window only builds strips for those.
@@ -132,18 +138,27 @@ app.MainWindow
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).
-- Pan uses a balance law: at centre both sides get full level. A mono source is panned across the
-  pair; in a linked stereo pair, left goes to left and right goes to right.
+- A mono source is panned across the pair with constant power, as in TotalMix: full level at
+  either end and 3 dB down on both sides at the centre (`model.pan_gains`). In a linked stereo
+  pair, left goes to left and right goes to right, and pan is their balance: full level on both
+  sides at the centre. Until state version 5 mono sources used the balance law too. States,
+  presets and mix files from then (`presets.json` and mix files: version 1) are converted when
+  they are read, so they sound as they did (`model.convert_pan_law`); the one thing that can't be
+  kept is a level above the fader's +6 dB, which is held there.
 - **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
   unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
-  `upgrade_state` clears it) and is not part of a mix.
+  `upgrade_state` clears it) and is not part of a mix. Only a channel with a strip can be
+  soloed: whenever the strips are rebuilt (a strip or channel group hidden, a recall, another
+  sample rate), `MainWindow.solo_as_shown` switches solo off for every channel without one,
+  so nothing out of sight can silence a submix.
 - `compute_matrix()` folds sends, pan, source mutes and solo into the 36×72 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
   fader floor (−80 dB), so a group can go all the way down and come back up together.
-- **Presets** store `extract_mix(state)`: stereo links, mutes, sends, output levels and groups.
+- **Presets** store `extract_mix(state)`: stereo links and what they keep for unlinking, mutes,
+  sends, output levels and groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
 - **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's

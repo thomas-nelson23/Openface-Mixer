@@ -1,6 +1,8 @@
-"""The window's part in protecting the mix: damaged files, failed imports and exports, and the
-mix kept before a recall. Opens the real main window offscreen with a stand-in engine and a
-throwaway config folder; skipped where PySide6 is not installed."""
+"""The window's part in protecting the mix: damaged files, failed imports and exports, the mix
+kept before a recall, what a stereo link keeps, and solo on strips that go out of sight. Opens
+the real main window offscreen with a stand-in engine and a throwaway config folder; skipped
+where PySide6 is not installed."""
+import copy
 import json
 import os
 import tempfile
@@ -8,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import arc, config, engine, model as m
+from openface_mixer import arc, config, engine, model as m, presets
 from openface_mixer.devices import DEVICES
 
 try:
@@ -81,8 +83,8 @@ class MixWindowTest(unittest.TestCase):
 
     def mix_file(self, mix, name="Live"):
         path = self.dir / "mix.json"
-        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": 1, "name": name,
-                                    "mix": mix}))
+        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": presets.VERSION,
+                                    "name": name, "mix": mix}))
         self.open_name.return_value = (str(path), "")
         return path
 
@@ -91,8 +93,13 @@ class MixWindowTest(unittest.TestCase):
 
     # ---------------------------------------------------------------- damaged files at start
     def test_opens_on_damaged_files(self):
+        kept = dict(m.default_state(), unlinked={"in:0": 5, "play:0": {"group": 0}}, control_room={
+            "phones": "x", "recall_db": "loud", "talkback_dests": 7, "dim_db": [1],
+            "talkback_dim_db": None, "encoder": "phones9"})
         for name, content in (("state.json", "[1, 2]"), ("state.json", ""),
                               ("state.json", '{"sends": "x", "selected": 99}'),
+                              ("state.json", json.dumps(kept)),
+                              ("state.json", json.dumps(dict(kept, unlinked="x", version="x"))),
                               ("presets.json", "[1]"), ("presets.json", '{"slots": 5}')):
             with self.subTest(name=name, content=content):
                 path = config.device_dir(self.dev) / name
@@ -102,6 +109,11 @@ class MixWindowTest(unittest.TestCase):
                 w.show()
                 self.qt.processEvents()
                 w.tabs.setCurrentIndex(1)
+                for pair in ("play", 0), ("in", 0):         # unlink and link
+                    w.toggle_stereo(*pair, not w.st["stereo"][pair[0]][0])
+                self.qt.processEvents()
+                w.control.recall.emit()
+                w.arc_encoder(1)
                 w.push_matrix()
                 w.save()
                 self.close(w)
@@ -297,6 +309,135 @@ class MixWindowTest(unittest.TestCase):
             w.st["active_slot"] = 2             # a state saved before Clear did that
             w.update_arc_leds()
             self.assertFalse(leds.call_args.args[0][key])
+
+    # ---------------------------------------------------------------- stereo link
+    def two_mono_channels(self, w):
+        """Inputs 1 and 2 with levels, pans, a mute, a group, a name, a colour and an icon of
+        their own. Returns the state to get back to."""
+        st = w.st
+        st["sends"]["in"][0][16], st["sends"]["in"][1][16] = [-6.0, -0.5], [-12.0, 0.25]
+        st["sends"]["in"][0][0], st["sends"]["in"][1][0] = [None, 0.3], [0.0, 1.0]
+        st["mute"]["in"][1] = True
+        st["groups"].update({"in:0": 1, "in:1": 2})
+        st["names"].update({"in:0": "Kick", "in:1": "Snare"})
+        st["colors"]["in:1"] = "#ff0000"
+        st["icons"]["in:1"] = "drum"
+        w.rebuild_all()
+        return copy.deepcopy(st)
+
+    def link(self, w, on):
+        strip = w.strips["in:0"]
+        self.assertNotEqual(strip.stereo.isChecked(), on)
+        strip.stereo.click()
+        self.qt.processEvents()                 # the row is rebuilt after the click
+        self.assertEqual(w.strips["in:0"].channels, [0, 1] if on else [0])
+        self.assertEqual("in:1" in w.strips, not on)
+
+    def test_st_button_brings_both_channels_back_as_they_were(self):
+        w = self.window()
+        before = self.two_mono_channels(w)
+        self.link(w, True)
+        self.assertEqual(w.st["sends"]["in"][1][16], [-6.0, 0.0])
+        self.assertEqual(w.strips["in:0"].name, "Kick")
+        self.assertFalse(w.strips["in:0"].mute.isChecked())
+        self.link(w, False)
+        self.assertEqual(w.st, before)
+        right = w.strips["in:1"]
+        self.assertEqual((right.name, right.group, right.mute.isChecked()), ("Snare", 2, True))
+        self.assertAlmostEqual(right.fader.db(), -12.0)
+        self.assertEqual(right.pan.value, 0.25)
+
+    def test_a_level_set_while_linked_stays_on_both_channels(self):
+        w = self.window()
+        before = self.two_mono_channels(w)
+        self.link(w, True)
+        w.move_fader(w.strips["in:0"], -3.0)        # in the phones submix
+        self.link(w, False)
+        self.assertEqual((w.st["sends"]["in"][0][16], w.st["sends"]["in"][1][16]),
+                         ([-3.0, -1.0], [-3.0, 1.0]))
+        self.assertEqual((w.st["sends"]["in"][0][0], w.st["sends"]["in"][1][0]),
+                         (before["sends"]["in"][0][0], before["sends"]["in"][1][0]))
+        self.assertEqual(w.st["groups"], before["groups"])
+
+    def test_link_survives_the_remote_presets_files_and_a_restart(self):
+        w = self.window()
+        before = m.extract_mix(self.two_mono_channels(w))
+
+        def remote_link(w, on):                                 # the OSC remote
+            w.remote_message(f"/input/{int(on)}/stereo", [float(on)])
+            self.qt.processEvents()             # the row is rebuilt after the message
+            self.assertEqual("in:1" in w.strips, not on)
+
+        def unlinks_to_before(w):
+            self.assertTrue(w.st["stereo"]["in"][0])
+            remote_link(w, False)
+            self.assertEqual(m.extract_mix(w.st), before)
+            self.assertEqual(w.strips["in:1"].name, "Snare")
+            remote_link(w, True)
+
+        remote_link(w, True)
+        unlinks_to_before(w)
+        linked = m.extract_mix(w.st)
+        w.presets.store(0, "Linked", linked)
+        self.save_name.return_value = (str(self.dir / "linked.json"), "")
+        w.export_mix()
+        self.open_name.return_value = self.save_name.return_value
+        for step in (lambda: w.recall_slot(0), w.import_mix, w.restore_previous_mix):
+            w.reset_mix()                                       # nothing linked, nothing kept
+            self.assertEqual(w.st["unlinked"], {})
+            step()
+            unlinks_to_before(w)
+        w.save()
+        self.close(w)
+        unlinks_to_before(self.window())
+        self.warning.assert_not_called()
+
+    # ---------------------------------------------------------------- solo out of sight
+    def solo(self, w, key):
+        w.strips[key].solo.click()
+        self.assertTrue(m.any_solo(w.st))
+
+    def test_hiding_a_strip_clears_its_solo(self):
+        w = self.window()
+        pushed = []
+        w.engine.write_matrix = lambda gains, out: pushed.append(list(gains))
+        self.solo(w, "in:2")
+        self.solo(w, "play:0")                      # a linked pair: both channels
+        self.assertEqual(w.st["solo"]["play"][:2], [True, True])
+        w.hide_strip(w.strips["play:0"])
+        self.assertEqual(w.st["solo"]["play"][:2], [False, False])
+        self.assertTrue(w.st["solo"]["in"][2])      # the one still in view stays
+        w.hide_strip(w.strips["in:2"])
+        self.assertFalse(m.any_solo(w.st))
+        self.assertEqual(pushed[-1], list(m.compute_matrix(w.st)))      # and it is heard
+        w.unhide_all()
+        self.assertFalse(w.strips["in:2"].solo.isChecked())
+
+    def test_hiding_a_group_clears_its_solos(self):
+        w = self.window()
+        self.solo(w, "in:8")                        # AD2 1
+        self.solo(w, "in:0")
+        w.settings._show_toggled("AD2", False)
+        self.assertEqual([c for c, on in enumerate(w.st["solo"]["in"]) if on], [0])
+        w.settings._show_toggled("AD1", False)
+        self.assertFalse(m.any_solo(w.st))
+
+    def test_nothing_out_of_sight_is_soloed_after_a_recall_a_rate_change_or_a_remote(self):
+        w = self.window()
+        w.presets.store(0, "A", m.extract_mix(w.st))
+        w.st["hidden_strips"] = ["in:3"]
+        w.st["solo"]["in"][3] = w.st["solo"]["in"][20] = True
+        w.recall_slot(0)                            # the strips are rebuilt
+        self.assertEqual([c for c, on in enumerate(w.st["solo"]["in"]) if on], [20])
+        w.engine.status = lambda: {      # found, but not yet active: nothing to enable
+            "processing": True, "rate": 96000, "sink_linked": True, "hw": "no-nodes",
+            "hw_nodes": 0, "hw_levels": True, "dev_status": 0, "dev_status2": 0}
+        w.poll_engine()                             # AD3 5 is not there at 96 kHz
+        self.assertFalse(m.any_solo(w.st))
+        w.remote_message("/mix/in/3/0/solo", [1.0])
+        self.assertFalse(m.any_solo(w.st))
+        w.remote_message("/mix/in/2/0/solo", [1.0])
+        self.assertTrue(w.strips["in:2"].solo.isChecked())
 
 
 if __name__ == "__main__":

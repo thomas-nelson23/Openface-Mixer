@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from openface_mixer import model as m
-from openface_mixer.presets import PresetBank, export_mix, import_mix
+from openface_mixer.presets import VERSION, PresetBank, export_mix, import_mix
 
 
 class PresetBankTest(unittest.TestCase):
@@ -112,7 +112,7 @@ class MixFileTest(unittest.TestCase):
         self.path = Path(tmp.name) / "x.json"
 
     def file(self, **changes):
-        return dict({"format": "openface-mixer-mix", "version": 1, "name": "Live",
+        return dict({"format": "openface-mixer-mix", "version": VERSION, "name": "Live",
                      "mix": m.extract_mix(m.default_state())}, **changes)
 
     def test_export_import(self):

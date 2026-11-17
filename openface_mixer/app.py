@@ -29,10 +29,10 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
     compute_matrix, compute_out_gains, default_state, display_name, extract_mix, get_strip_db,
-    group_follow, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode,
-    strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
+    group_follow, set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon,
+    speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
@@ -142,6 +142,7 @@ class MainWindow(QMainWindow):
         self.settings.update_waiting.connect(self.show_update_waiting)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
+        self.control.recall.connect(self.recall_main)
         self.settings.add_control_room(self.control)
         self.remote_panel = RemotePanel(self.st, dev)
         self.settings.add_before_updates(self.remote_panel)
@@ -589,6 +590,21 @@ class MainWindow(QMainWindow):
         self.refresh_settings_buttons()
         self.refresh_sends(kind)
         self.matrix.rebuild()
+        if self.solo_as_shown(kind):
+            self.push_matrix()
+
+    def solo_as_shown(self, kind):
+        """Solo is what the strips show: off for a channel without one (hidden, or not there
+        at this sample rate), which would silence the submix with nothing on screen to say
+        why, and the same on both channels of a linked pair. True if that changed any."""
+        solo = self.st["solo"][kind]
+        shown = [False] * len(solo)
+        for s in (self.row_in if kind == "in" else self.row_play).strips:
+            for c in s.channels:
+                shown[c] = solo[s.channels[0]]
+        changed = shown != solo
+        solo[:] = shown
+        return changed
 
     def rebuild_outputs(self):
         self.strips = {k: s for k, s in self.strips.items() if not k.startswith("out:")}
@@ -697,20 +713,7 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def toggle_stereo(self, kind, c, on):
-        st = self.st
-        st["stereo"][kind][c // 2] = on
-        # keep the audible result similar: stereo uses balance, mono L/R get hard-panned
-        for p in range(N_PAIRS):
-            left, right = st["sends"][kind][c][p], st["sends"][kind][c + 1][p]
-            right[0] = left[0]
-            if on:
-                left[1] = right[1] = 0.0
-            else:
-                left[1], right[1] = -1.0, 1.0
-        st["mute"][kind][c + 1] = st["mute"][kind][c]
-        st["solo"][kind][c + 1] = st["solo"][kind][c]
-        st["groups"].pop(strip_key(kind, c + 1), None)   # the right channel no longer has a strip
-        st["names"].pop(strip_key(kind, c + 1), None)
+        set_stereo(self.st, kind, c, on)
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
 
@@ -1179,8 +1182,8 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action == "phones":
-            cr["encoder"] = "main" if cr["encoder"] == "phones" else "phones"
+        if action in ("phones", "phones2"):         # a lit key again: back to Main Out
+            cr["encoder"] = "main" if arc.key_lit(self.st, action, None) else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1188,13 +1191,24 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def arc_encoder(self, clicks):
-        """The encoder turns the Main Out (or Phones) master; its fader group follows, as when
-        the fader is moved with the mouse."""
+        """The encoder turns the Main Out (or Phones) master."""
         key = strip_key("out", control_room.encoder_pair(self.st))
         old = get_strip_db(self.st, key)
         _pair, db = control_room.step_volume(self.st, clicks)
-        moved = {key: db, **group_follow(self.st, key, old, db)}
-        for k, val in moved.items():
+        self.out_moved(key, old, db)
+
+    def recall_main(self):
+        """TotalMix's Recall: Main Out goes to the stored listening level."""
+        cr = control_room.control_room(self.st)
+        key = strip_key("out", cr["main"])
+        old = get_strip_db(self.st, key)
+        set_strip_db(self.st, key, cr["recall_db"])
+        self.out_moved(key, old, cr["recall_db"])
+
+    def out_moved(self, key, old, db):
+        """An output master was set without its fader: show it, and let its fader group follow
+        as when the fader is moved with the mouse, also where a strip is hidden."""
+        for k, val in {key: db, **group_follow(self.st, key, old, db)}.items():
             if k in self.strips:
                 self.strips[k].set_fader(val)
         self.push_matrix()
@@ -1261,6 +1275,8 @@ class MainWindow(QMainWindow):
         """A controller on the network changed something (osc_remote.apply says what)."""
         res = osc_remote.apply(self.st, self.dev, self.mode, address, args)
         if res.kind == "changed":
+            for kind in ("in", "play"):
+                self.solo_as_shown(kind)        # a remote can't solo what is hidden here
             if res.selected is not None and res.selected != self.submix.currentData():
                 self.select_out(res.selected, by_pair=True)
             self.sync_strips()

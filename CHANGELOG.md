@@ -15,11 +15,16 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The settings show the installed version, and the app looks for an update a few seconds after it starts. A dot on the gear button says one is waiting. Untick *Check when the app starts* to switch this off.
 - Updates follow releases by default. Choose *Update to: Latest changes* to get every change as soon as it is made (for testers).
 - Arch: a package recipe (`openface-mixer-git`) in `packaging/aur`.
+- Control room: set the Dim amount and the Talkback dim amount, send talkback to further outputs with *Talkback to*, and set Main Out to a stored listening level with *Recall*.
+- Control room: up to four Phones outputs. With two or more, the ARC USB's two Phones keys select the first and the second.
 
 ### Changed
 
 - Matrix view: a click on a cell that has a level selects it instead of clearing it. Double-click or Delete clears it. The wheel scrolls the grid, and Ctrl + wheel changes a level.
 - Clearing a preset slot asks first.
+- Pan: a mono channel panned to the centre is 3 dB down on each side, as in TotalMix. Saved mixes, presets and mix files are converted once and sound the same; a centred mono fader reads about 3 dB higher than before. Going back to an older version afterwards needs the config backup the update made.
+- Linking two channels to a stereo pair keeps what each had on its own. Unlinking brings back both channels' levels, pans and mutes, and the right channel's fader group.
+- Hiding a channel or a channel group switches its solo off, so nothing out of sight can silence a mix.
 - An interface's engine and playback sink are switched on the first time the app sees that interface, no longer for everyone at install.
 - 802, UCX II: mute and solo also cut a channel's reverb and echo send.
 - 802, UCX II: a stereo-linked pair uses the left channel's effects for both sides. The right channel's own settings come back on unlink.
@@ -40,6 +45,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - A damaged or half-written mix or preset file no longer stops the app from opening: the last good save is loaded, and saves are synced to disk.
 - Importing a damaged or foreign mix file leaves the current mix as it was, and exporting to a place that can't be written says so.
 - A mix made on a bigger interface no longer leaves hidden routing on channels this interface doesn't have.
+- Talkback goes to the output chosen as Phones, no longer always to the interface's own phones output.
 - 802, UCX II: effect settings are sent before an effect is switched on, so it never starts with settings left by another controller.
 - UCX II: input 1 is unmuted on connect like the other inputs.
 - 802, UCX II: Room EQ volume and the UCX II echo delay show the value that is sent, and typing a value on FX Send in the channel settings works.
@@ -68,6 +74,7 @@ people who have one can try them. Please try the points for your interface and
 
 **Fireface 802**
 
+- Talkback with Phones set to PH 11/12 lands there only, and on both PH 9/10 and PH 11/12 once both are ticked as Phones.
 - Mute or solo a channel that has an FX send: it leaves the reverb and echo and returns at its old level.
 - Link and unlink a pair, and recall a preset that links one: both sides take the left channel's effects, and the right channel's own return on unlink.
 - AN 9 to 12 with a condenser mic: 48V stays off after Inst was ticked and unticked, also on a linked pair.
@@ -101,10 +108,14 @@ people who have one can try them. Please try the points for your interface and
 
 - After an engine restart the saved routing is back.
 - Update with the Digiface unplugged: `systemctl --user is-enabled openface-mixer-engine` still says `enabled`.
+- An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
 
 **Every Fireface and HDSPe card**
 
+- An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
+- Talkback to further outputs, the Talkback dim amount and *Recall*.
+- ARC USB: with one Phones output both Phones keys light together as before; with two, each key lights alone and the encoder turns its own output.
 - With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
