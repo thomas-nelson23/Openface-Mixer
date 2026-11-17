@@ -103,7 +103,9 @@ app.MainWindow
   `app.py`): connecting never changes the unit's clock. On the 802 and UCX II the command list ends with the TotalMix FX effects
   (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
   parameters stay 0 (unused slots) while their effect is off. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
-  and written live. The settings panel picks its layout by `Device.family` ("latter", "former",
+  and written live; their one stored setting is the "Use anyway" answer to the driver warning,
+  which reaches the engine as a non-zero configuration word (the backend's `attach()` gives it
+  the shared memory to look at when it opens the card). The settings panel picks its layout by `Device.family` ("latter", "former",
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).

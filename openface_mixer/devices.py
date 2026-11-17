@@ -307,6 +307,14 @@ class HDSPeCard(Device):
     def present(self):
         return Hardware.find_card(self.alsa_card) is not None
 
+    def upgrade_settings(self, st):
+        hw = st.get("hw")
+        st["hw"] = {"use_anyway": isinstance(hw, dict) and hw.get("use_anyway") is True}
+
+    def device_words(self, st):
+        """The configuration word tells the engine to drive a card its driver rule doubts."""
+        return int(st["hw"]["use_anyway"]), []
+
 
 DEVICES = {d.key: d for d in (
     Digiface(), Fireface802(), Fireface802USB(), FirefaceUCX2(), Fireface800(), Fireface400(),

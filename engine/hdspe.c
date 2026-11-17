@@ -28,6 +28,7 @@ const struct hdspe_model hdspe_aes = { "RME AES32", 16 };
 
 struct hdspe {
 	const struct hdspe_model *model;
+	const struct ofm_shm *shm;   /* dev_config: non-zero once the user chose "Use anyway" */
 	int ctl;      /* /dev/snd/controlC<n>, -1 while closed */
 	int hwdep;    /* /dev/snd/hwC<n>D0 */
 	unsigned int mixer_numid;
@@ -115,8 +116,9 @@ static int read_gain(struct hdspe *r, int src, int dst, uint16_t *gain)
 	return mixer_io(r, SNDRV_CTL_IOCTL_ELEM_READ, src, dst, gain);
 }
 
-/* Opens the control device of the model's card. Returns its fd, or -1 with *state set. */
-static int find_card(const struct hdspe_model *m, int *card, int *state)
+/* Opens the control device of the model's card. Returns its fd, or -1 with *state set. A card
+ * the driver rule doubts is only taken with anyway. */
+static int find_card(const struct hdspe_model *m, bool anyway, int *card, int *state)
 {
 	*state = DFU_STATE_NO_DEVICE;
 	for (int n = 0; n < MAX_CARDS; n++) {
@@ -132,7 +134,8 @@ static int find_card(const struct hdspe_model *m, int *card, int *state)
 		memset(&info, 0, sizeof(info));
 		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
 		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name)) {
-			if (hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
+			if (anyway ||
+			    hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
 				*card = n;
 				return fd;
 			}
@@ -153,6 +156,12 @@ static void *create(const struct hdspe_model *m)
 	r->model = m;
 	r->ctl = r->hwdep = -1;
 	return r;
+}
+
+static void attach(void *h, const struct ofm_shm *s)
+{
+	struct hdspe *r = h;
+	r->shm = s;
 }
 
 static void close_dev(void *h)
@@ -179,7 +188,7 @@ static int open_dev(void *h)
 
 	if (r->ctl >= 0)
 		return DFU_STATE_ACTIVE;
-	r->ctl = find_card(r->model, &card, &state);
+	r->ctl = find_card(r->model, r->shm->dev_config != 0, &card, &state);
 	if (r->ctl < 0)
 		return state;
 
@@ -306,6 +315,7 @@ static void *create_aes(void) { return create(&hdspe_aes); }
 		.out_node_card = card_name,		\
 		.meter_us = 20000,			\
 		.create = create_fn,			\
+		.attach = attach,			\
 		.destroy = destroy,			\
 		.open = open_dev,			\
 		.close = close_dev,			\

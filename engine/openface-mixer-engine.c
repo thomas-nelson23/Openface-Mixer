@@ -607,6 +607,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "openface-mixer: cannot initialise the %s backend\n", d.be->name);
 		return 1;
 	}
+	if (d.be->attach)
+		d.be->attach(d.hw, d.shm);
 	pthread_mutex_init(&d.usb_lock, NULL);
 
 	d.loop = pw_main_loop_new(NULL);

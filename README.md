@@ -293,8 +293,10 @@ Which driver the card needs depends on its age:
 
 - Cards from before 2022 run on the kernel's own `snd-hdspm`; nothing to install.
 - Cards from 2022 on need [snd-hdspe](https://github.com/Schroedingers-Cat/snd-hdspe) (its
-  `develop` branch). The kernel's `snd-hdspm` still claims them but can't run them, so Openface
-  Mixer leaves such a card alone and says so. Install snd-hdspe with DKMS as its README
+  `develop` branch). The kernel's `snd-hdspm` still claims them but doesn't run them properly,
+  so Openface Mixer leaves such a card alone and says so. Which cards those are is a guess (see
+  [Status and limitations](#status-and-limitations)): if yours works with `snd-hdspm`, choose **Use
+  anyway** in the settings panel. Otherwise install snd-hdspe with DKMS as its README
   describes (`make install`) and blacklist the old driver:
 
       echo "blacklist snd-hdspm" | sudo tee /etc/modprobe.d/hdspe.conf

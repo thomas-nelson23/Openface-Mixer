@@ -24,6 +24,9 @@ struct ofm_backend {
 	unsigned int meter_us;        /* meter poll interval */
 
 	void *(*create)(void);
+	/* Optional, called once after create: the shared memory, for a backend whose open depends
+	 * on what the GUI wrote there. */
+	void (*attach)(void *h, const struct ofm_shm *s);
 	void (*destroy)(void *h);
 	/* Opens the device. Returns a DFU_STATE_* value (digiface_usb.h); ACTIVE when open. */
 	int (*open)(void *h);

@@ -418,9 +418,14 @@ or `HDSPe` and short name `RME RayDAT_<serial>`.
 Cards made from 2022 on need snd-hdspe; snd-hdspm still binds to them (its PCI table lists
 device `3fc6` under both Xilinx's vendor ID `10ee` and RME's `1d18`) but doesn't run them
 properly. Openface Mixer tells them apart by PCI vendor (`/sys/class/sound/card<n>/device/vendor`):
-a card with RME's `1d18` under snd-hdspm is left alone, and the engine reports `wrong-driver`
-instead of writing its mixer. That the vendor ID is what marks the newer cards is inferred from
-the drivers' ID tables and user reports, not from RME documentation.
+a card with RME's `1d18` under snd-hdspm is left alone at first, and the engine reports
+`wrong-driver` instead of writing its mixer. That the vendor ID is what marks the newer cards is
+a guess from the drivers' ID tables and user reports, not from RME documentation (snd-hdspe
+itself tells the generations apart by firmware build). So it is a warning, not a block: **Use
+anyway** in the settings panel stores the choice with the mix (`dev_config` = 1 in shared memory
+and `matrix.bin`), and from then on the engine and the settings controls treat the card as any
+other.
+
 
 ## Mixer
 

@@ -1,9 +1,13 @@
 import copy
+import importlib.util
+import os
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import devices, hardware, hdspe as rd, model as m
+from openface_mixer import config, devices, hardware, hdspe as rd, model as m
+
+HAVE_QT = importlib.util.find_spec("PySide6") is not None
 
 # amixer -c N contents, cut down to the RayDAT controls the GUI uses (snd-hdspm's names)
 AMIXER = """\
@@ -165,6 +169,7 @@ CARDS = """\
 RAYDAT, AIO, AES = rd.MODELS["raydat"], rd.MODELS["aio"], rd.MODELS["aes"]
 
 
+
 class ChannelTest(unittest.TestCase):
     def test_counts(self):
         self.assertEqual([RAYDAT.n_channels(mode) for mode in (1, 2, 4)], [36, 20, 12])
@@ -306,6 +311,21 @@ class DeviceTest(unittest.TestCase):
             self.assertTrue(devices.DEVICES["aiopro"].present())
 
 
+    def test_use_anyway(self):
+        dev = devices.DEVICES["aio"]
+        st = m.default_state(dev.phones_pair(1))
+        dev.upgrade_settings(st)
+        self.assertEqual(st["hw"], {"use_anyway": False})
+        self.assertIsNone(config.device_block(st, dev))        # nothing for the engine
+        self.assertNotIn(b"OFD2", config.matrix_file_bytes(st, dev))
+        st["hw"] = {"use_anyway": True, "junk": 1}
+        dev.upgrade_settings(st)
+        self.assertEqual(st["hw"], {"use_anyway": True})
+        self.assertEqual(config.device_block(st, dev)[0], 1)   # the engine's dev_config
+        self.assertIn(b"OFD2", config.matrix_file_bytes(st, dev))
+
+
+
 class OldMixTest(unittest.TestCase):
     """Mixes saved before the mix model grew to 36 channels still load."""
 
@@ -337,6 +357,61 @@ class OldMixTest(unittest.TestCase):
         mix = m.extract_mix(self.old_state())
         st = m.apply_mix(m.default_state(16), copy.deepcopy(mix))
         self.check_full(st)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
+class PanelTest(unittest.TestCase):
+    """What the settings panel and a strip show (Qt widgets, drawn nowhere)."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def panel(self, key="raydat", **hw):
+        from openface_mixer import settings_panel
+        dev = devices.DEVICES[key]
+        st = m.default_state(dev.phones_pair(1))
+        dev.upgrade_settings(st)
+        st["hw"].update(hw)
+        with mock.patch.object(settings_panel.updater, "install_source", return_value=None):
+            return settings_panel.SettingsPanel(hardware.Hardware(dev.alsa_card), dev, st)
+
+    @staticmethod
+    def lit(light):
+        return "●" in light.text()
+
+    def test_use_anyway(self):
+        p = self.panel("aio")
+        status = {"hw": "wrong-driver", "hw_nodes": 0, "hw_levels": 0, "processing": True,
+                  "sink_linked": False}
+        p.update_hw_mixer(status)
+        self.assertFalse(p.use_btn.isHidden())
+        self.assertIn("Check driver", p.hw_label.text())
+        self.assertIn("Use anyway", p.status_note.text())
+        changed = []
+        p.hw_changed.connect(lambda: changed.append(1))
+        p.use_btn.click()
+        self.assertEqual((p.st["hw"], changed), ({"use_anyway": True}, [1]))
+        p.update_hw_mixer(dict(status, hw="active"))
+        self.assertTrue(p.use_btn.isHidden())
+        p.update_hw_mixer(dict(status, hw="wrong-driver"))
+        p.update_hw_mixer(None)
+        self.assertTrue(p.use_btn.isHidden())
+
+    def test_doubted_driver_turns_settings_off(self):
+        ctrls = hardware.parse_amixer_contents(AMIXER)
+        for anyway in (False, True):
+            p = self.panel(use_anyway=anyway)
+            p.hw.card = 1
+            with mock.patch.object(Path, "read_text", return_value=CARDS), \
+                    mock.patch.object(hardware.Hardware, "pci_vendor",
+                                      return_value=rd.VENDOR_RME):
+                p.update_hdspe(ctrls)
+            self.assertEqual(p.rd_combos["clock"].isEnabled(), anyway)
+            self.assertEqual("Settings are off" in p.rd_info.text(), not anyway)
+
 
 
 if __name__ == "__main__":

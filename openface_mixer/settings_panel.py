@@ -62,10 +62,11 @@ def hw_state(dev, state):
                      "missing."),
         "error": (light(RED, f"{dev.bus} error", False),
                   f"{dev.bus} error talking to the {short}; retrying."),
-        "wrong-driver": (light(RED, "Wrong driver", False),
-                         f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards "
-                         "from 2022 on. Install snd-hdspe and blacklist snd-hdspm (see the "
-                         "README)."),
+        "wrong-driver": (light(AMBER, "Check driver", False),
+                         f"This {short} looks like a card from 2022 on. Those need the snd-hdspe "
+                         "driver, and this one runs on snd-hdspm, so the mixer is left alone. "
+                         "Install snd-hdspe and blacklist snd-hdspm (see the README), or choose "
+                         "Use anyway if the card works for you as it is."),
     }.get(state, (state, ""))
 
 
@@ -219,6 +220,11 @@ class SettingsPanel(QWidget):
         self.status_note.setTextInteractionFlags(Qt.TextSelectableByMouse)   # commands to copy
         self.status_note.hide()
         el.addWidget(self.status_note, el.rowCount(), 0, 1, 2)
+        self.use_btn = QPushButton("Use anyway")      # for the HDSPe driver warning
+        self.use_btn.setToolTip("Let Openface Mixer drive this card on snd-hdspm from now on")
+        self.use_btn.clicked.connect(lambda: self._set_hw("use_anyway", True))
+        self.use_btn.hide()
+        el.addWidget(self.use_btn, el.rowCount(), 0, 1, 2)
         self.eng_btn = QPushButton("Restart engine")
         el.addWidget(self.eng_btn, el.rowCount(), 0, 1, 2)
         el.setColumnStretch(1, 1)
@@ -658,7 +664,8 @@ class SettingsPanel(QWidget):
         usable = True
         if st:
             drv = Hardware.card_driver(self.hw.card) or st["driver"]
-            usable = hdspe.driver_usable(drv, Hardware.pci_vendor(self.hw.card))
+            usable = (self.st["hw"]["use_anyway"]
+                      or hdspe.driver_usable(drv, Hardware.pci_vendor(self.hw.card)))
         self._rd_ctrls = ctrls if st else None
         self._updating = True
         try:
@@ -693,9 +700,8 @@ class SettingsPanel(QWidget):
             self._show_fw_status(None)
             return
         if not usable:
-            self.rd_info.setText(
-                "<span style='color:#ff2a4f'>Settings off: snd-hdspm can't run this card."
-                "</span>")
+            self.rd_info.setText(f"<span style='color:{AMBER}'>Settings are off: see the driver "
+                                 "note under Status.</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
             if st["firmware"]:
@@ -772,10 +778,12 @@ class SettingsPanel(QWidget):
             self.show_status_note(html.escape(engine_error) if engine_error else
                                   "The hardware keeps its last mix. Start the engine to "
                                   "change it.")
+            self.use_btn.hide()
             self.eng_btn.setText("Start engine")
             return
         value, note = hw_state(self.dev, status["hw"])
         self.hw_label.setText(value)
+        self.use_btn.setVisible(status["hw"] == "wrong-driver")
         if status["hw"] in ("active", "no-nodes"):
             limit = f" of {self.dev.max_routes}" if self.dev.max_routes else ""
             self.routes_label.setText(f"{status['hw_nodes']}{limit}")
