@@ -27,7 +27,7 @@ class UpdaterTest(unittest.TestCase):
         git(self.up, "config", "user.name", "t")
         script = self.up / "scripts" / "install.sh"
         script.parent.mkdir()
-        script.write_text('#!/bin/sh\ngit rev-parse HEAD >> ran\n')
+        script.write_text('#!/bin/sh\ngit rev-parse HEAD >> ran\necho "$PREFIX" > prefix\n')
         script.chmod(0o755)
         self.commit(self.up, "first")
         git(self.tmp, "clone", "-q", str(self.origin), str(self.src))
@@ -51,16 +51,33 @@ class UpdaterTest(unittest.TestCase):
             f.write_text(f"{self.tmp / 'gone'}\n{self.installed}\n")
             self.assertIsNone(updater.install_source())
 
+    def test_packaged_install(self):
+        f = self.tmp / "install-source"
+        with mock.patch.object(updater, "SOURCE_FILE", f):
+            self.assertFalse(updater.packaged())
+            self.assertIn("git pull", updater.manual_hint())
+            f.write_text("package\n")       # what scripts/install.sh writes with DESTDIR
+            self.assertTrue(updater.packaged())
+            self.assertIsNone(updater.install_source())
+            self.assertIn("package manager", updater.manual_hint())
+            f.write_text(f"{self.src}\n{self.installed}\n")
+            self.assertFalse(updater.packaged())
+
     def test_check_and_update(self):
         self.assertEqual(updater.check(self.src, self.installed), [])
         self.commit(self.up, "second")
         self.commit(self.up, "third")
         self.assertEqual(updater.check(self.src, self.installed), ["third", "second"])
-        with mock.patch.object(updater, "CONFIG_DIR", self.config):
+        prefix = self.tmp / "prefix"
+        with mock.patch.object(updater, "CONFIG_DIR", self.config), \
+                mock.patch.object(updater, "SOURCE_FILE",
+                                  prefix / "share" / "openface-mixer" / "install-source"):
             updater.update(self.src)
         head = git(self.src, "rev-parse", "HEAD")
         self.assertEqual(head, git(self.up, "rev-parse", "HEAD"))
         self.assertEqual((self.src / "ran").read_text().split(), [head])
+        # reinstalled where the running copy is, not in the installer's default prefix
+        self.assertEqual((self.src / "prefix").read_text().strip(), str(prefix))
         backups = list(self.config.parent.glob("openface-mixer.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual((backups[0] / "matrix.bin").read_bytes(), b"mix")
