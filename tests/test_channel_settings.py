@@ -43,6 +43,20 @@ class Fireface802Test(unittest.TestCase):
         p48.click()
         self.assertTrue(s["in"]["p48"][0])
 
+    def test_48v_is_locked_while_either_side_of_a_pair_has_inst(self):
+        from openface_mixer import fireface802 as ff
+        s = ff.default_settings()
+        s["in"]["inst"][1] = True                                   # AN 10 only
+        popup = self.popup(s, "in", [8, 9])                         # AN 9/10 linked
+        boxes = {b.text(): b for b in popup.findChildren(QCheckBox)}
+        p48, inst = boxes["48V phantom power"], boxes["Inst (Hi-Z)"]
+        self.assertTrue(inst.isChecked() and not p48.isEnabled())
+        p48.click()                                                 # can't be stored for later
+        self.assertEqual(s["in"]["p48"][:2], [False, False])
+        inst.click()
+        self.assertEqual(s["in"]["inst"][:2], [False, False])
+        self.assertTrue(p48.isEnabled())
+
     def test_fx_send_of_a_linked_pair_is_the_left_channels(self):
         from openface_mixer import fireface802 as ff
         from openface_mixer.fx_panels import LevelKnob

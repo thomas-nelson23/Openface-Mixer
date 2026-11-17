@@ -134,9 +134,10 @@ class ChannelSettings(QFrame):
         if kind == "in" and mic:
             row = self._check(grid, row, "48V phantom power", part["p48"], mic)
             p48 = grid.itemAtPosition(row - 1, 0).widget()
-            p48.setEnabled(not part["inst"][mic[0]])
+            inst_on = any(part["inst"][m] for m in mic)   # either side of a linked pair
+            p48.setEnabled(not inst_on)
             inst = QCheckBox("Inst (Hi-Z)")
-            inst.setChecked(part["inst"][mic[0]])
+            inst.setChecked(inst_on)
             inst.setToolTip("Instrument input. Switches 48V off")
 
             def set_inst(on):
