@@ -794,7 +794,11 @@ class MainWindow(QMainWindow):
     def show_fx_unit(self, on):
         """Reverb and Echo, at the end of the outputs row (the FX button)."""
         panel = self.fx_panels.get(("unit", ""))
-        if not on:
+        if panel is not None and self.tabs.currentIndex() == 1:
+            self.tabs.setCurrentIndex(0)    # it is open behind the Matrix: show it
+            self.fx_btn.setChecked(True)
+            self.row_out.reveal(panel)
+        elif not on:
             if panel is not None:
                 panel.close()
         elif panel is None:

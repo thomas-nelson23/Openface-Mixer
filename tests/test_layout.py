@@ -390,6 +390,11 @@ class PanelTest(WindowCase):
         unit.rv_on.click()
         self.assertTrue(self.w.st["hw"]["fx"]["reverb"]["on"])
         unit.rv_on.click()
+        self.w.tabs.setCurrentIndex(1)                              # open behind the Matrix:
+        self.w.fx_btn.click()                                       # the button shows it
+        self.settle()
+        self.assertEqual(self.w.tabs.currentIndex(), 0)
+        self.assertTrue(unit.isVisible() and self.w.fx_btn.isChecked())
         self.w.fx_btn.click()
         self.settle()
         self.assertNotIn(("unit", ""), self.w.fx_panels)
