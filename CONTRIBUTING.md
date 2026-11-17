@@ -40,7 +40,7 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   wheel.py              mouse wheel and touchpad steps for faders, knobs and matrix cells (no Qt)
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
-  updater.py            the Updates section's work: check and update the checkout it was installed from (no Qt)
+  updater.py            the Updates section's work: check and update the checkout it was installed from, to the newest release or the latest main (no Qt)
   theme.py              colours, bundled fonts and the Qt stylesheet
   fonts/                Sora, JetBrains Mono, Michroma (SIL OFL)
 packaging/              .desktop file, systemd user units, udev rules; aur/ has the Arch package recipe
@@ -75,6 +75,25 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
 - Python style: PEP 8, 100-column lines, standard library only (plus PySide6).
   C style: kernel/PipeWire-like (tabs, `snake_case`).
 - Add or update tests for model and preset changes. Run `make test lint` before opening a PR.
+- Every pull request adds its line to the *Unreleased* section of [CHANGELOG.md](CHANGELOG.md),
+  written for users. A change to an interface nobody could try also gets a line under *Not yet
+  tried on hardware* that says what a tester should check.
+
+## Releases
+
+The app's **Updates** section has two channels. *Releases*, the default, moves an install to
+the newest release tag. *Latest changes* follows `main` and is meant for testers. Until the
+first tag exists, both follow `main`.
+
+A release is a tag named `vMAJOR.MINOR.PATCH` on a commit of `main`:
+
+1. Set `__version__` in `openface_mixer/__init__.py`, and in `CHANGELOG.md` rename *Unreleased*
+   to the version and its date and start a new empty *Unreleased* above it. Merge that.
+2. Tag the merged commit and push the tag: `git tag v0.4.0 && git push origin v0.4.0`.
+
+The app compares the three numbers, so `v0.10.0` is newer than `v0.9.0`. It ignores tags of any
+other form (`v0.5.0-rc1`) and tags on commits that are not on `main`, and it never moves an
+install backwards: a copy that is already past the newest tag waits for the next one.
 
 ## Testing without hardware
 
