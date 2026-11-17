@@ -235,3 +235,13 @@ class RemoteSettingsTest(unittest.TestCase):
         st = {"remote": {"enabled": True, "port": 1.5, "host": "studio.local"}}
         r = osc.remote_settings(st)
         self.assertEqual((r["enabled"], r["port"], r["host"]), (True, 7001, "studio.local"))
+
+    def test_ports_outside_what_the_settings_offer_go_back_to_their_defaults(self):
+        for port, out_port in ((70000, 0), (-5, -1), (22, 70000), (2 ** 40, 2 ** 40)):
+            r = osc.remote_settings({"remote": {"enabled": True, "port": port,
+                                                "out_port": out_port}})
+            self.assertEqual((r["port"], r["out_port"]), (7001, 9001))
+        r = osc.remote_settings({"remote": {"port": 1024, "out_port": 1}})
+        self.assertEqual((r["port"], r["out_port"]), (1024, 1))
+        r = osc.remote_settings({"remote": {"port": 65535, "out_port": 65535}})
+        self.assertEqual((r["port"], r["out_port"]), (65535, 65535))

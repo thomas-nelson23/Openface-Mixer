@@ -107,6 +107,13 @@ class MixWindowTest(unittest.TestCase):
                 self.close(w)
                 path.unlink()
 
+    def test_opens_on_damaged_remote_settings(self):
+        remote = {"port": 2 ** 40, "host": "a..b", "out_port": -1}      # no port, no host name
+        self.write_state(json.dumps(dict(m.default_state(), remote=remote)))
+        w = self.window()
+        self.assertEqual((w.st["remote"]["port"], w.st["remote"]["out_port"]), (7001, 9001))
+        self.assertIsNone(w.remote.target)
+
     def test_says_once_that_the_backup_was_loaded(self):
         good = m.default_state(16)
         good["sends"]["in"][0][0] = [-6.0, 0.0]

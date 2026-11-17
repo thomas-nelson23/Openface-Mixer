@@ -31,6 +31,7 @@ from .model import NEG_INF, any_solo, display_name, strip_channels, strip_key
 
 DEFAULT_PORT = 7001        # TotalMix's default "Port incoming"
 DEFAULT_OUT_PORT = 9001    # TotalMix's default "Port outgoing"
+PORTS = {"port": range(1024, 65536), "out_port": range(1, 65536)}   # what the settings offer
 LEVEL_FLOOR_DB = -90.0
 
 KINDS = {"input": "in", "playback": "play", "output": "out"}
@@ -57,7 +58,8 @@ def remote_settings(st):
         r = st["remote"] = {}
     for k, default in (("enabled", False), ("port", DEFAULT_PORT), ("host", ""),
                        ("out_port", DEFAULT_OUT_PORT), ("levels", True)):
-        if type(r.get(k)) is not type(default):     # missing, or damaged in the state file
+        v = r.get(k)                    # missing, or damaged in the state file
+        if type(v) is not type(default) or (k in PORTS and v not in PORTS[k]):
             r[k] = default
     return r
 
