@@ -8,7 +8,9 @@ Concepts
 * A *send* is the level (dB, or None for -inf) and pan (-1..1) of one source channel into one
   output pair. The GUI's faders show the sends into the currently selected output pair, which
   is TotalMix's "submix" workflow.
-* Adjacent source channels can be stereo-linked; a linked pair shares one strip.
+* A mono channel is panned with constant power, as in TotalMix: 3 dB down on both sides at the
+  centre. Adjacent source channels can be stereo-linked; a linked pair shares one strip, and its
+  pan is the balance of the two sides.
 * Solo works like TotalMix: solo-in-place, post fader, and only in the current submix. While
   any source is soloed, the other sources are silent in the selected output pair; every other
   submix is untouched. Solo is momentary monitoring, so it is neither saved nor part of a mix.
@@ -35,7 +37,7 @@ NEG_INF = float("-inf")
 FADER_MAX_DB = 6.0
 FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
-STATE_VERSION = 5
+STATE_VERSION = 6        # 6: mono channels pan with constant power (convert_pan_law)
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
 MIX_KEYS = ("stereo", "mute", "sends", "out", "groups")
 
@@ -254,9 +256,12 @@ def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
             raise ValueError("not a mixer state")
         return default_state(selected)
     base = default_state(selected)
+    version = st.get("version", 0)
     for k, v in base.items():
         st.setdefault(k, v)
     st.update(checked_mix(st, strict))
+    if is_index(version, 6):            # a version that is no number is taken as today's
+        convert_pan_law(st)
     for k in ("names", "colors", "icons"):
         st[k] = {key: v for key, v in st[k].items() if valid_key(key) and isinstance(v, str)
                  } if isinstance(st[k], dict) else {}
@@ -276,6 +281,34 @@ def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
 
 def any_solo(st):
     return any(st["solo"]["in"]) or any(st["solo"]["play"])
+
+
+def pan_gains(pan):
+    """(left, right) gain of a mono channel at pan (-1..1). Constant power, as in TotalMix:
+    full level at either end and 3 dB down on both sides at the centre."""
+    t = (pan + 1.0) * math.pi / 4
+    return (math.cos(t) if pan < 1.0 else 0.0), math.sin(t)
+
+
+def convert_pan_law(mix):
+    """Rewrite, in place, a checked mix from before mono channels were panned with constant
+    power (state version 5, mix files version 1), so that it sounds as it did. Then a send
+    gave min(1, 1 - pan) to the left and min(1, 1 + pan) to the right, full level on both
+    sides at the centre; its new level is the power sum of the two and its new pan their
+    angle. Linked pairs still use that balance law and stay as they are. A level can't go
+    above the fader's top: a send that would is held there and comes out lower by the rest
+    (only one that was above +3 dB at the centre)."""
+    stereo = mix.get("stereo") or default_state(0)["stereo"]
+    for kind, rows in mix.get("sends", {}).items():
+        for c, row in enumerate(rows):
+            if stereo[kind][c // 2]:
+                continue
+            for send in row:
+                gl, gr = min(1.0, 1.0 - send[1]), min(1.0, 1.0 + send[1])
+                send[1] = max(-1.0, min(1.0, math.atan2(gr, gl) * 4 / math.pi - 1.0))
+                if send[0] is not None:
+                    send[0] = min(FADER_MAX_DB, send[0] + 10 * math.log10(gl * gl + gr * gr))
+    return mix
 
 
 def compute_matrix(st, solo=True):
@@ -302,17 +335,16 @@ def compute_matrix(st, solo=True):
                 lin = db2lin(gdb)
                 if lin == 0.0:
                     continue
-                gl = lin * min(1.0, 1.0 - pan)   # balance law: centre = full level both sides
-                gr = lin * min(1.0, 1.0 + pan)
                 s = base + c
-                if stereo:                        # linked pair: L -> L, R -> R
+                if stereo:      # linked pair: L -> L, R -> R, pan is the balance of the two
                     if left:
-                        g[(2 * p) * N_SRC + s] += gl
+                        g[(2 * p) * N_SRC + s] += lin * min(1.0, 1.0 - pan)
                     else:
-                        g[(2 * p + 1) * N_SRC + s] += gr
-                else:                             # mono: panned into both sides
-                    g[(2 * p) * N_SRC + s] += gl
-                    g[(2 * p + 1) * N_SRC + s] += gr
+                        g[(2 * p + 1) * N_SRC + s] += lin * min(1.0, 1.0 + pan)
+                else:           # mono: panned into both sides
+                    gl, gr = pan_gains(pan)
+                    g[(2 * p) * N_SRC + s] += lin * gl
+                    g[(2 * p + 1) * N_SRC + s] += lin * gr
     return g
 
 

@@ -3,9 +3,19 @@ import json
 from pathlib import Path
 
 from .config import BAD_FILE, atomic_write
-from .model import N_SLOTS, checked_mix
+from .model import N_SLOTS, checked_mix, convert_pan_law, is_index
 
 FILE_FORMAT = "openface-mixer-mix"
+VERSION = 2     # of presets.json and of mix files. 2: constant-power pan (convert_pan_law)
+
+
+def read_mix(mix, data):
+    """The mix found in data, a preset or mix file as parsed, checked and in today's shape.
+    One from a file older than VERSION is converted, so it sounds as it did when it was saved;
+    a file whose version is no number is taken as today's. Raises ValueError for a damaged
+    mix."""
+    mix = checked_mix(mix)
+    return convert_pan_law(mix) if is_index(data.get("version", 1), VERSION) else mix
 
 
 class PresetBank:
@@ -34,7 +44,7 @@ class PresetBank:
             if s is None:
                 continue
             try:
-                mix = checked_mix(s.get("mix") if isinstance(s, dict) else None)
+                mix = read_mix(s.get("mix") if isinstance(s, dict) else None, data)
             except ValueError:
                 self.damaged = True
                 continue
@@ -43,7 +53,7 @@ class PresetBank:
                              "mix": mix}
 
     def save(self):
-        atomic_write(self.path, json.dumps({"version": 1, "slots": self.slots}, indent=1),
+        atomic_write(self.path, json.dumps({"version": VERSION, "slots": self.slots}, indent=1),
                      keep_backup=self.damaged)
         self.damaged = False
 
@@ -65,7 +75,7 @@ class PresetBank:
 
 
 def export_mix(path, name, mix):
-    atomic_write(Path(path), json.dumps({"format": FILE_FORMAT, "version": 1, "name": name,
+    atomic_write(Path(path), json.dumps({"format": FILE_FORMAT, "version": VERSION, "name": name,
                                          "mix": mix}, indent=1))
 
 
@@ -79,7 +89,7 @@ def import_mix(path):
         data = None
     if not isinstance(data, dict) or data.get("format") != FILE_FORMAT:
         raise ValueError("not an Openface Mixer mix file")
-    mix = checked_mix(data.get("mix"))
+    mix = read_mix(data.get("mix"), data)
     if not mix:
         raise ValueError("mix file contains no mixer settings")
     name = data.get("name")

@@ -118,8 +118,13 @@ app.MainWindow
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).
-- Pan uses a balance law: at centre both sides get full level. A mono source is panned across the
-  pair; in a linked stereo pair, left goes to left and right goes to right.
+- A mono source is panned across the pair with constant power, as in TotalMix: full level at
+  either end and 3 dB down on both sides at the centre (`model.pan_gains`). In a linked stereo
+  pair, left goes to left and right goes to right, and pan is their balance: full level on both
+  sides at the centre. Until state version 5 mono sources used the balance law too. States,
+  presets and mix files from then (`presets.json` and mix files: version 1) are converted when
+  they are read, so they sound as they did (`model.convert_pan_law`); the one thing that can't be
+  kept is a level above the fader's +6 dB, which is held there.
 - **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
   unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,

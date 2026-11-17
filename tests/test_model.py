@@ -1,4 +1,5 @@
 import copy
+import math
 import unittest
 
 from openface_mixer import model as m
@@ -82,10 +83,10 @@ class MatrixTest(unittest.TestCase):
 
     def test_mono_input_pans_into_pair(self):
         st = m.default_state()
-        st["sends"]["in"][0][16] = [0.0, -0.5]          # input 1 -> phones, panned left
+        st["sends"]["in"][0][16] = [0.0, -0.5]          # input 1 -> phones, half way left
         g = m.compute_matrix(st)
-        self.assertAlmostEqual(gain(g, 32, 0), 1.0)
-        self.assertAlmostEqual(gain(g, 33, 0), 0.5)
+        self.assertAlmostEqual(gain(g, 32, 0), math.cos(math.pi / 8), places=6)
+        self.assertAlmostEqual(gain(g, 33, 0), math.sin(math.pi / 8), places=6)
 
     def test_stereo_pair_keeps_sides(self):
         st = m.default_state()
@@ -120,9 +121,10 @@ class SoloTest(unittest.TestCase):
     def setUp(self):
         self.st = m.default_state()
         self.st["selected"] = 16                       # phones
-        self.st["sends"]["in"][0][16] = [-6.0, 0.0]    # input 1 -> phones
-        self.st["sends"]["in"][2][16] = [0.0, 0.0]     # input 3 -> phones
-        self.st["sends"]["in"][2][0] = [0.0, 0.0]      # input 3 -> AD1 1/2 too
+        # hard left, so the left output has the fader's level
+        self.st["sends"]["in"][0][16] = [-6.0, -1.0]   # input 1 -> phones
+        self.st["sends"]["in"][2][16] = [0.0, -1.0]    # input 3 -> phones
+        self.st["sends"]["in"][2][0] = [0.0, -1.0]     # input 3 -> AD1 1/2 too
 
     def test_no_solo_changes_nothing(self):
         self.assertEqual(m.compute_matrix(self.st), m.compute_matrix(self.st, solo=False))

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import config, engine, model as m
+from openface_mixer import config, engine, model as m, presets
 from openface_mixer.devices import DEVICES
 
 try:
@@ -81,7 +81,7 @@ class MixWindowTest(unittest.TestCase):
 
     def mix_file(self, mix, name="Live"):
         path = self.dir / "mix.json"
-        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": 1, "name": name,
+        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": presets.VERSION, "name": name,
                                     "mix": mix}))
         self.open_name.return_value = (str(path), "")
         return path
