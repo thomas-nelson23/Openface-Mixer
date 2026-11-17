@@ -150,7 +150,8 @@ def save_state(st, dev=DEFAULT):
 
 
 def load_ui():
-    """ui.json: the UI scale, plus the window size and whether the settings sidebar is open."""
+    """ui.json: the UI scale, the window size, whether the settings sidebar is open, and the
+    Updates section's two choices."""
     try:
         ui = json.loads(UI_FILE.read_text())
     except BAD_FILE:
@@ -175,6 +176,13 @@ def load_window():
 
 def save_window(width, height, sidebar):
     save_ui(window=[int(width), int(height)], sidebar=bool(sidebar))
+
+
+def load_update_prefs():
+    """(check for updates at startup, follow the latest changes instead of releases). Saved
+    with save_ui(update_check=..., update_channel="releases" or "latest")."""
+    ui = load_ui()
+    return ui.get("update_check") is not False, ui.get("update_channel") == "latest"
 
 
 def load_ui_scale():
