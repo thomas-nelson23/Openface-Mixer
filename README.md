@@ -138,6 +138,7 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Fine fader move | Ctrl + drag (or Ctrl + scroll) |
 | Fader from the keyboard | Click a fader (or Tab to it), then Up/Down (1 dB, Ctrl = 0.5 dB), Page Up/Down (6 dB), Home (0 dB), End (-∞) |
 | Fader to 0 dB | Double-click or Alt-click |
+| Type a fader level | Double-click the level under the fader (or press Enter on the fader), type `-12`, `+3` or `off`, then Enter. Esc cancels |
 | Centre pan | Double-click the knob (or Home); Left/Right move it |
 | Reset peak / clip | Click the meter |
 | Solo | **S** on a strip: solo-in-place in the current submix |
@@ -147,9 +148,9 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
-| Matrix | Click a cell to toggle 0 dB / off, scroll to adjust, right-click to clear |
+| Matrix | Click an empty cell for 0 dB, drag up or down to set its level, double-click or Delete to clear it. Scrolling moves the grid; Ctrl + scroll changes a level. Arrow keys move the selection, Enter types a level |
 | Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
-| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click to type a value |
+| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
 | Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
 
 ### Control room and ARC USB
