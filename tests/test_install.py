@@ -2,9 +2,12 @@
 
 systemctl, pkill, sudo and pacman are stand-ins first on PATH: they log their calls and keep
 which units are enabled and running in two files, so the tests see what the scripts would do to
-the user's services without touching the machine. A command the scripts start to use that acts
-on the system needs a stand-in here too.
+the user's services without touching the machine. id is one too, so the scripts work for a
+user who does not exist: uninstall.sh removes that user's engine segments from /dev/shm, and the
+real ones may belong to engines that are running. A command the scripts start to use that acts
+outside HOME needs a stand-in here too.
 """
+import glob
 import os
 import shutil
 import subprocess
@@ -15,6 +18,7 @@ from pathlib import Path
 from openface_mixer.devices import DIGIFACE_USB_PIDS, RME_USB_VENDOR, usb_devices
 
 REPO = Path(__file__).resolve().parent.parent
+NOBODY = "4000000000"
 DIGIFACE = "openface-mixer-engine.service"
 FF802 = "openface-mixer-engine@ff802.service"
 SYSTEMCTL = r"""#!/bin/bash
@@ -31,6 +35,7 @@ STUBS = {"systemctl": SYSTEMCTL,
          "pkill": '#!/bin/sh\necho "pkill $*" >> "$STUB/log"\n',
          "sudo": '#!/bin/sh\necho "sudo $*" >> "$STUB/log"\nexit 1\n',
          "pacman": "#!/bin/sh\nexit 0\n",
+         "id": f"#!/bin/sh\necho {NOBODY}\n",
          "gtk-update-icon-cache": "#!/bin/sh\nexit 0\n"}       # would add a cache file
 
 
@@ -123,7 +128,7 @@ class InstallTest(unittest.TestCase):
             source = (prefix / "share/openface-mixer/install-source").read_text().splitlines()
             self.assertEqual(source[0], str(REPO))
         # engines are stopped by the 15 characters the kernel keeps of their name
-        self.assertIn(f"pkill -u {os.getuid()} -x openface-mixer-", calls)
+        self.assertIn(f"pkill -u {NOBODY} -x openface-mixer-", calls)
         # a fresh install enables the Digiface engine only with a Digiface connected
         self.assertEqual(f"systemctl --user enable {DIGIFACE}" in calls, digiface_connected())
         self.assertEqual(f"systemctl --user restart {DIGIFACE}" in calls, digiface_connected())
@@ -141,12 +146,14 @@ class InstallTest(unittest.TestCase):
         mix.parent.mkdir()
         mix.write_text("{}")
         self.set_units(enabled=(DIGIFACE, FF802), running=(DIGIFACE, FF802))
+        segments = glob.glob("/dev/shm/openface-mixer*")
         out, calls = self.run_script("uninstall.sh", PREFIX=str(prefix))
+        self.assertEqual(glob.glob("/dev/shm/openface-mixer*"), segments)
         self.assertEqual(self.files(self.home), [".config/autostart/another-app.desktop",
                                                  ".config/openface-mixer/state.json"])
         for unit in (DIGIFACE, FF802):
             self.assertIn(f"systemctl --user disable --now {unit}", calls)
-        self.assertIn(f"pkill -u {os.getuid()} -x openface-mixer-", calls)
+        self.assertIn(f"pkill -u {NOBODY} -x openface-mixer-", calls)
         self.assertFalse([c for c in calls if c.startswith("sudo")])
         self.assertEqual("sudo rm" in out, bool(rules))      # they are root's: it says how
 
