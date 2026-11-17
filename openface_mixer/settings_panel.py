@@ -10,11 +10,10 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import hdspe, updater
+from . import hdspe, theme, updater
 from .config import UI_SCALES
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
-from . import theme
 from .theme import SANS, Section, caption_html, font, key_label, px
 
 # Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
