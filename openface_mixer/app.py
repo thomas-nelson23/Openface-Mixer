@@ -1218,7 +1218,7 @@ class MainWindow(QMainWindow):
         the user changes a setting here, show what the unit reports and write nothing (the
         protocol module's config_ready), so connecting never changes the unit's clock."""
         hw = self.st["hw"]
-        if hw["known"] and hw["edited"]:
+        if self.dev.proto.config_ready(hw):
             return
         before = dict(hw)
         self.dev.proto.settings_from_status(hw, status)

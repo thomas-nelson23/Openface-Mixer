@@ -156,7 +156,10 @@ running from, which is Internal while the chosen input has no signal; and the op
 input, optical out, AES out format, word clock single speed, effects on inputs) can't be read
 at all, so the first change writes what the Options section shows for all of them. The status
 codes for ADAT A and ADAT B above are the kernel driver's; snd-firewire-ctl-services'
-`ff802.rs` has the two the other way round. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
+`ff802.rs` has the two the other way round (the lock bits are the same in both). So an input
+is taken as the clock source only while its lock bit is set; otherwise, as for a code that is
+not in the list, the clock box stays empty and nothing is written until the unit reports a
+source that fits or one is chosen. With both ADAT inputs locked the kernel's codes decide. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
 5 = 88.2k, 6 = 96k, 8 = 128k, 9 = 176.4k, 10 = 192k.
 
 ## DSP commands
@@ -366,7 +369,8 @@ source and the levels, jacks and phantom power too, which can't be read back. Op
 therefore shows the clock and the options from quadlet 1 and writes nothing until a setting is
 changed in Openface Mixer; that first change sends the whole configuration, with the clock the
 unit reported and what the panel shows for the rest. A source code that is not in the list is
-never written: the clock box stays empty until one is chosen.
+never written: the clock box stays empty, and the configuration unsent, until the unit reports
+one that is or one is chosen.
 
 ## Fireface 800 not verified on hardware yet
 
