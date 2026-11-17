@@ -82,10 +82,11 @@ def load(st, phones):
     one = cr.get("phones")
     if pair(one):
         # Up to version 2 there was one Phones pair, and Talkback went to talkback_dests
-        # alone: that pair, unless the file was edited by hand.
+        # alone. Nothing on screen could change that list: it held the device's own phones
+        # pair, also after another pair was chosen as Phones. Neither is a further output.
         cr["phones"] = [one]
         if pairs(cr.get("talkback_dests")):
-            cr["talkback_dests"] = [p for p in cr["talkback_dests"] if p != one]
+            cr["talkback_dests"] = [p for p in cr["talkback_dests"] if p not in (one, phones)]
     for k, default in default_control_room(phones).items():
         if k in cr and not valid.get(k, lambda v: isinstance(v, type(default)))(cr[k]):
             cr[k] = default
@@ -107,12 +108,18 @@ def toggle(st, key):
     return cr[key]
 
 
+def encoder_target(st, target):
+    """The encoder target an ARC key stands for. With fewer than two Phones pairs the second
+    Phones key is another first one: either selects the one pair, and both light up."""
+    return "phones" if target == "phones2" and len(control_room(st)["phones"]) < 2 else target
+
+
 def encoder_pair(st):
-    """The output pair the ARC encoder turns: Main Out, or the Phones pair chosen with the
-    ARC's Phones keys (the last one there is if it asks for more, Main Out if there is none)."""
+    """The output pair the ARC encoder turns: Main Out, or the first or second Phones pair
+    (Main Out if there is none)."""
     cr = control_room(st)
-    phones = cr["phones"][:ENCODER_TARGETS.index(cr["encoder"])][-1:]
-    return phones[0] if phones else cr["main"]
+    i = ENCODER_TARGETS.index(encoder_target(st, cr["encoder"])) - 1
+    return cr["phones"][i] if 0 <= i < len(cr["phones"]) else cr["main"]
 
 
 def step_volume(st, clicks):

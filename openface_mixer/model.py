@@ -246,7 +246,7 @@ def checked_mix(mix, strict=True):
                     and is_index(o.get("group"), N_GROUPS + 1)):
                 bad(None)
                 continue
-            own[key] = {"sends": sends(o.get("sends"), base["sends"]["in"][:2]),
+            own[key] = {"sends": sends(o.get("sends"), copy.deepcopy(base["sends"]["in"][:2])),
                         "mute": flags(o.get("mute"), [False, False]), "group": o["group"]}
         return own
 

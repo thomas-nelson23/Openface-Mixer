@@ -195,8 +195,8 @@ TotalMix layout printed on it:
 - Row 3: Mono, Volume Phones 1 and 2, External Input.
 - Bottom: Talkback (tap to latch, hold to talk), Speaker B, Dim.
 - Encoder: Main Out volume in 0.5 dB steps, or the volume of the first or second Phones output
-  while its key is lit (with one Phones output, both keys select it). Faders grouped with it
-  follow, as with the mouse.
+  (in the order they were ticked) while its key is lit. With one Phones output both keys
+  select it and both light up. Faders grouped with it follow, as with the mouse.
 
 Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
 it to work (its window can be hidden, see below).

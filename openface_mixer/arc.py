@@ -16,7 +16,7 @@ import os
 import re
 from pathlib import Path
 
-from .control_room import ENCODER_TARGETS, control_room
+from .control_room import ENCODER_TARGETS, control_room, encoder_target
 
 CARDS = Path("/proc/asound/cards")
 CARD_NAME = re.compile(r"\bARC\b", re.I)
@@ -70,7 +70,7 @@ def key_lit(st, action, active_slot):
     if action.startswith("snapshot:"):
         return active_slot == int(action.split(":")[1]) - 1
     if action in ENCODER_TARGETS:
-        return cr["encoder"] == action
+        return encoder_target(st, cr["encoder"]) == encoder_target(st, action)
     return bool(cr.get(action))
 
 

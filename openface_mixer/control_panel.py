@@ -234,8 +234,8 @@ class ControlRoomPanel(Section):
             a.setCheckable(True)
             a.setChecked(idx in cr[key] or idx in cr["phones"])
             a.setEnabled(idx in cr[key] or not (full or idx in cr["phones"]))
-            a.triggered.connect(lambda on, p=idx: self._set(
-                key, sorted({*cr[key], p} if on else {*cr[key]} - {p})))
+            a.triggered.connect(lambda on, p=idx: self._set(     # in the order they are ticked
+                key, [q for q in cr[key] if q != p] + [p] * on))
 
     def set_arc_status(self, s):
         self.arc_label.setText(self.STATUS.get(s, s))

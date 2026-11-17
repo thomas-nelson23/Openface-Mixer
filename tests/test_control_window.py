@@ -46,8 +46,8 @@ class ControlRoomTest(WindowCase):
     def test_up_to_four_phones(self):
         for name in ("AD1 3/4", "AD1 5/6", "AD1 7/8"):
             self.menu("phones")[name].trigger()
-        self.assertEqual(self.cr["phones"], [1, 2, 3, 16])
-        self.assertEqual(self.panel.choices["phones"].currentText(), "AD1 3/4 +3")
+        self.assertEqual(self.cr["phones"], [16, 1, 2, 3])      # in the order they were ticked
+        self.assertEqual(self.panel.choices["phones"].currentText(), "Phones +3")
         menu = self.menu("phones")
         self.assertEqual([n for n, a in menu.items() if a.isChecked()],
                          ["AD1 3/4", "AD1 5/6", "AD1 7/8", "Phones"])
@@ -134,12 +134,16 @@ class ControlRoomTest(WindowCase):
         self.assertAlmostEqual(self.w.strips["out:0"].fader.db(), -12.5)
         self.assertAlmostEqual(self.w.strips["out:1"].fader.db(), -12.5)
         self.cr["main"] = 2                                 # and with Main Out hidden
+        self.st["groups"]["out:2"] = 1
         self.st["hidden_strips"].append("out:2")
         self.w.rebuild_all()
         recall.click()
         self.assertEqual(self.st["out"][2]["gain"], -12.5)
+        self.assertEqual(self.st["out"][0]["gain"], -25.0)  # its group follows all the same
+        self.assertAlmostEqual(self.w.strips["out:0"].fader.db(), -25.0)
         self.st["hidden_strips"].remove("out:2")
-        self.st["out"][1]["gain"] = self.st["out"][2]["gain"] = 0.0
+        for p in range(3):
+            self.st["out"][p]["gain"] = 0.0
 
     def test_the_arcs_phones_keys_pick_the_first_and_second_phones(self):
         self.cr["phones"] = [3, 16]
@@ -154,6 +158,22 @@ class ControlRoomTest(WindowCase):
         self.w.arc_key(phones1, True)                       # the lit key again: Main Out
         self.assertEqual(self.cr["encoder"], "main")
         self.st["out"][16]["gain"] = self.st["out"][3]["gain"] = 0.0
+
+    def test_with_one_phones_pair_both_arc_keys_are_its_key(self):
+        """As before there could be several: either key selects the Phones and lights both,
+        and either takes the encoder back to Main Out."""
+        from openface_mixer import arc
+        phones1, phones2 = 9, 10
+
+        def lit():
+            return [arc.key_lit(self.st, arc.DEFAULT_KEYS[k], None) for k in (phones1, phones2)]
+
+        for first, second in ((phones1, phones2), (phones2, phones1), (phones2, phones2)):
+            self.w.arc_key(first, True)
+            self.assertEqual(lit(), [True, True])
+            self.assertEqual(control_room.encoder_pair(self.st), 16)
+            self.w.arc_key(second, True)
+            self.assertEqual((self.cr["encoder"], lit()), ("main", [False, False]))
 
 
 if __name__ == "__main__":

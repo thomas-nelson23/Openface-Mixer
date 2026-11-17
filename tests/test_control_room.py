@@ -163,8 +163,10 @@ class ControlRoomTest(unittest.TestCase):
         c = cr.control_room(st)
         c["encoder"] = "phones2"
         self.assertEqual(cr.encoder_pair(st), m.N_PAIRS - 1)    # only one: that one
+        self.assertEqual(cr.encoder_target(st, "phones2"), "phones")
         c["phones"] = [4, 6, 9]
         self.assertEqual(cr.encoder_pair(st), 6)
+        self.assertEqual(cr.encoder_target(st, "phones2"), "phones2")
         c["encoder"] = "phones"
         self.assertEqual(cr.encoder_pair(st), 4)
         c["phones"] = []
@@ -237,9 +239,10 @@ class LoadTest(unittest.TestCase):
                                                                     cr.CR_VERSION))
 
     def test_one_phones_pair_from_before_becomes_a_list(self):
-        """Until version 2 Phones was one pair and Talkback went to talkback_dests, which held
-        that pair: now it goes to the Phones anyway, and the list is for further outputs."""
-        for dests, further in (([5], []), ([5, 3], [3]), ([3], [3]), ([], [])):
+        """Until version 2 Phones was one pair and Talkback went to talkback_dests: now it goes
+        to the Phones anyway, and the list is for further outputs. Until then the list held
+        that pair, or still the device's own phones (8 here) after another was chosen."""
+        for dests, further in (([5], []), ([8], []), ([8, 5, 3], [3]), ([3], [3]), ([], [])):
             with self.subTest(dests=dests):
                 st = m.default_state()
                 st["control_room"] = {"phones": 5, "talkback_dests": dests, "version": 2,

@@ -350,11 +350,15 @@ class StereoLinkTest(unittest.TestCase):
         mix["unlinked"]["in:6"] = {"group": 7}
         mix["unlinked"]["in:4"]["sends"][1][3] = "x"
         mix["unlinked"]["in:4"]["mute"] = [True]
+        mix["unlinked"]["in:8"] = mix["unlinked"]["play:8"] = {"group": 0, "mute": [True, True]}
         fixed = m.checked_mix(mix, strict=False)["unlinked"]
+        self.assertEqual(fixed.pop("in:8"), fixed["play:8"])
+        fixed.pop("play:8")["sends"][0][0][0] = -3.0       # repaired sends are no one else's
         self.assertEqual(list(fixed), ["in:4"])
         self.assertEqual(fixed["in:4"]["sends"][1][3], [None, 0.0])
         self.assertEqual(fixed["in:4"]["sends"][1][16], [-12.0, 0.25])
         self.assertEqual(fixed["in:4"]["mute"], [True, False])
+        self.assertEqual(fixed["in:4"]["sends"][0][0], self.before["sends"]["in"][4][0])
 
 
 class MixTest(unittest.TestCase):

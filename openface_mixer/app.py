@@ -1128,8 +1128,8 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action in ("phones", "phones2"):         # the lit key again: back to Main Out
-            cr["encoder"] = "main" if cr["encoder"] == action else action
+        if action in ("phones", "phones2"):         # a lit key again: back to Main Out
+            cr["encoder"] = "main" if arc.key_lit(self.st, action, None) else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1137,27 +1137,27 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def arc_encoder(self, clicks):
-        """The encoder turns the Main Out (or Phones) master; its fader group follows, as when
-        the fader is moved with the mouse."""
+        """The encoder turns the Main Out (or Phones) master."""
         key = strip_key("out", control_room.encoder_pair(self.st))
         old = get_strip_db(self.st, key)
         _pair, db = control_room.step_volume(self.st, clicks)
-        moved = {key: db, **group_follow(self.st, key, old, db)}
-        for k, val in moved.items():
+        self.out_moved(key, old, db)
+
+    def recall_main(self):
+        """TotalMix's Recall: Main Out goes to the stored listening level."""
+        cr = control_room.control_room(self.st)
+        key = strip_key("out", cr["main"])
+        old = get_strip_db(self.st, key)
+        set_strip_db(self.st, key, cr["recall_db"])
+        self.out_moved(key, old, cr["recall_db"])
+
+    def out_moved(self, key, old, db):
+        """An output master was set without its fader: show it, and let its fader group follow
+        as when the fader is moved with the mouse, also where a strip is hidden."""
+        for k, val in {key: db, **group_follow(self.st, key, old, db)}.items():
             if k in self.strips:
                 self.strips[k].set_fader(val)
         self.push_matrix()
-
-    def recall_main(self):
-        """TotalMix's Recall: Main Out goes to the stored listening level, and its fader group
-        follows as when the fader is moved."""
-        cr = control_room.control_room(self.st)
-        key = strip_key("out", cr["main"])
-        if key in self.strips:
-            self.move_fader(self.strips[key], cr["recall_db"])
-        else:                           # Main Out is hidden
-            set_strip_db(self.st, key, cr["recall_db"])
-            self.push_matrix()
 
     def arc_status(self, status):
         self.control.set_arc_status(status)
