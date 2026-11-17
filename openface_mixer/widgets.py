@@ -979,7 +979,7 @@ class Row(QWidget):
             at = lay.count() - 1                            # before the stretch
         else:
             at = lay.indexOf(strip) + 1
-            while not first and lay.itemAt(at).widget() in self.docks:
+            while not first and self.docks.get(lay.itemAt(at).widget()) == strip.key:
                 at += 1
         lay.insertWidget(at, panel)
 

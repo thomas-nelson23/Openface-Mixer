@@ -405,8 +405,11 @@ class PanelTest(WindowCase):
         self.assertFalse(unit.isWindow())
         self.assertTrue(unit.isVisible())
         self.assertGreater(out.scroll.horizontalScrollBar().value(), 0)     # scrolled into view
+        dyn = self.open(out.strips[-1], "dyn")                      # the strip's own come first
         eq = self.open(out.strips[-1], "eq")
-        self.assertEqual(self.order(out)[-3:], [out.strips[-1], eq, unit])
+        self.assertEqual(self.order(out)[-4:], [out.strips[-1], eq, dyn, unit])
+        self.w.rebuild_all()
+        self.assertEqual(self.order(out)[-4:], [out.strips[-1], eq, dyn, unit])
         unit.rv_on.click()
         self.assertTrue(self.w.st["hw"]["fx"]["reverb"]["on"])
         unit.rv_on.click()
