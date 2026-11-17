@@ -241,6 +241,44 @@ class TypeLevelTest(WindowCase):
         self.assertIsNone(self.w.st["out"][s.pair]["gain"])
 
 
+class PeakResetTest(WindowCase):
+    """A click on the peak readout or the meter clears the clip LED, peak and hold line."""
+    def setUp(self):
+        self.strip = self.w.row_in.strips[0]
+        self.strip.meter.reset_peak()
+
+    def clip(self):
+        m = self.strip.meter
+        m.push([1.0] * len(m.levels), 0.03)
+        self.assertTrue(all(m.clip))
+        self.assertEqual(self.strip.peak.text(), "0.0")
+
+    def assert_cleared(self, quiet):
+        m = self.strip.meter
+        self.assertFalse(any(m.clip))
+        self.assertEqual([h[0] for h in m.holds], [0.0] * len(m.holds))
+        self.assertEqual(self.strip.peak.text(), "-∞")
+        # a quiet signal afterwards shows its own peak and doesn't light the clip LED again
+        m.push([quiet] * len(m.levels), 0.03)
+        self.assertFalse(any(m.clip))
+        self.assertEqual(self.strip.peak.text(), "-40.0")
+
+    def test_click_on_the_peak_readout(self):
+        self.clip()
+        QTest.mouseClick(self.strip.peak, Qt.LeftButton)
+        self.assert_cleared(0.01)
+
+    def test_click_on_the_meter(self):
+        self.clip()
+        QTest.mouseClick(self.strip.meter, Qt.LeftButton)
+        self.assert_cleared(0.01)
+
+    def test_right_click_leaves_the_peak(self):
+        self.clip()
+        QTest.mouseClick(self.strip.peak, Qt.RightButton)
+        self.assertTrue(all(self.strip.meter.clip))
+
+
 class MatrixTest(WindowCase):
     @classmethod
     def setUpClass(cls):
