@@ -105,11 +105,35 @@ def exercise(app, w, check):
     pump(app)
     check(not w.fx_panels, f"effects panels left open: {sorted(w.fx_panels)}")
     check(not w.fx_btn.isChecked(), "the FX button stayed lit")
+    fold_rows(app, w, check)
     for rate in (96000, 192000):                    # the double and quad speed channel layouts
         w.engine.rate = rate
         w.poll_engine()
         pump(app)
         check(w.rate == rate and w.row_in.strips and w.row_out.strips, f"no strips at {rate} Hz")
+        fold_rows(app, w, check)
+
+
+def fold_rows(app, w, check):
+    """Fold each row to names and meters and unfold it again, then all three at once."""
+    rows = (w.row_in, w.row_play, w.row_out)
+    for folding in (*((r,) for r in rows), rows):
+        shown = [s.fader.isVisible() for r in rows for s in r.strips]
+        for row in folding:
+            row.fold_btn.click()
+        pump(app)
+        w.update_meters()
+        for row in folding:
+            check(row.folded and row.scroll.height() < row.strips[0].width_px * 2
+                  and all(s.meter.isVisible() and not s.fader.isVisible() for s in row.strips),
+                  f"{row.title} did not fold at {w.rate} Hz")
+        for row in folding:
+            row.fold_btn.click()
+        pump(app)
+        check(not any(r.folded for r in rows)
+              and shown == [s.fader.isVisible() for r in rows for s in r.strips],
+              f"{[r.title for r in folding]} did not unfold at {w.rate} Hz")
+    check(w.st["folded"] == [], f"folded rows left in the state: {w.st['folded']}")
 
 
 def drive(home):

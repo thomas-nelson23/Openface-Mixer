@@ -104,12 +104,15 @@ class MainWindow(QMainWindow):
         rows = QVBoxLayout(mixer_page)
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(px(10))
-        self.row_in = Row("Hardware Inputs", "", KIND_COLOR["in"])
-        self.row_play = Row("Playback", "", KIND_COLOR["play"])
-        self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix",
-                           KIND_COLOR["out"])
+        self.row_in = Row("in", "Hardware Inputs", "", KIND_COLOR["in"])
+        self.row_play = Row("play", "Playback", "", KIND_COLOR["play"])
+        self.row_out = Row("out", "Hardware Outputs",
+                           "master level · click a name tag to edit its submix", KIND_COLOR["out"])
         for r in (self.row_in, self.row_play, self.row_out):
-            rows.addWidget(r, 1)
+            rows.addWidget(r)
+            r.set_folded(r.kind in self.st["folded"])
+            r.fold_changed.connect(self.rows_folded)
+        rows.addStretch()           # takes the height when every row is folded
         self.matrix = MatrixView(self)
         self.tabs = QStackedWidget()
         self.tabs.addWidget(mixer_page)
@@ -477,6 +480,12 @@ class MainWindow(QMainWindow):
             menu.addAction("No hidden channels").setEnabled(False)
         menu.exec(pos)
         menu.deleteLater()
+
+    def rows_folded(self):
+        """A row was folded or unfolded: remembered with the device's state."""
+        self.st["folded"] = [r.kind for r in (self.row_in, self.row_play, self.row_out)
+                             if r.folded]
+        self.schedule_save()
 
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
@@ -891,8 +900,9 @@ class MainWindow(QMainWindow):
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         if self.dev.fx is not None and strip.kind in ("in", "out"):
             menu.addSeparator()
-            menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
-            menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
+            if not strip.folded:        # the panels open beside the strip's controls
+                menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
+                menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
             menu.addAction("Copy effects", lambda: self.copy_effects(strip))
             paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
             paste.setEnabled(self.fx_clipboard is not None)
@@ -1234,6 +1244,7 @@ class MainWindow(QMainWindow):
             s.mute.blockSignals(True)
             s.mute.setChecked(mute)
             s.mute.blockSignals(False)
+            s.show_flags()
 
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
