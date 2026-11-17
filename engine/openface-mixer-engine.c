@@ -84,6 +84,8 @@ struct data {
 	struct pw_main_loop *loop;
 	struct pw_context *context;
 	struct pw_core *core;
+	struct spa_hook core_listener;
+	bool pw_lost;         /* the connection to PipeWire is gone */
 	struct pw_registry *registry;
 	struct spa_hook registry_listener;
 	struct pw_impl_module *loopback;
@@ -114,6 +116,7 @@ struct data {
 	char sink_out_name[96];
 	struct obj objs[MAX_OBJ];
 	int n_objs;
+	bool objs_full;       /* said once */
 	struct spa_list links;
 };
 
@@ -385,8 +388,14 @@ static void registry_global(void *data, uint32_t id, uint32_t permissions,
 		return;
 	}
 
-	if (d->n_objs >= MAX_OBJ)
+	if (d->n_objs >= MAX_OBJ) {
+		if (!d->objs_full)
+			fprintf(stderr, "openface-mixer: PipeWire has more than %d nodes, ports and "
+				"links; the engine does not see the rest, so the playback sink "
+				"may stay unlinked\n", MAX_OBJ);
+		d->objs_full = true;
 		return;
+	}
 	d->objs[d->n_objs++] = o;
 	relink(d);
 }
@@ -547,6 +556,24 @@ static void do_quit(void *userdata, int signal_number)
 	pw_main_loop_quit(d->loop);
 }
 
+/* PipeWire went away (it crashed or was restarted): the playback sink went with it and only a
+ * new connection brings it back. The engine stops with an error, so systemd starts it again;
+ * that start waits for PipeWire. The interface is not told anything and keeps mixing. */
+static void core_error(void *userdata, uint32_t id, int seq, int res, const char *message)
+{
+	struct data *d = userdata;
+	if (id != PW_ID_CORE || res != -EPIPE)
+		return;
+	fprintf(stderr, "openface-mixer: lost the connection to PipeWire, stopping\n");
+	d->pw_lost = true;
+	pw_main_loop_quit(d->loop);
+}
+
+static const struct pw_core_events core_events = {
+	PW_VERSION_CORE_EVENTS,
+	.error = core_error,
+};
+
 int main(int argc, char *argv[])
 {
 	struct data d = { 0 };
@@ -608,6 +635,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "openface-mixer: cannot connect to PipeWire: %m\n");
 		return 1;
 	}
+	pw_core_add_listener(d.core, &d.core_listener, &core_events, &d);
 
 	/* one sink per device, so several devices' engines can run side by side */
 	char sink_name[80], sink_desc[96], args[1024];
@@ -656,6 +684,9 @@ int main(int argc, char *argv[])
 	d.be->destroy(d.hw);
 	d.shm->hw_levels = 0;
 	d.shm->hw_state = DFU_STATE_NO_DEVICE;
+	d.shm->engine_pid = 0;
+	if (d.pw_lost)
+		return 1;   /* nothing to hand back: the sink and the links went with PipeWire */
 
 	struct link_req *r, *t;
 	spa_list_for_each_safe(r, t, &d.links, link)
@@ -666,7 +697,6 @@ int main(int argc, char *argv[])
 	pw_core_disconnect(d.core);
 	pw_context_destroy(d.context);
 	pw_main_loop_destroy(d.loop);
-	d.shm->engine_pid = 0;
 	munmap(d.shm, sizeof(struct ofm_shm));
 	pw_deinit();
 	return 0;
