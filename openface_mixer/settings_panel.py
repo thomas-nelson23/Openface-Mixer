@@ -67,8 +67,8 @@ def hw_state(dev, state):
                          "from 2022 on. Install snd-hdspe and blacklist snd-hdspm (see the "
                          "README)."),
         "no-reply": (light(AMBER, "Connected, no reply from the DSP"),
-                     f"The {short} is connected but does not answer, so changes may not reach "
-                     "it. Retrying."),
+                     f"The {short} is connected but has not answered, so changes may not "
+                     "reach it."),
     }.get(state, (state, ""))
 
 
