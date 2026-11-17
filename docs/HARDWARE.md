@@ -75,7 +75,8 @@ little-endian 64-bit words, and successive frames cycle through three types:
 Measured on a Digiface (firmware in vendor mode, 48 kHz): a −20 dBFS sine on playback 1 reads
 peak `0xCCC000` (−20.00 dB) and RMS 10·log10(E) = 142.56, i.e. E = 0.005 × 2^55. Output meters
 are post-mixer and post-fader, and matched the expected mix gains within 0.05 dB. The engine
-polls all three frame types every 10 ms on a separate thread.
+polls all three frame types on a separate thread: every 10 ms while a GUI reads the meters,
+once a second otherwise.
 
 Access needs the udev rule in `packaging/70-rme-digiface.rules`.
 
