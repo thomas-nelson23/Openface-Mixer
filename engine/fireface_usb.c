@@ -598,13 +598,16 @@ static int meters(void *h, struct ofm_shm *s)
 	return ms_since(&f->last_levels) < LEVELS_TIMEOUT_MS ? 0 : -ETIMEDOUT;
 }
 
-/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)" */
+/* snd-usb-audio names the card after the USB product string, "Fireface 802 (serial)". The
+ * meter read also carries the keep-alive and takes in what the unit reports, so with no GUI it
+ * only slows down to oscmix's rate, 10 a second. */
 #define FFUSB_BACKEND(k, n, card_name, create_fn)	\
 	{						\
 		.key = k,				\
 		.name = n,				\
 		.out_node_card = card_name,		\
 		.meter_us = 30000,			\
+		.meter_idle_us = 100000,		\
 		.create = create_fn,			\
 		.destroy = destroy,			\
 		.open = open_dev,			\

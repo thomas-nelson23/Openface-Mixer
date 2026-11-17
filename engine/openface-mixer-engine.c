@@ -29,6 +29,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <pipewire/pipewire.h>
@@ -52,6 +53,7 @@
 #define HW_RETRY_TICKS   50  /* look for the device every second */
 #define HW_LOG_EVERY     60  /* a device that keeps failing is logged once in this many rounds */
 #define HW_STABLE_TICKS  500 /* and counts as working again once it has stayed open for 10 s */
+#define HW_WATCH_TICKS   25  /* the meters count as watched for 500 ms after a GUI last read them */
 
 #define MAX_OBJ 2048
 
@@ -92,11 +94,16 @@ struct data {
 	unsigned int hw_opened; /* hw_ticks when it was opened */
 
 	/* hardware meters are read on their own thread; usb_lock keeps device I/O on the main loop
-	 * and the meter reads apart */
+	 * and the meter reads apart. Between reads the thread waits on meter_wake: the backend's
+	 * meter interval while a GUI reads the meters (its heartbeat moves), the idle one otherwise */
 	pthread_mutex_t usb_lock;
+	pthread_cond_t meter_wake;
 	pthread_t meter_thread;
 	bool meter_thread_started;
-	volatile bool meter_quit;
+	bool meter_quit;
+	uint32_t gui_heartbeat;  /* the GUI's heartbeat as last seen */
+	unsigned int gui_seen;   /* hw_ticks when it last moved */
+	bool watched;
 
 	int no_autolink;
 	char sink_out_name[96];
@@ -403,16 +410,42 @@ static void *meter_thread(void *userdata)
 	struct data *d = userdata;
 	struct ofm_shm *s = d->shm;
 
+	pthread_mutex_lock(&d->usb_lock);
 	while (!d->meter_quit) {
 		int r = -1;
-		pthread_mutex_lock(&d->usb_lock);
 		if (d->be->is_open(d->hw) && !d->hw_need_full)
 			r = d->be->meters(d->hw, s);
-		pthread_mutex_unlock(&d->usb_lock);
 		s->hw_levels = r == 0;
-		usleep(d->be->meter_us);
+
+		/* the wait lets go of usb_lock; hw_tick ends it early when a GUI starts to look */
+		unsigned int us = d->watched ? d->be->meter_us : d->be->meter_idle_us;
+		struct timespec until;
+		clock_gettime(CLOCK_MONOTONIC, &until);
+		until.tv_sec += us / 1000000;
+		until.tv_nsec += us % 1000000 * 1000L;
+		if (until.tv_nsec >= 1000000000L) {
+			until.tv_sec++;
+			until.tv_nsec -= 1000000000L;
+		}
+		pthread_cond_timedwait(&d->meter_wake, &d->usb_lock, &until);
 	}
+	pthread_mutex_unlock(&d->usb_lock);
 	return NULL;
+}
+
+/* A GUI that reads the meters moves its heartbeat with every read. While it does, the meter
+ * thread reads the device at the full rate, and it is woken at once when the reading starts. */
+static void watch_gui(struct data *d)
+{
+	if (d->shm->gui_heartbeat != d->gui_heartbeat) {
+		d->gui_heartbeat = d->shm->gui_heartbeat;
+		d->gui_seen = d->hw_ticks;
+		if (!d->watched)
+			pthread_cond_signal(&d->meter_wake);
+		d->watched = true;
+	} else if (d->hw_ticks - d->gui_seen >= HW_WATCH_TICKS) {
+		d->watched = false;
+	}
 }
 
 static void hw_tick_locked(struct data *d)
@@ -424,6 +457,7 @@ static void hw_tick_locked(struct data *d)
 
 	d->hw_ticks++;
 	s->heartbeat++;
+	watch_gui(d);
 
 	if (!be->is_open(d->hw)) {
 		if (d->hw_ticks % HW_RETRY_TICKS != 1)
@@ -533,7 +567,12 @@ int main(int argc, char *argv[])
 	}
 	if (d.be->attach)
 		d.be->attach(d.hw, d.shm);
+	d.gui_heartbeat = d.shm->gui_heartbeat;   /* where a GUI that has gone left it */
 	pthread_mutex_init(&d.usb_lock, NULL);
+	pthread_condattr_t monotonic;
+	pthread_condattr_init(&monotonic);
+	pthread_condattr_setclock(&monotonic, CLOCK_MONOTONIC);
+	pthread_cond_init(&d.meter_wake, &monotonic);
 
 	d.loop = pw_main_loop_new(NULL);
 	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGINT, do_quit, &d);
@@ -583,7 +622,10 @@ int main(int argc, char *argv[])
 
 	/* the hardware mixer keeps running with the last mix, like TotalMix's stored state */
 	if (d.meter_thread_started) {
+		pthread_mutex_lock(&d.usb_lock);
 		d.meter_quit = true;
+		pthread_cond_signal(&d.meter_wake);
+		pthread_mutex_unlock(&d.usb_lock);
 		pthread_join(d.meter_thread, NULL);
 	}
 	pw_loop_destroy_source(pw_main_loop_get_loop(d.loop), d.hw_timer);

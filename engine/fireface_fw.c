@@ -562,6 +562,7 @@ const struct ofm_backend ofm_backend_ff802 = {
 	.name = "Fireface 802",
 	.out_node = out_node,
 	.meter_us = 30000,
+	.meter_idle_us = 1000000,
 	.create = create,
 	.destroy = destroy,
 	.open = open_dev,
@@ -813,6 +814,7 @@ static int former_meters(void *h, struct ofm_shm *s)
 		.name = n,					\
 		.out_node = out_node,				\
 		.meter_us = 30000,				\
+		.meter_idle_us = 1000000,			\
 		.create = create_fn,				\
 		.destroy = former_destroy,			\
 		.open = former_open,				\

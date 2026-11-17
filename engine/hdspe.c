@@ -367,6 +367,7 @@ static void *create_aes(void) { return create(&hdspe_aes); }
 		.out_node_card = card_name,		\
 		.out_node = out_node,			\
 		.meter_us = 20000,			\
+		.meter_idle_us = 1000000,		\
 		.create = create_fn,			\
 		.attach = attach,			\
 		.destroy = destroy,			\

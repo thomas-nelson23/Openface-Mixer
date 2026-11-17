@@ -22,7 +22,8 @@ struct ofm_backend {
 	 * has been found, NULL before. With out_node_card: the full name of the card in use (one
 	 * of several of a model), NULL before one was opened */
 	const char *(*out_node)(void *h);
-	unsigned int meter_us;        /* meter poll interval */
+	unsigned int meter_us;        /* meter poll interval while a GUI reads the meters */
+	unsigned int meter_idle_us;   /* and while none does */
 
 	void *(*create)(void);
 	/* Optional, called once after create: the shared memory, for a backend whose open depends

@@ -16,11 +16,11 @@ ENGINE_BINARY = "openface-mixer-engine"
 
 # Must match struct ofm_shm in engine/shm_layout.h
 SHM_MAGIC = 0x584D464F
-SHM_VERSION = 6
+SHM_VERSION = 7
 HDR_SIZE = 64
 HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
 HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED, HDR_DEV_STATUS = 7, 8, 9, 10, 11
-HDR_DEV_STATUS2 = 12
+HDR_DEV_STATUS2, HDR_GUI_HEARTBEAT = 12, 13
 OFF_GAIN = HDR_SIZE
 OFF_OUT_GAIN = OFF_GAIN + N_OUT * N_SRC * 4
 OFF_PEAK_SRC = OFF_OUT_GAIN + N_OUT * 4
@@ -115,9 +115,13 @@ class Engine:
             self.m[OFF_DEV_CONFIG:OFF_DEV_CONFIG + 4] = struct.pack("<I", config)
 
     def read_peaks(self):
-        """Returns (source peaks, output peaks) as linear floats and resets the max-hold."""
+        """Returns (source peaks, output peaks) as linear floats and resets the max-hold. Each
+        call moves the GUI heartbeat: the engine reads the device's meters at the full rate
+        only while someone keeps asking for them, so nothing else has to tell it."""
         if not self.attach():
             return None, None
+        beat, = struct.unpack_from("<I", self.m, 4 * HDR_GUI_HEARTBEAT)
+        struct.pack_into("<I", self.m, 4 * HDR_GUI_HEARTBEAT, (beat + 1) & 0xFFFFFFFF)
         src = array("f", self.m[OFF_PEAK_SRC:OFF_PEAK_SRC + N_SRC * 4])
         out = array("f", self.m[OFF_PEAK_OUT:OFF_PEAK_OUT + N_OUT * 4])
         self.m[OFF_PEAK_SRC:OFF_PEAK_OUT + N_OUT * 4] = bytes((N_SRC + N_OUT) * 4)
