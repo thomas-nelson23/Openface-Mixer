@@ -1,7 +1,7 @@
 /* Unit test for the engine's own logic, with a fake backend in place of an interface: when it
  * opens, reads the status of and syncs the device (and sends everything again), how often it
- * reads the meters with and without a GUI, the one-engine lock, the PipeWire object cap, and
- * which PipeWire error ends it.
+ * reads the meters with and without a GUI (and each interface's two rates), the one-engine lock,
+ * the PipeWire object cap, and which PipeWire error ends it.
  * The engine's source is included as it is, so nothing in it is built differently for the test;
  * its main() is not run, and nothing here talks to PipeWire or to a device. The shared memory is
  * a segment of its own, named after this process, and the config a temporary directory. */
@@ -363,6 +363,32 @@ static void check_meters(struct ofm_shm *s)
 	check("the meter thread stops at once", ms_now() - t0 < 1000, 1);
 }
 
+/* How often each interface's meters are read, in microseconds: for a GUI, and with none. The USB
+ * Firefaces' meter request is also their keep-alive, so theirs idles at oscmix's 10 a second. */
+static void check_meter_rates(void)
+{
+	static const struct {
+		const struct ofm_backend *be;
+		unsigned int us, idle_us;
+	} want[] = {
+		{ &ofm_backend_digiface, 10000, 1000000 },
+		{ &ofm_backend_ff802, 30000, 1000000 },
+		{ &ofm_backend_ff800, 30000, 1000000 },
+		{ &ofm_backend_ff400, 30000, 1000000 },
+		{ &ofm_backend_ff802usb, 30000, 100000 },
+		{ &ofm_backend_ucx2, 30000, 100000 },
+		{ &ofm_backend_raydat, 20000, 1000000 },
+		{ &ofm_backend_aio, 20000, 1000000 },
+		{ &ofm_backend_aiopro, 20000, 1000000 },
+		{ &ofm_backend_aes, 20000, 1000000 },
+	};
+
+	for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+		check(want[i].be->key, want[i].be->meter_us, want[i].us);
+		check(want[i].be->key, want[i].be->meter_idle_us, want[i].idle_us);
+	}
+}
+
 /* ---------- PipeWire object tracking ---------- */
 
 static void check_object_cap(struct ofm_shm *s)
@@ -432,6 +458,7 @@ int main(void)
 	struct ofm_shm *s = check_shm();
 	check_tick(s);
 	check_meters(s);
+	check_meter_rates();
 	check_object_cap(s);
 	check_pipewire_loss();
 	rmdir(config);
