@@ -133,7 +133,21 @@ class ChannelSettings(QFrame):
             row = self._gain(grid, row, part["gain"], line, ff.LINE_GAIN_MAX_DB)
         if kind == "in" and mic:
             row = self._check(grid, row, "48V phantom power", part["p48"], mic)
-            row = self._check(grid, row, "Inst (Hi-Z)", part["inst"], mic)
+            p48 = grid.itemAtPosition(row - 1, 0).widget()
+            p48.setEnabled(not part["inst"][mic[0]])
+            inst = QCheckBox("Inst (Hi-Z)")
+            inst.setChecked(part["inst"][mic[0]])
+            inst.setToolTip("Instrument input. Switches 48V off")
+
+            def set_inst(on):
+                ff.set_inst(self.s, mic, on)
+                if on:
+                    p48.setChecked(False)       # set_inst() cleared the stored 48V
+                p48.setEnabled(not on)
+                self.changed.emit()
+            inst.toggled.connect(set_inst)
+            grid.addWidget(inst, row, 0, 1, 2)
+            row += 1
         if kind == "out" and line:
             row = self._combo(grid, row, "Level", ff.OUT_LEVELS, part["level"], line)
 

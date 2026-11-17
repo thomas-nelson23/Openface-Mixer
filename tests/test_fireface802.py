@@ -50,6 +50,30 @@ class CommandTest(unittest.TestCase):
         self.assertIn(0x0A080000, cmds)                  # AN 11 48V off
         self.assertNotIn(0x0A080001, cmds)
 
+    def test_inst_clears_the_stored_phantom_power(self):
+        """48V must not come back by itself when Inst is switched off again."""
+        s = ff.default_settings()
+        s["in"]["p48"][2] = s["in"]["p48"][3] = True
+        self.assertIn(0x0A080001, ff.commands(s))        # AN 11 48V on
+        ff.set_inst(s, [2], True)
+        self.assertEqual(s["in"]["p48"], [False, False, False, True])   # AN 12 keeps its own
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090001, cmds)
+        self.assertIn(0x0A080000, cmds)
+        ff.set_inst(s, [2], False)
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090000, cmds)                  # Inst off
+        self.assertIn(0x0A080000, cmds)                  # ... and 48V stays off
+        self.assertIn(0x0B080001, cmds)
+
+    def test_a_saved_state_with_inst_and_phantom_loses_the_phantom(self):
+        s = ff.default_settings()
+        s["in"]["p48"] = [True, True, False, False]
+        s["in"]["inst"] = [True, False, False, True]
+        s = ff.upgrade_settings(s)
+        self.assertEqual(s["in"]["p48"], [False, True, False, False])
+        self.assertEqual(s["in"]["inst"], [True, False, False, True])
+
     def test_output_commands(self):
         s = ff.default_settings()
         s["out"]["phase"][12] = True

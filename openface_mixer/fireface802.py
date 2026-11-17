@@ -179,7 +179,18 @@ def upgrade_settings(s, base=None, fx_model=FX):
             s[k] = part
         else:
             s.setdefault(k, v)
+    if "inst" in s["in"]:           # states from before set_inst() may hold Inst and 48V
+        s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
+
+
+def set_inst(s, mics, on):
+    """Inst on AN 9-12 (mics: 0-3). Switching it on switches 48V off, as on the unit, and
+    clears the stored 48V so phantom power can't come back when Inst is switched off."""
+    for m in mics:
+        s["in"]["inst"][m] = on
+        if on:
+            s["in"]["p48"][m] = False
 
 
 def phys_cmd(ch, cmd, value):
@@ -211,7 +222,7 @@ def commands(s, st=None, usb=False):
     for m in range(N_MIC_IN):
         ch = N_LINE_IN + m
         cmds.append(phys_cmd(ch, IN_MIC_INST, i["inst"][m]))
-        # Inst switches phantom power off, as on the unit
+        # never 48V with Inst (set_inst() clears it; this guards a state that holds both)
         cmds.append(phys_cmd(ch, IN_MIC_POWER, i["p48"][m] and not i["inst"][m]))
     for c in range(N_PHYS_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_PHASE, o["phase"][c]))
