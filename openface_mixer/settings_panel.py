@@ -82,12 +82,12 @@ def read_failure(hw, short):
     return "Can't read settings", hw.error or "The card's ALSA controls are not the expected ones."
 
 
-def write_failure(why, dev):
-    """The toast for a setting amixer could not change (why: Hardware.write()'s answer)."""
+def write_failure(why, dev, tool="amixer"):
+    """The toast for a setting tool could not change (why: hardware.run()'s answer)."""
     if why == "missing":
-        why = "amixer is not installed (package alsa-utils)"
+        why = f"{tool} is not installed"
     elif why == "timeout":
-        why = "amixer did not answer"
+        why = f"{tool} did not answer"
     elif dev.family == "hdspe" and "busy" in why:
         why = "the driver is busy while playback and recording are open in two programs"
     return f"Not changed: {why}"
@@ -773,9 +773,9 @@ class SettingsPanel(QWidget):
         if not self._updating:
             self._report(self.hw.write(name, value))
 
-    def _report(self, why):
+    def _report(self, why, tool="amixer"):
         if why:
-            self.notice.emit(write_failure(why, self.dev))
+            self.notice.emit(write_failure(why, self.dev, tool))
 
     def _enable_pro(self):
         if not self._card_name:
@@ -785,7 +785,7 @@ class SettingsPanel(QWidget):
                "This lets apps record all 32 hardware inputs. The output device will be renamed "
                "to '…pro-output-0' (your existing combine-stream config already matches it). "
                "Audio may briefly drop out.", "Switch profile"):
-            self._report(set_card_profile(self._card_name, "pro-audio"))
+            self._report(set_card_profile(self._card_name, "pro-audio"), "pactl")
 
     def update_hw(self, ctrls):
         self._updating = True

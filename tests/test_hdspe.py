@@ -559,8 +559,10 @@ class PanelTest(unittest.TestCase):
                 p._write("Clock Mode", 1)
         self.assertEqual(len(said), 3)
         self.assertIn("playback and recording are open in two programs", said[0])
-        self.assertIn("alsa-utils", said[1])
-        self.assertIn("did not answer", said[2])
+        self.assertEqual(said[1:], ["Not changed: amixer is not installed",
+                                    "Not changed: amixer did not answer"])
+        self.assertEqual(settings_panel.write_failure("timeout", devices.DEFAULT, "pactl"),
+                         "Not changed: pactl did not answer")
         # on other interfaces "busy" is whatever amixer says it is
         self.assertEqual(settings_panel.write_failure("amixer: busy", devices.DEFAULT),
                          "Not changed: amixer: busy")
