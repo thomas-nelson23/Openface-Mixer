@@ -303,7 +303,8 @@ def _fill(cur, base):
 def _levels(cur, n):
     if not isinstance(cur, list) or len(cur) != n:
         return [None] * n
-    return [v if isinstance(v, (int, float)) and not isinstance(v, bool) else None for v in cur]
+    return [v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+            else None for v in cur]
 
 
 def _hold(cur, params, prefix=""):
