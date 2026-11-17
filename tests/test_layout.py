@@ -510,5 +510,96 @@ class NoEffectsTest(WindowCase):
                          [{}, {}, {}])
 
 
+class ShortcutListTest(WindowCase):
+    """The keyboard shortcuts are listed at the bottom of the settings, and in the README."""
+    device = "ff802"
+
+    def listed(self):
+        from openface_mixer.settings_panel import SHORTCUTS
+        return [(where, keys, what) for where, rows in SHORTCUTS for keys, what in rows]
+
+    def test_the_list_is_closed_until_asked_for(self):
+        panel = self.w.settings
+        self.w.settings_btn.setChecked(True)
+        self.w.sidebar.set_open(True, animate=False)
+        self.settle()
+        box = panel.keys_btn.parentWidget()
+        self.assertIs(panel.layout().itemAt(panel.layout().count() - 2).widget(), box)  # last
+        self.assertEqual(box.title_text(), "KEYBOARD SHORTCUTS")
+        self.assertTrue(panel.keys_list.isHidden())
+        self.assertEqual(panel.keys_btn.text(), "Show")
+        closed = box.height()
+        panel.keys_btn.click()
+        self.settle()
+        self.assertTrue(panel.keys_list.isVisible())
+        self.assertEqual(panel.keys_btn.text(), "Hide")
+        self.assertEqual(panel.keys_btn.accessibleName(), "Hide keyboard shortcuts")
+        self.assertGreater(box.height(), closed + 200)
+        self.assertFalse(panel.keys_list.visibleRegion().isEmpty())     # scrolled into view
+        for _where, keys, what in self.listed():
+            self.assertIn(keys, panel.keys_list.text())
+            self.assertIn(what.replace("'", "&#x27;"), panel.keys_list.text())
+        panel.keys_btn.click()
+        self.settle()
+        self.assertTrue(panel.keys_list.isHidden())
+        self.assertEqual(box.height(), closed)
+
+    def test_every_window_shortcut_is_listed(self):
+        from PySide6.QtGui import QShortcut
+        keys = ", ".join(k for _where, k, _what in self.listed())
+        shortcuts = [sc.key().toString() for sc in self.w.findChildren(QShortcut)]
+        self.assertGreaterEqual(len(shortcuts), 7)
+        for key in shortcuts:
+            self.assertIn(key, keys)
+        for key in ("Page Up / Down", "Ctrl+Q", "Ctrl+W", "Space, Enter", "Delete", "End"):
+            self.assertIn(key, keys)
+
+    def test_the_fader_and_pan_keys_do_what_the_list_says(self):
+        from openface_mixer.model import NEG_INF
+        strip = self.w.row_play.strips[3]
+        fader, pan = strip.fader, strip.pan
+        self.addCleanup(self.w.move_fader, strip, fader.db())
+        self.w.move_fader(strip, -20.0)
+        for key, mods, want in ((Qt.Key_Up, Qt.NoModifier, -19.0),
+                                (Qt.Key_Down, Qt.ControlModifier, -19.5),
+                                (Qt.Key_PageUp, Qt.NoModifier, -13.5),
+                                (Qt.Key_PageDown, Qt.NoModifier, -19.5),
+                                (Qt.Key_Home, Qt.NoModifier, 0.0),
+                                (Qt.Key_End, Qt.NoModifier, NEG_INF)):
+            QTest.keyClick(fader, key, mods)
+            self.assertAlmostEqual(fader.db(), want, places=3, msg=str(key))
+        QTest.keyClick(pan, Qt.Key_Right)
+        self.assertGreater(pan.value, 0.0)
+        QTest.keyClick(pan, Qt.Key_Left)
+        QTest.keyClick(pan, Qt.Key_Left)
+        self.assertLess(pan.value, 0.0)
+        QTest.keyClick(pan, Qt.Key_Home)
+        self.assertEqual(pan.value, 0.0)
+
+    def test_no_effects_keys_without_effects(self):
+        from openface_mixer.devices import DEVICES
+        from openface_mixer.hardware import Hardware
+        from openface_mixer.model import default_state
+        from openface_mixer.settings_panel import SettingsPanel
+        dev = DEVICES["digiface"]
+        with mock.patch("openface_mixer.updater.install_source", return_value=None):
+            panel = SettingsPanel(Hardware(dev.alsa_card), dev, default_state())
+        self.addCleanup(panel.deleteLater)
+        text = panel.keys_list.text()
+        self.assertIn("Ctrl+Q", text)
+        self.assertIn("Page Up / Down", text)
+        for word in ("Effects", "Ctrl+E", "Ctrl+W", "knob (", "Ten steps"):
+            self.assertNotIn(word, text)
+        self.assertIn("Ctrl+W", self.w.settings.keys_list.text())      # the 802 has them
+
+    def test_the_readme_has_the_same_list(self):
+        from pathlib import Path
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        section = readme.split("### Keyboard shortcuts")[1].split("\n### ")[0]
+        rows = [tuple(cell.strip() for cell in line.strip("|").split("|"))
+                for line in section.splitlines() if line.startswith("|")]
+        self.assertEqual(rows[2:], self.listed())
+
+
 if __name__ == "__main__":
     unittest.main()

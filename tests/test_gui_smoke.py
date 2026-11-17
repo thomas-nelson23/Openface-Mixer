@@ -48,6 +48,10 @@ def exercise(app, w, check):
         w.settings_btn.click()
         pump(app)
         check(w.sidebar.is_open() == want_open, f"sidebar open is not {want_open}")
+    w.settings.keys_btn.click()                     # the shortcut list at its bottom
+    pump(app)
+    check(w.settings.keys_list.isVisible(), "the shortcut list did not open")
+    w.settings.keys_btn.click()
     # the engine is enabled for login once it reports its interface, not before
     w.poll_engine()
     check(w.engine.enabled == 0, "the engine was enabled before the interface was seen")

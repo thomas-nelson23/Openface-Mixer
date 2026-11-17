@@ -85,6 +85,6 @@ for the 802 over USB, `ff800` for the Fireface 800, `raydat` for the HDSPe RayDA
 
 The GUI also runs offscreen (`QT_QPA_PLATFORM=offscreen`), which is useful for screenshots
 and smoke tests. `tests/test_gui_smoke.py` does that for every device with a stub engine and a
-temporary HOME: it opens the window, both views, the settings and every effects panel, and
-fails on any exception or Qt warning. It runs with `make test` where PySide6 is installed, and
+temporary HOME: it opens the window, both views, the settings and every effects panel, folds
+and unfolds each row, and fails on any exception or Qt warning. It runs with `make test` where PySide6 is installed, and
 in CI. When you add a window, a panel or a device, make the smoke test open it.

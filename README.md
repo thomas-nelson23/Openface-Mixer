@@ -169,11 +169,42 @@ checkout where it is; if it has local changes or isn't on `main`, update by hand
 | Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
+| Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
 | Matrix | Click an empty cell for 0 dB, drag up or down to set its level, double-click or Delete to clear it. Scrolling moves the grid; Ctrl + scroll changes a level. Arrow keys move the selection, Enter types a level |
 | Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
-| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
+| Effects (802, UCX II) | **EQ** / **D** on a strip open its panel in the row, and close it again; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
 | Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
+
+### Keyboard shortcuts
+
+The same list is in the app: **Keyboard shortcuts** at the bottom of the settings, then
+**Show**. The effects are on the Fireface 802 and UCX II.
+
+| Where | Keys | What they do |
+| --- | --- | --- |
+| Window | Ctrl+, | Show or hide settings |
+| Window | Ctrl+1, Ctrl+2 | Mixer, Matrix |
+| Window | Tab, Shift+Tab | Next, previous control |
+| Window | Esc | Cancel Store or typing |
+| Window | Ctrl+Q | Quit |
+| Row title | Space, Enter | Fold or unfold the row |
+| Fader | Up, Down | 1 dB (Ctrl: 0.5 dB) |
+| Fader | Page Up / Down | 6 dB |
+| Fader | Home | 0 dB |
+| Fader | End | Off (-∞) |
+| Fader | Enter | Type a level |
+| Pan knob | Left, Right | Pan |
+| Pan knob | Home | Centre |
+| Matrix | Arrow keys | Move the selection |
+| Matrix | Enter | Type a level |
+| Matrix | Delete | Clear the cell |
+| Effects | Ctrl+E | Reverb and Echo |
+| Effects | Esc, Ctrl+W | Close a panel |
+| Effects knob | Arrow keys | Turn (Shift: fine) |
+| Effects knob | Page Up / Down | Ten steps |
+| Effects knob | Home | Default value |
+| Effects knob | Enter | Type a value |
 
 ### Control room and ARC USB
 

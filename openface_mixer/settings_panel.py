@@ -3,7 +3,7 @@ mixer status."""
 import html
 import threading
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
@@ -16,6 +16,49 @@ from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 from . import theme
 from .theme import SANS, Section, caption_html, font, key_label, px
+
+# Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
+# the bottom of the sidebar shows them, and README.md has the same list under "Keyboard
+# shortcuts" (tests/test_layout.py holds the two together). The Effects groups are for devices
+# with TotalMix FX.
+SHORTCUTS = (
+    ("Window", (
+        ("Ctrl+,", "Show or hide settings"),
+        ("Ctrl+1, Ctrl+2", "Mixer, Matrix"),
+        ("Tab, Shift+Tab", "Next, previous control"),
+        ("Esc", "Cancel Store or typing"),
+        ("Ctrl+Q", "Quit"),
+    )),
+    ("Row title", (
+        ("Space, Enter", "Fold or unfold the row"),
+    )),
+    ("Fader", (
+        ("Up, Down", "1 dB (Ctrl: 0.5 dB)"),
+        ("Page Up / Down", "6 dB"),
+        ("Home", "0 dB"),
+        ("End", "Off (-∞)"),
+        ("Enter", "Type a level"),
+    )),
+    ("Pan knob", (
+        ("Left, Right", "Pan"),
+        ("Home", "Centre"),
+    )),
+    ("Matrix", (
+        ("Arrow keys", "Move the selection"),
+        ("Enter", "Type a level"),
+        ("Delete", "Clear the cell"),
+    )),
+    ("Effects", (
+        ("Ctrl+E", "Reverb and Echo"),
+        ("Esc, Ctrl+W", "Close a panel"),
+    )),
+    ("Effects knob", (
+        ("Arrow keys", "Turn (Shift: fine)"),
+        ("Page Up / Down", "Ten steps"),
+        ("Home", "Default value"),
+        ("Enter", "Type a value"),
+    )),
+)
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules", "ff400": "70-rme-fireface.rules"}
@@ -186,6 +229,9 @@ class Sidebar(QFrame):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         lay.addWidget(scroll, 1)
+        # the shortcut list opens at the very bottom: scroll down to it once it is laid out
+        panel.keys_btn.clicked.connect(lambda: QTimer.singleShot(
+            0, lambda: scroll.ensureWidgetVisible(panel.keys_list, 0, px(8))))
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -284,6 +330,7 @@ class SettingsPanel(QWidget):
         self._build_ui_scale(lay, ui_scale)
         self._build_mix(lay)
         self._build_updates(lay)
+        self._build_shortcuts(lay)
 
         eng.setToolTip(
             f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
@@ -382,6 +429,37 @@ class SettingsPanel(QWidget):
         if self._source is None:
             self.update_label.setText(updater.manual_hint())
             self.update_btn.setVisible(False)
+
+    def _build_shortcuts(self, lay):
+        """The keyboard shortcuts in one place. The list is long, so it is closed until asked
+        for."""
+        box = Section("KEYBOARD SHORTCUTS")
+        bl = QVBoxLayout(box)
+        self.keys_btn = QPushButton("Show")
+        self.keys_btn.setAccessibleName("Show keyboard shortcuts")
+        self.keys_btn.clicked.connect(self._toggle_shortcuts)
+        bl.addWidget(self.keys_btn)
+        rows = ""
+        for where, keys in SHORTCUTS:
+            if where.startswith("Effects") and self.dev.fx is None:
+                continue
+            rows += (f"<tr><td colspan='2' style='padding-top:{px(6)}px;"
+                     f"color:{theme.DIM.name()}'>{where}</td></tr>")
+            for key, what in keys:
+                rows += (f"<tr><td style='padding-right:{px(8)}px;white-space:nowrap'>"
+                         f"{html.escape(key)}</td>"
+                         f"<td style='color:{theme.MUTED}'>{html.escape(what)}</td></tr>")
+        self.keys_list = QLabel(f"<table cellspacing='0' cellpadding='{px(1)}'>{rows}</table>")
+        self.keys_list.setWordWrap(True)
+        bl.addWidget(self.keys_list)
+        self.keys_list.hide()
+        lay.addWidget(box)
+
+    def _toggle_shortcuts(self):
+        show = self.keys_list.isHidden()
+        self.keys_list.setVisible(show)
+        self.keys_btn.setText("Hide" if show else "Show")
+        self.keys_btn.setAccessibleName(f"{self.keys_btn.text()} keyboard shortcuts")
 
     def _update_clicked(self):
         src, installed = self._source
