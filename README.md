@@ -50,7 +50,8 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   with its response curve) and Dynamics panel (compressor, expander and Auto Level); they light
   while an effect is on. **FX** in the top bar (Ctrl+E) opens Reverb and Echo, fed by the **FX
   Send** in each input and playback channel's settings and heard through each output's **FX
-  Return**. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
+  Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
+  a stereo pair uses its left channel's effects on both sides. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
   bands) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
   to reuse settings.
 
