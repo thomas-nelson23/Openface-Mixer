@@ -709,10 +709,10 @@ class SettingsPanel(QWidget):
         if not self._card_name:
             return
         if ask(self, "Switch profile",
-               "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-               "This lets apps record all 32 hardware inputs. The output device will be renamed "
-               "to '…pro-output-0' (your existing combine-stream config already matches it). "
-               "Audio may briefly drop out.", "Switch profile"):
+               "Switch the Digiface to the Pro Audio profile?\n\n"
+               "Apps can then record all of its hardware inputs. Its output device gets a new "
+               "name ending in pro-output-0, so apps that play to it directly may need it "
+               "chosen again. Audio may drop out for a moment.", "Switch profile"):
             set_card_profile(self._card_name, "pro-audio")
 
     def update_hw(self, ctrls):
