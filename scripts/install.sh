@@ -20,7 +20,7 @@ fi
 
 if [ -z "$DESTDIR" ] && command -v pacman >/dev/null; then
     missing=()
-    for pkg in pyside6 qt6-svg libpipewire libusb alsa-utils libpulse gcc pkgconf make; do
+    for pkg in pyside6 libpipewire libusb alsa-utils libpulse gcc pkgconf make; do
         pacman -Qq "$pkg" &>/dev/null || missing+=("$pkg")
     done
     if ((${#missing[@]})); then
