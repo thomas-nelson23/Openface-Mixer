@@ -82,6 +82,27 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual((backups[0] / "matrix.bin").read_bytes(), b"mix")
 
+    def test_only_the_newest_three_backups_are_kept(self):
+        parent = self.config.parent
+        stamps = ["2026-01-05-120000", "2025-12-31-235959", "2026-03-01-080000",
+                  "2026-02-10-101010"]
+        for stamp in stamps:
+            (parent / f"openface-mixer.backup-{stamp}").mkdir()
+        # not named like a backup: never touched
+        others = [parent / "openface-mixer.backup-mine", parent / "openface-mixer.backup-2026",
+                  parent / "other.backup-2020-01-01-000000", parent / "openface-mixer.backup"]
+        for other in others:
+            other.mkdir()
+        with mock.patch.object(updater, "CONFIG_DIR", self.config), \
+                mock.patch.object(updater.time, "strftime", lambda _fmt: "2026-11-16-170000"):
+            new = updater.backup_config()
+        self.assertEqual((new / "matrix.bin").read_bytes(), b"mix")
+        kept = sorted(p.name.rpartition("backup-")[2] for p in parent.iterdir()
+                      if p.name.startswith("openface-mixer.backup-2") and len(p.name) > 30)
+        self.assertEqual(kept, ["2026-02-10-101010", "2026-03-01-080000", "2026-11-16-170000"])
+        self.assertTrue(all(other.is_dir() for other in others))
+        self.assertTrue(self.config.is_dir())
+
     def test_refuses_local_changes(self):
         (self.src / "f").write_text("edited")
         with self.assertRaises(updater.UpdateError):

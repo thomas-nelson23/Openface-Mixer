@@ -72,6 +72,13 @@ class DeviceTest(unittest.TestCase):
         dev.upgrade_settings(st)
         self.assertEqual(st["hw"]["mic_gain"], [0, 0])
 
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        s = ff.upgrade_settings({"mic_gain": [30.0, "x"], "line_gain": [None, 7],
+                                 "pad": [1, True], "phones_level": []})
+        # the gain boxes store what they show, so a gain can be a whole number or not
+        self.assertEqual((s["mic_gain"], s["line_gain"]), ([30.0, 0], [0, 7]))
+        self.assertEqual((s["pad"], s["phones_level"]), ([False, True], "high"))
+
 
 if __name__ == "__main__":
     unittest.main()

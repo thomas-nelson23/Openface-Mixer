@@ -223,6 +223,7 @@ def stylesheet():
                 border-radius:{p(8)}px; padding:{p(6)}px; }}
         QMenu::item {{ padding:{p(5)}px {p(18)}px; border-radius:{p(4)}px; color:{s}; }}
         QMenu::item:selected {{ background:rgba(42,212,255,0.12); color:white; }}
+        QMenu::item:disabled {{ background:transparent; color:{MUTED}; }}
         QMenu::separator {{ height:1px; background:{HAIR}; margin:{p(4)}px {p(6)}px; }}
         QMenu::icon {{ margin-left:{p(6)}px; }}
         QPushButton {{ background:transparent; color:{t}; border:1px solid {HAIR_STRONG};

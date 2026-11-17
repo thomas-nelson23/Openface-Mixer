@@ -130,5 +130,59 @@ class ControlRoomTest(unittest.TestCase):
         self.assertEqual(cr.step_volume(st, 2), (0, m.FADER_MIN_DB + 1.0))
 
 
+class LoadTest(unittest.TestCase):
+    """load(): a damaged or hand-edited control room can't stop the window or the mix."""
+
+    def usable(self, st):
+        c = cr.control_room(st)
+        self.assertEqual(set(c), set(cr.default_control_room()))
+        for key in ("dim", "mono", "ext_in", "talkback"):
+            c[key] = True
+        run(st)
+        cr.step_volume(st, 1)
+        return c
+
+    def test_no_control_room(self):
+        for value in (None, "x", [1], 7):
+            with self.subTest(value=value):
+                st = m.default_state()
+                st["control_room"] = value
+                self.assertEqual(cr.load(st, 8), cr.default_control_room(8))
+        st = m.default_state()
+        self.assertEqual(cr.load(st, 8), cr.default_control_room(8))
+
+    def test_wrong_values_go_back_to_their_defaults(self):
+        base = cr.default_control_room(8)
+        bad = {"main": (99, -1, "x", 1.5, True, None), "phones": (18, "x"),
+               "main_b": (99, -2, "x"), "talkback_src": (36, -4, "a"), "ext_src": (35, -1, "a"),
+               "talkback_dests": (5, "x", [99], [0, "x"], None),
+               "dim_db": (20.0, "x", None, float("nan")), "talkback_dim_db": (6, "x"),
+               "encoder": (5, "aux", None), "dim": (1, "x"), "mono": (None,),
+               "speaker_b": ("yes",), "ext_in": (0,), "version": ("new", None)}
+        for key, values in bad.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    st = m.default_state()
+                    st["control_room"] = dict(base, **{key: value})
+                    self.assertEqual(cr.load(st, 8), base)
+                    self.usable(st)
+
+    def test_good_values_are_kept(self):
+        st = m.default_state()
+        good = dict(cr.default_control_room(8), main=3, main_b=4, phones=5, dim=True,
+                    dim_db=-30, mono=True, speaker_b=True, talkback_src=35, ext_src=34,
+                    talkback_dests=[5, 6], talkback_dim_db=0.0, ext_in=True, encoder="phones")
+        st["control_room"] = dict(good, talkback=True)
+        self.assertEqual(cr.load(st, 8), good)       # all but Talkback, which is switched off
+        self.usable(st)
+
+    def test_old_control_room_is_still_upgraded(self):
+        st = m.default_state()
+        st["control_room"] = {"main_b": 1, "speaker_b": False}
+        c = cr.load(st, 8)
+        self.assertEqual((c["main_b"], c["phones"], c["version"]), (cr.NO_PAIR, 8,
+                                                                    cr.CR_VERSION))
+
+
 if __name__ == "__main__":
     unittest.main()

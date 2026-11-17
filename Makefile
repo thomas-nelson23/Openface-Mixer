@@ -11,9 +11,9 @@ all: engine ## Build everything (just the engine; the GUI is plain Python)
 engine: $(ENGINE) ## Build the C mixer engine
 
 ENGINE_SRC = engine/openface-mixer-engine.c engine/backend_digiface.c engine/digiface_usb.c \
-	     engine/fireface_fw.c engine/fireface_usb.c engine/hdspe.c
+	     engine/fireface_fw.c engine/fireface_usb.c engine/hdspe.c engine/matrix_file.c
 ENGINE_HDR = engine/backend.h engine/digiface_usb.h engine/fireface_fw.h engine/fireface_usb.h \
-	     engine/hdspe.h \
+	     engine/hdspe.h engine/matrix_file.h \
 	     engine/shm_layout.h
 
 $(ENGINE): $(ENGINE_SRC) $(ENGINE_HDR)
@@ -37,6 +37,8 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	./tests/test_fireface_usb
 	$(CC) $(CFLAGS) -o tests/test_hdspe tests/test_hdspe.c engine/hdspe.c -lm
 	./tests/test_hdspe
+	$(CC) $(CFLAGS) -o tests/test_matrix_file tests/test_matrix_file.c engine/matrix_file.c -lm
+	./tests/test_matrix_file
 
 lint: ## Byte-compile and run pyflakes (syntax errors, unused imports, undefined names)
 	python3 -m compileall -q openface_mixer tests
@@ -49,7 +51,8 @@ uninstall: ## Remove the user install (keeps saved mixes)
 	./scripts/uninstall.sh
 
 clean: ## Remove build output
-	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_hdspe
+	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_hdspe \
+		tests/test_matrix_file
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
 help: ## Show this help

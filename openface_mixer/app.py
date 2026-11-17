@@ -19,7 +19,7 @@ from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
     device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
-    save_device_choice, save_state, save_ui_scale, save_window,
+    previous_mix_file, save_device_choice, save_state, save_ui_scale, save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -27,10 +27,10 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
-    compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
-    set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels,
-    strip_color, strip_hidden, strip_icon, strip_key,
+    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, clear_sends_outside,
+    compute_matrix, compute_out_gains, default_state, display_name, extract_mix, get_strip_db,
+    group_follow, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode,
+    strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import RemoteLink, RemotePanel, remote_settings
@@ -42,6 +42,12 @@ from .theme import (
 from .widgets import Row, Strip
 
 
+def reason(e):
+    """Why a file could not be read or written, without the error number and path that Python
+    puts around it."""
+    return getattr(e, "strerror", None) or str(e)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, dev, background=False):
         super().__init__()
@@ -51,7 +57,11 @@ class MainWindow(QMainWindow):
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
         self.ui_scale = load_ui_scale()    # applied by main() through theme.apply_theme
-        self.st = load_state(dev)
+        self.st, problem = load_state(dev)
+        self._load_notice = {       # said once, when the window is first shown
+            "backup": "The saved mix could not be read. The last good copy was loaded.",
+            "reset": "The saved mix was damaged. What could not be read was reset to the default.",
+        }.get(problem)
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
         self._quitting = False             # Ctrl+Q: close for real even when started in the background
@@ -141,6 +151,7 @@ class MainWindow(QMainWindow):
         self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
         self.toast.setObjectName("toast")
         self.toast.hide()
+        self.toast.mousePressEvent = lambda _e: self.toast.hide()
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
         self._build_shortcuts()
 
@@ -296,9 +307,10 @@ class MainWindow(QMainWindow):
             if b.focusPolicy() != Qt.NoFocus:
                 b.setFocusPolicy(Qt.TabFocus)
 
-    def notify(self, text):
+    def notify(self, text, stay=False):
         """Brief feedback over the bottom of the mixer, gone after a few seconds. Only for
-        things that are also visible elsewhere (nothing has to be read in time)."""
+        things that are also visible elsewhere (nothing has to be read in time); anything else
+        is shown with stay, until it is clicked or the next message comes."""
         self.toast.setText(text)
         self.toast.adjustSize()
         area = self.centralWidget().width() - (self.sidebar.width() if self.sidebar.is_open()
@@ -307,7 +319,16 @@ class MainWindow(QMainWindow):
                         self.centralWidget().height() - self.toast.height() - px(24))
         self.toast.raise_()
         self.toast.show()
-        self._toast_timer.start()
+        if stay:
+            self._toast_timer.stop()
+        else:
+            self._toast_timer.start()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._load_notice:
+            QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
+            self._load_notice = None
 
     @staticmethod
     def _caption(text):
@@ -384,6 +405,7 @@ class MainWindow(QMainWindow):
             name = self.presets.name(i)
             store.addAction(f"{i + 1}  {name}" if name else f"{i + 1}  (empty)",
                             lambda _=False, n=i: self.store_slot(n))
+        self._add_restore_action(menu)
 
     # ------------------------------------------------------------------ building strips
     def channels(self, kind):
@@ -947,13 +969,40 @@ class MainWindow(QMainWindow):
         self.notify(f"Saved “{name}” in slot {i + 1}")
 
     def recall_slot(self, i):
-        apply_mix(self.st, self.presets.slots[i]["mix"])
-        self.st["active_slot"] = i
-        name = self.presets.name(i)
+        self.replace_mix(self.presets.slots[i]["mix"], f"Recalled “{self.presets.name(i)}”", i)
+
+    def replace_mix(self, mix, message, slot=None):
+        """Recall, Import, Reset and Restore all end here. The mix that is replaced is written
+        to one file first, overwritten each time, so that a slip can be taken back with
+        "Restore previous mix". Sends on channels this interface doesn't have are switched off,
+        so a mix from a bigger interface leaves no routing that no strip shows."""
+        try:
+            export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
+        except OSError:
+            pass                    # a full disk must not stop a recall
+        apply_mix(self.st, mix)
+        clear_sends_outside(self.st, self.dev.all_channels)
+        self.st["active_slot"] = slot
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Recalled “{name}”")
+        self.notify(message)
+
+    def restore_previous_mix(self):
+        try:
+            _name, mix = import_mix(previous_mix_file(self.dev))
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Restore previous mix",
+                                f"Could not restore the previous mix:\n{reason(e)}")
+            return
+        self.replace_mix(mix, "Restored the previous mix")
+
+    def _add_restore_action(self, menu):
+        menu.addSeparator()
+        a = menu.addAction("Restore previous mix", self.restore_previous_mix)
+        a.setToolTip("The mix as it was before the last recall, import or reset")
+        a.setEnabled(previous_mix_file(self.dev).exists())
+        menu.setToolTipsVisible(True)
 
     def slot_menu(self, i):
         menu = QMenu(self)
@@ -962,7 +1011,8 @@ class MainWindow(QMainWindow):
             menu.addAction("Recall", lambda: self.recall_slot(i))
             menu.addAction("Rename…", lambda: self._rename_slot(i))
             menu.addSeparator()
-            menu.addAction("Clear", lambda: (self.presets.clear(i), self.refresh_slots()))
+            menu.addAction("Clear…", lambda: self.clear_slot(i))
+        self._add_restore_action(menu)
         menu.exec(self.slot_btns[i].mapToGlobal(self.slot_btns[i].rect().bottomLeft()))
         menu.deleteLater()
 
@@ -973,12 +1023,23 @@ class MainWindow(QMainWindow):
             self.presets.rename(i, name.strip())
             self.refresh_slots()
 
+    def clear_slot(self, i):
+        if ask(self, "Clear preset", f"Clear “{self.presets.name(i)}” from slot {i + 1}? "
+               "This can't be undone.", "Clear"):
+            self.presets.clear(i)
+            self.refresh_slots()
+
     def export_mix(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export mix", "mix.ofmix.json",
                                               "Openface Mixer mix (*.json)")
-        if path:
-            slot = self.st.get("active_slot")
-            export_mix(path, self.presets.name(slot) if slot is not None else "Mix", extract_mix(self.st))
+        if not path:
+            return
+        slot = self.st.get("active_slot")
+        try:
+            export_mix(path, self.presets.name(slot) if slot is not None else "Mix",
+                       extract_mix(self.st))
+        except OSError as e:
+            QMessageBox.warning(self, "Export mix", f"Could not export to {path}:\n{reason(e)}")
 
     def import_mix(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import mix", "", "Openface Mixer mix (*.json)")
@@ -987,25 +1048,16 @@ class MainWindow(QMainWindow):
         try:
             name, mix = import_mix(path)
         except (OSError, ValueError) as e:
-            QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{e}")
+            QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{reason(e)}")
             return
-        apply_mix(self.st, mix)
-        self.st["active_slot"] = None
-        self.rebuild_all()
-        self.refresh_slots()
-        self.push_matrix()
-        self.notify(f"Imported “{name}”")
+        self.replace_mix(mix, f"Imported “{name}”")
 
     def reset_mix(self):
         if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
-                   "no input monitoring, no groups)? This can't be undone.", "Reset mix"):
+                   "no input monitoring, no groups)?", "Reset mix"):
             return
-        apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
-        self.st["active_slot"] = None
-        self.rebuild_all()
-        self.refresh_slots()
-        self.push_matrix()
-        self.notify("Mix reset to default")
+        self.replace_mix(extract_mix(default_state(self.dev.phones_pair(1))),
+                         "Mix reset to default")
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):

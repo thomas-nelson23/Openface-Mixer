@@ -62,7 +62,7 @@ def resolve_target(host, port):
         return None
     try:
         return socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4][0], port
-    except (OSError, IndexError):
+    except (OSError, IndexError, UnicodeError):     # UnicodeError: no host name ("a..b")
         return None
 
 
@@ -237,7 +237,7 @@ class RemotePanel(Section):
         g.addWidget(self.enabled, 0, 0, 1, 2)
         g.addWidget(key_label("UDP port"), 1, 0)
         self.port = QSpinBox()
-        self.port.setRange(1024, 65535)
+        self.port.setRange(osc_remote.PORTS["port"][0], osc_remote.PORTS["port"][-1])
         self.port.setValue(r["port"])
         self.port.editingFinished.connect(self._edit)
         g.addWidget(self.port, 1, 1)
@@ -251,7 +251,7 @@ class RemotePanel(Section):
         g.addWidget(self.host, 2, 1)
         g.addWidget(key_label("Port out"), 3, 0)
         self.out_port = QSpinBox()
-        self.out_port.setRange(1, 65535)
+        self.out_port.setRange(osc_remote.PORTS["out_port"][0], osc_remote.PORTS["out_port"][-1])
         self.out_port.setValue(r["out_port"])
         self.out_port.editingFinished.connect(self._edit)
         g.addWidget(self.out_port, 3, 1)
