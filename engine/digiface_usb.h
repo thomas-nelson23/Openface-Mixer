@@ -48,6 +48,7 @@ enum {
 	DFU_STATE_NO_NODES,       /* active, but the matrix needs more than DFU_MAX_NODES */
 	DFU_STATE_ERROR,          /* USB error; will retry */
 	DFU_STATE_WRONG_DRIVER,   /* the kernel driver bound to the device can't run it (RayDAT) */
+	DFU_STATE_NO_REPLY,       /* open, but the device does not answer (USB Firefaces) */
 };
 
 struct dfu;

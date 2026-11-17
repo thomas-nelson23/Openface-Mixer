@@ -1,9 +1,11 @@
 /* Unit test for the Fireface 802 and UCX II USB (Class Compliant) SysEx encoding and decoding. */
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "../engine/digiface_usb.h"   /* DFU_STATE_* */
 #include "../engine/fireface_fw.h"
 #include "../engine/fireface_usb.h"
 
@@ -78,9 +80,23 @@ int main(void)
 	put_word(pkt + 6, 0x3d200003);
 	put_word(pkt + 11, 0x3d210005);
 	pkt[16] = 0xf7;
+	/* link health: no reply yet, then active, then silent for too long */
+	check("link: opened", ffusb_link_state(info.replies, 0), DFU_STATE_NO_REPLY);
+	check("link: still waiting", ffusb_link_state(info.replies, FFUSB_REPLY_TIMEOUT_MS - 1),
+	      DFU_STATE_NO_REPLY);
+	check("link: never answered", ffusb_link_state(info.replies, FFUSB_REPLY_TIMEOUT_MS),
+	      -ENODATA);
+	pkt[3] = 0x0e;   /* not RME's header: not a reply */
+	check("foreign sysex", ff802usb_handle_sysex(pkt, 17, &info, &s), -1);
+	check("foreign sysex is no reply", info.replies, 0);
+	pkt[3] = 0x0d;
 	check("subid", ff802usb_handle_sysex(pkt, 17, &info, &s), 0);
 	check("clock", info.clock, 3);
 	check("rate", info.rate, 5);
+	check("replies", info.replies, 1);
+	check("link: answered", ffusb_link_state(info.replies, 0), DFU_STATE_ACTIVE);
+	check("link: quiet for a moment", ffusb_link_state(info.replies, 1000), DFU_STATE_ACTIVE);
+	check("link: went silent", ffusb_link_state(info.replies, FFUSB_REPLY_TIMEOUT_MS), -ENODATA);
 
 	/* levels: subid 4 (inputs), channel 3 at half scale; delivered in two pieces */
 	memset(pkt, 0, sizeof(pkt));
@@ -91,6 +107,7 @@ int main(void)
 	ff802usb_rx_feed(&rx, pkt, 100, &info, &s);
 	ff802usb_rx_feed(&rx, pkt + 100, sizeof(pkt) - 100, &info, &s);
 	check("level packets", info.level_packets, 1);
+	check("level packets are replies", info.replies, 2);
 	if (fabsf(s.peak_src[2] - 0.5f) > 1e-6f || s.peak_src[1] != 0.0f) {
 		fprintf(stderr, "input meters: %g %g\n", s.peak_src[1], s.peak_src[2]);
 		failed = 1;

@@ -1159,12 +1159,12 @@ class MainWindow(QMainWindow):
             self.status.setToolTip("The engine is not running · click for details")
         else:
             hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
+                      "#ffb020" if s["hw"] in ("no-nodes", "starting", "no-reply") else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
-                      else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
+                      else "no reply" if s["hw"] == "no-reply" else "offline")
+            dot = "●" if s["hw"] in ("active", "no-nodes", "starting", "no-reply") else "○"
             txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
