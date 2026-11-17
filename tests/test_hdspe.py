@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import os
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -168,6 +169,11 @@ CARDS = """\
                       RME AIO Pro S/N 00012345 at 0xf7b00000 irq 17
 """
 
+
+TWO_CARDS = CARDS + """\
+ 3 [HDSPMx4d5e6f   ]: HDSPM - RME RayDAT_4d5e6f
+                      RME RayDAT S/N 0x4d5e6f at 0xf7a00000, irq 18
+"""
 
 RAYDAT, AIO, AES = rd.MODELS["raydat"], rd.MODELS["aio"], rd.MODELS["aes"]
 
@@ -383,14 +389,40 @@ class DeviceTest(unittest.TestCase):
         dev = devices.DEVICES["aio"]
         st = m.default_state(dev.phones_pair(1))
         dev.upgrade_settings(st)
-        self.assertEqual(st["hw"], {"use_anyway": False})
+        self.assertEqual(st["hw"], {"use_anyway": False, "card": None})
         self.assertIsNone(config.device_block(st, dev))        # nothing for the engine
         self.assertNotIn(b"OFD2", config.matrix_file_bytes(st, dev))
-        st["hw"] = {"use_anyway": True, "junk": 1}
+        st["hw"] = {"use_anyway": True, "junk": 1, "card": 7}
         dev.upgrade_settings(st)
-        self.assertEqual(st["hw"], {"use_anyway": True})
+        self.assertEqual(st["hw"], {"use_anyway": True, "card": None})
         self.assertEqual(config.device_block(st, dev)[0], 1)   # the engine's dev_config
         self.assertIn(b"OFD2", config.matrix_file_bytes(st, dev))
+
+    def test_second_card(self):
+        self.assertEqual(hardware.Hardware.find_cards(""), [])
+        with mock.patch.object(Path, "read_text", return_value=TWO_CARDS):
+            self.assertEqual(hardware.Hardware.find_cards(RAYDAT.card),
+                             [(1, "RME RayDAT_1a2b3c"), (3, "RME RayDAT_4d5e6f")])
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card), 1)
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card, "RME RayDAT_4d5e6f"), 3)
+            # the chosen card was taken out: the one that is there
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card, "RME RayDAT_777777"), 1)
+            hw = hardware.Hardware(RAYDAT.card)
+            hw.exact = "RME RayDAT_4d5e6f"
+            with mock.patch.object(hardware.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 0, AMIXER, "")):
+                hw.read()
+            self.assertEqual(hw.card, 3)
+        # the engine gets the name as a C string in the command slots
+        dev = devices.DEVICES["raydat"]
+        st = m.default_state(0)
+        dev.upgrade_settings(st)
+        st["hw"]["card"] = "RME RayDAT_4d5e6f"
+        config_word, cmds = config.device_block(st, dev)
+        raw = struct.pack(f"<{len(cmds)}I", *cmds)
+        self.assertEqual((config_word, raw[:raw.index(0)]), (0, b"RME RayDAT_4d5e6f"))
+        st["hw"]["card"] = "x" * 40                         # the card info's name is 32 bytes
+        self.assertEqual(dev.device_words(st)[1], [0x78787878] * 7 + [0x00787878])
 
     def test_missing_hint(self):
         aio, aiopro, raydat = (devices.DEVICES[k] for k in ("aio", "aiopro", "raydat"))
@@ -536,7 +568,7 @@ class PanelTest(unittest.TestCase):
         changed = []
         p.hw_changed.connect(lambda: changed.append(1))
         p.use_btn.click()
-        self.assertEqual((p.st["hw"], changed), ({"use_anyway": True}, [1]))
+        self.assertEqual((p.st["hw"]["use_anyway"], changed), (True, [1]))
         p.update_hw_mixer(dict(status, hw="active"))
         self.assertTrue(p.use_btn.isHidden())
         p.update_hw_mixer(dict(status, hw="wrong-driver"))
@@ -554,6 +586,24 @@ class PanelTest(unittest.TestCase):
                 p.update_hdspe(ctrls)
             self.assertEqual(p.rd_combos["clock"].isEnabled(), anyway)
             self.assertEqual("Settings are off" in p.rd_info.text(), not anyway)
+
+    def test_card_choice_only_with_several(self):
+        p = self.panel()
+        chosen = []
+        p.card_chosen.connect(lambda: chosen.append(1))
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(None)
+        self.assertTrue(p.card_combo.isHidden())
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=TWO_CARDS):
+            p.update_hdspe(None)
+        self.assertFalse(p.card_combo.isHidden())
+        self.assertEqual(p.card_combo.currentText(), "RME RayDAT_1a2b3c")    # the one in use
+        p.card_combo.setCurrentIndex(1)
+        p.card_combo.activated.emit(1)
+        self.assertEqual((p.st["hw"]["card"], p.hw.exact, chosen),
+                         ("RME RayDAT_4d5e6f", "RME RayDAT_4d5e6f", [1]))
+        self.assertTrue(self.panel("aio").card_combo.isHidden())
 
     def test_limited_readout(self):
         from openface_mixer import widgets

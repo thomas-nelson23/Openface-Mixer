@@ -19,7 +19,8 @@ struct ofm_backend {
 	const char *out_node_card;    /* or, for PCI cards whose node names carry only the slot,
 	                               * the prefix of the playback node's ALSA card name */
 	/* or, for FireWire units, whose node names carry their GUID: the prefix once the unit
-	 * has been found, NULL before */
+	 * has been found, NULL before. With out_node_card: the full name of the card in use (one
+	 * of several of a model), NULL before one was opened */
 	const char *(*out_node)(void *h);
 	unsigned int meter_us;        /* meter poll interval */
 

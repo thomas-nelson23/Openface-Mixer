@@ -311,6 +311,7 @@ the output masters are folded into every send, as TotalMix does on this card. A 
 output's level can add up to +6 dB at most; a fader held there shows its level in red. The clock and
 S/PDIF settings are the driver's ALSA controls, which Openface Mixer reads and writes live; they
 aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to write wins.
+With two cards of the same model, the settings panel lets you pick which one to mix.
 
 ## Files
 

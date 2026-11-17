@@ -201,6 +201,7 @@ class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface) changed in st["hw"]
     notice = Signal(str)             # a short message for the window to show
+    card_chosen = Signal()           # another card of the model (HDSPe): the engine restarts
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
@@ -225,6 +226,11 @@ class SettingsPanel(QWidget):
         self.device.setCurrentIndex(self.device.findData(dev.key))
         self.device.activated.connect(lambda i: self.device_selected.emit(self.device.itemData(i)))
         bl.addWidget(self.device)
+        self.card_combo = QComboBox()    # shown while there are several cards of an HDSPe model
+        self.card_combo.setToolTip("Which of these cards to mix")
+        self.card_combo.activated.connect(self._card_chosen)
+        self.card_combo.hide()
+        bl.addWidget(self.card_combo)
         lay.addWidget(box)
         self._card_name = None
         self._updating = False
@@ -685,8 +691,25 @@ class SettingsPanel(QWidget):
         if name:
             self._write(name, value)
 
+    def _card_chosen(self, i):
+        self.hw.exact = self.st["hw"]["card"] = self.card_combo.itemText(i)
+        self.hw_changed.emit()
+        self.card_chosen.emit()
+
+    def _show_cards(self):
+        cards = Hardware.find_cards(self.dev.alsa_card)
+        names = [name for _n, name in cards]
+        if [self.card_combo.itemText(i) for i in range(self.card_combo.count())] != names:
+            self.card_combo.clear()
+            self.card_combo.addItems(names)
+        self.card_combo.setVisible(len(names) > 1)
+        if not self.card_combo.view().isVisible():
+            self.card_combo.setCurrentIndex(next((i for i, (n, _name) in enumerate(cards)
+                                                  if n == self.hw.card), -1))
+
     def update_hdspe(self, ctrls):
         """ctrls: the card's ALSA controls (Hardware.read()), or None if they can't be read."""
+        self._show_cards()
         st = hdspe.decode_status(ctrls, self.dev.model)
         usable = True
         if st:

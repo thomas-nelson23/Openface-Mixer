@@ -28,11 +28,12 @@ const struct hdspe_model hdspe_aes = { "RME AES32", 16 };
 
 struct hdspe {
 	const struct hdspe_model *model;
-	const struct ofm_shm *shm;   /* dev_config: non-zero once the user chose "Use anyway" */
+	const struct ofm_shm *shm;   /* the GUI's "Use anyway" (dev_config), chosen card (dev_cmd) */
 	int ctl;      /* /dev/snd/controlC<n>, -1 while closed */
 	int hwdep;    /* /dev/snd/hwC<n>D0 */
 	unsigned int mixer_numid;
 	unsigned int rate_numid;     /* snd-hdspm's "System Sample Rate" control, 0 under snd-hdspe */
+	char card[32];               /* short name of the card last opened (as the card info's) */
 	uint16_t sent[HDSPE_MAX_CH][N_SRC_MAX];
 	int routes;
 	int check_out;   /* output whose sends the next status call reads back */
@@ -127,9 +128,11 @@ static int read_gain(struct hdspe *r, int src, int dst, uint16_t *gain)
 	return mixer_io(r, SNDRV_CTL_IOCTL_ELEM_READ, src, dst, gain);
 }
 
-/* Opens the control device of the model's card. Returns its fd, or -1 with *state set. A card
- * the driver rule doubts is only taken with anyway. */
-static int find_card(const struct hdspe_model *m, bool anyway, int *card, int *state)
+/* Opens the control device of the model's card: the one named want, or with "" the first.
+ * Returns its fd and sets name, or -1 with *state set. A card the driver rule doubts is only
+ * taken with anyway. */
+static int find_card(const struct hdspe_model *m, const char *want, bool anyway, int *card,
+		     char *name, int *state)
 {
 	*state = DFU_STATE_NO_DEVICE;
 	for (int n = 0; n < MAX_CARDS; n++) {
@@ -144,10 +147,12 @@ static int find_card(const struct hdspe_model *m, bool anyway, int *card, int *s
 		struct snd_ctl_card_info info;
 		memset(&info, 0, sizeof(info));
 		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
-		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name)) {
+		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name) &&
+		    (!want[0] || strcmp((const char *)info.name, want) == 0)) {
 			if (anyway ||
 			    hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
 				*card = n;
+				memcpy(name, info.name, sizeof(info.name));
 				return fd;
 			}
 			*state = DFU_STATE_WRONG_DRIVER;
@@ -199,7 +204,15 @@ static int open_dev(void *h)
 
 	if (r->ctl >= 0)
 		return DFU_STATE_ACTIVE;
-	r->ctl = find_card(r->model, r->shm->dev_config != 0, &card, &state);
+	/* with several cards of the model, the GUI names the one to use in dev_cmd (a string) */
+	char want[sizeof(r->card)];
+	memcpy(want, r->shm->dev_cmd, sizeof(want) - 1);
+	want[sizeof(want) - 1] = '\0';
+	bool anyway = r->shm->dev_config != 0;
+	r->ctl = find_card(r->model, want, anyway, &card, r->card, &state);
+	/* that card is gone: the first one, as without a choice */
+	if (r->ctl < 0 && want[0] && state != DFU_STATE_WRONG_DRIVER)
+		r->ctl = find_card(r->model, "", anyway, &card, r->card, &state);
 	if (r->ctl < 0)
 		return state;
 
@@ -248,6 +261,12 @@ static bool is_open(void *h)
 {
 	struct hdspe *r = h;
 	return r->ctl >= 0;
+}
+
+static const char *out_node(void *h)
+{
+	struct hdspe *r = h;
+	return r->card[0] ? r->card : NULL;
 }
 
 static int status(void *h, struct ofm_shm *s, bool *reset)
@@ -340,6 +359,7 @@ static void *create_aes(void) { return create(&hdspe_aes); }
 		.key = k,				\
 		.name = n,				\
 		.out_node_card = card_name,		\
+		.out_node = out_node,			\
 		.meter_us = 20000,			\
 		.create = create_fn,			\
 		.attach = attach,			\

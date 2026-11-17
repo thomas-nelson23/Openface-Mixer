@@ -37,25 +37,32 @@ class Hardware:
 
     def __init__(self, card_name=DIGIFACE_CARD):
         self.card_name = card_name
+        self.exact = None       # the full name of the card to use when several match
         self.card = None
         self.ctrls = {}
         self.error = None       # why read() could not read a card that is there (see run())
 
     @staticmethod
-    def find_card(card_name=DIGIFACE_CARD):
+    def find_cards(card_name):
+        """[(card number, short name)] of the ALSA cards whose name has card_name in it."""
         if not card_name:
-            return None
+            return []
         try:
             text = Path("/proc/asound/cards").read_text()
         except OSError:
-            return None
+            return []
         # a name ending in a letter or digit must end there ("RME AIO" isn't "RME AIO Pro"),
         # as the engine's ofm_card_match
         pat = re.escape(card_name) + (r"(?! ?[A-Za-z0-9])" if card_name[-1].isalnum() else "")
-        for m in re.finditer(r"^\s*(\d+)\s+\[.*?\]:.*?-\s*(.*)$", text, re.M):
-            if re.search(pat, m.group(2)):
-                return int(m.group(1))
-        return None
+        return [(int(m.group(1)), m.group(2).strip())
+                for m in re.finditer(r"^\s*(\d+)\s+\[.*?\]:.*?-\s*(.*)$", text, re.M)
+                if re.search(pat, m.group(2))]
+
+    @staticmethod
+    def find_card(card_name=DIGIFACE_CARD, exact=None):
+        """The number of the card named exact, else of the first that matches, else None."""
+        cards = Hardware.find_cards(card_name)
+        return next((n for n, name in cards if name == exact), cards[0][0] if cards else None)
 
     @staticmethod
     def card_driver(card):
@@ -79,7 +86,7 @@ class Hardware:
         """{control name: {"value": int, "values": [int], "items": [str], "rw": bool, "numid":
         int}} or None if absent. "value" is the first of "values"; switches read as 1 (on) or 0
         (off)."""
-        self.card = self.find_card(self.card_name)
+        self.card = self.find_card(self.card_name, self.exact)
         self.error = None
         if self.card is None:
             return None

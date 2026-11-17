@@ -5,6 +5,7 @@ and 36 outputs. A device says which of those channels exist at each speed mode, 
 called, and where its engine, config files and PipeWire nodes are.
 """
 import re
+import struct
 from pathlib import Path
 
 from . import fireface400, fireface800, fireface802, hdspe, ucx2
@@ -309,12 +310,17 @@ class HDSPeCard(Device):
         return Hardware.find_card(self.alsa_card) is not None
 
     def upgrade_settings(self, st):
-        hw = st.get("hw")
-        st["hw"] = {"use_anyway": isinstance(hw, dict) and hw.get("use_anyway") is True}
+        hw = st.get("hw") if isinstance(st.get("hw"), dict) else {}
+        card = hw.get("card")
+        st["hw"] = {"use_anyway": hw.get("use_anyway") is True,
+                    "card": card if isinstance(card, str) else None}
 
     def device_words(self, st):
-        """The configuration word tells the engine to drive a card its driver rule doubts."""
-        return int(st["hw"]["use_anyway"]), []
+        """The configuration word tells the engine to drive a card its driver rule doubts; the
+        commands hold the name of the card chosen among several, as a C string."""
+        name = (st["hw"]["card"] or "").encode()[:31]
+        name += bytes(-len(name) % 4)
+        return int(st["hw"]["use_anyway"]), list(struct.unpack(f"<{len(name) // 4}I", name))
 
     def missing_hint(self):
         if self.key == "aio" and Hardware.find_card(hdspe.MODELS["aiopro"].card) is not None:

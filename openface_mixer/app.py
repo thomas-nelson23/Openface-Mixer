@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.hw = Hardware(dev.alsa_card)
         self.ui_scale = load_ui_scale()    # applied by main() through theme.apply_theme
         self.st = load_state(dev)
+        self.hw.exact = self.st.get("hw", {}).get("card")   # HDSPe: one of several cards
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
         self._quitting = False             # Ctrl+Q: close for real even when started in the background
@@ -112,6 +113,7 @@ class MainWindow(QMainWindow):
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
         self.settings.notice.connect(self.notify)
+        self.settings.card_chosen.connect(self.restart_engine)
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
         self.settings.export_btn.clicked.connect(self.export_mix)

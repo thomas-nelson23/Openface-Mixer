@@ -370,7 +370,8 @@ static void relink(struct data *d)
 {
 	struct obj *sink = node_by_prefix(d, d->sink_out_name, 1);
 	const char *prefix = d->be->out_node ? d->be->out_node(d->hw) : d->be->out_node_prefix;
-	struct obj *dout = d->be->out_node_card ? node_by_card(d, d->be->out_node_card) :
+	const char *card = d->be->out_node_card;
+	struct obj *dout = card ? node_by_card(d, prefix ? prefix : card) :
 			   prefix ? node_by_prefix(d, prefix, 0) : NULL;
 	struct obj *fl = NULL, *fr = NULL, *a0 = NULL, *a1 = NULL;
 

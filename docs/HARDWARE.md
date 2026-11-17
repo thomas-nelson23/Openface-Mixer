@@ -413,6 +413,14 @@ uses too (`engine/hdspe.c`). No low-level protocol and no udev rule are needed: 
 opens the card's `/dev/snd/controlC<n>` and `/dev/snd/hwC<n>D0`, found by driver name `HDSPM`
 or `HDSPe` and short name `RME RayDAT_<serial>`.
 
+With two cards of one model in the computer the first is used, until another is picked in the
+settings panel (the choice only shows when there are several). The choice is the card's full
+short name, serial included: it is saved with the mix and handed to the engine as a string in
+the command slots (`dev_cmd`), and the engine opens that card and links the playback sink to
+the PipeWire node with that card name. If the named card is gone, the first one is used again.
+Each model still has one mix and one engine: the second card is mixed instead of the first, not
+beside it. Two cards whose names carry no serial can't be told apart.
+
 ## Which driver
 
 Cards made from 2022 on need snd-hdspe; snd-hdspm still binds to them (its PCI table lists
@@ -549,7 +557,8 @@ Nobody has run Openface Mixer on a RayDAT yet. Worth checking first: that the mi
 writes with PipeWire running (the `EBUSY` rule above compares the processes that opened
 playback and capture), the PipeWire card name property the engine matches, the meter scale,
 the channel layout at 2x/4x speed (on an AIO see the open question above), the driver check on
-a 2022-or-later card, and the sample rate shown while slaved under snd-hdspm.
+a 2022-or-later card, the sample rate shown while slaved under snd-hdspm, and picking the
+second of two cards.
 
 # RME ARC USB
 
