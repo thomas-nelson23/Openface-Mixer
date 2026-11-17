@@ -50,7 +50,8 @@ class Device:
         raise NotImplementedError
 
     def all_channels(self, kind):
-        """The channels of this kind the device has at any sample rate, as a set."""
+        """The channels of this kind the device has at any sample rate, as a set. A mix keeps
+        its sends on these only (model.clear_sends_outside)."""
         return {c for mode in (1, 2, 4) for c in self.channels(kind, mode)}
 
     def chan_label(self, kind, c, mode):
@@ -298,6 +299,9 @@ class HDSPeCard(Device):
 
     def channels(self, kind, mode):
         return self.model.channels(kind, mode)
+
+    def all_channels(self, kind):
+        return super().all_channels(kind) | set(self.model.extension)
 
     def chan_label(self, kind, c, mode):
         return self.model.chan_label(kind, c, mode)

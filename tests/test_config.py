@@ -263,6 +263,16 @@ class DeviceStateTest(unittest.TestCase):
                     (kind, c, o) for kind in ("in", "play") for c in dev.all_channels(kind)
                     for o in outs})
 
+    def test_the_aio_extension_boards_keep_their_routing(self):
+        """Analog 3-6 (AI4S/AO4S, hardware channels 2-5) have no strips yet, but the engine
+        mixes them: the default playback 3-6 to outputs 3-6 must stay, or a card with an AO4S
+        goes silent there with no strip to bring it back."""
+        for key in ("aio", "aiopro"):
+            st, _problem = config.load_state(DEVICES[key])
+            for c in (2, 3, 4, 5):
+                self.assertIn(("play", c, c), self.routes(st), key)
+            self.assertNotIn(("play", 20, 20), self.routes(st), key)
+
     def test_channels_of_other_sample_rates_are_kept(self):
         """A higher rate hides channels (the Digiface's ADAT 5-8 of each port at 96 kHz); their
         sends come back with the rate, so they are not cleared."""
@@ -276,7 +286,7 @@ class DeviceStateTest(unittest.TestCase):
         digiface = DEVICES["digiface"]
         self.assertEqual(digiface.all_channels("in"), set(range(32)))
         self.assertEqual(digiface.all_channels("out"), set(range(34)))
-        self.assertEqual(DEVICES["aio"].all_channels("in"), {0, 1, *range(8, 20)})
+        self.assertEqual(DEVICES["aio"].all_channels("in"), {*range(6), *range(8, 20)})
         self.assertEqual(DEVICES["ff802"].all_channels("in"), set(range(30)))
 
 
