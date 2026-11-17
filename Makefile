@@ -28,7 +28,7 @@ run-engine: engine ## Run the engine in the foreground (stop the systemd service
 test: ## Run the unit tests (no audio hardware or display needed)
 	python3 -m unittest discover -s tests -t . -v
 	$(CC) $(CFLAGS) -o tests/test_digiface_usb tests/test_digiface_usb.c engine/digiface_usb.c \
-		$(shell pkg-config --cflags --libs libusb-1.0) -lm
+		engine/backend_digiface.c $(shell pkg-config --cflags libusb-1.0) -lm
 	./tests/test_digiface_usb
 	$(CC) $(CFLAGS) -o tests/test_fireface_fw tests/test_fireface_fw.c engine/fireface_fw.c -lm
 	./tests/test_fireface_fw
