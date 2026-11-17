@@ -173,7 +173,7 @@ class EngineStartTest(WindowCase):
                 w.poll_engine()
             self.assertIn("HW DSP", w.status.text())
             self.assertEqual(intervals(w)[1], pace)
-            w.quit_app()
+            w.close()
             self.settle()
 
     def test_a_start_that_fails_is_shown_in_the_status(self):
