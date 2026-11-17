@@ -1171,6 +1171,8 @@ class MainWindow(QMainWindow):
                 self.rebuild_all()
         self.status.setText(txt)
         active = s is not None and s["hw"] == "active"
+        if active and not self._hw_active:
+            self.engine.enable()        # the interface is there: restore its mix at every login
         self._hw_active = active
         if self.dev.family == "latter":
             self.settings.update_latter_status(s["dev_status"] if active else None)
