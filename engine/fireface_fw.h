@@ -79,7 +79,39 @@ struct ff_former_model {
 };
 extern const struct ff_former_model ff800_model, ff400_model;
 
+/* How long one sync may send before it leaves the rest to the next engine tick (20 ms), so the
+ * heartbeat and the meter thread keep running during a full send. */
+#define FW_SLICE_MS 10
+
+/* An open FireWire node. */
+struct fwdev {
+	int fd;                 /* -1 while closed */
+	uint32_t generation;    /* bus generation requests are sent in */
+	uint64_t closure;
+	int64_t slice_end;      /* when the running sync has to stop sending (ms), 0 once it has */
+	char out_node[48];      /* its PipeWire playback node's name prefix, "" until found */
+};
+
+/* How the backends reach the bus. Tests put their own functions here and record what is sent. */
+struct fw_bus {
+	/* Finds and opens the RME unit with this unit version and fills in f. Returns a
+	 * DFU_STATE_* value, ACTIVE when open. */
+	int (*open)(struct fwdev *f, unsigned long unit_version);
+	/* One transaction in bus generation f->generation. Returns the response code (RCODE_*,
+	 * 0 = complete) or -errno; *got is the number of bytes a read put into data. */
+	int (*transact)(struct fwdev *f, int tcode, uint64_t offset, void *data, size_t len,
+			size_t *got);
+	/* Reads the current bus generation into f->generation. Returns 0 or -errno. */
+	int (*generation)(struct fwdev *f);
+	/* A monotonic clock in milliseconds, for the send slices. */
+	int64_t (*now_ms)(void);
+};
+extern struct fw_bus fw_bus;
+
 /* Exposed for tests. */
+/* The log line for a failed request: what kind, which register, and the response code (or the
+ * error, for result < 0). */
+void fw_failure_text(int tcode, uint64_t offset, int result, char *buf, size_t len);
 uint16_t ff802_encode_gain(float lin);
 int16_t ff802_out_vol(float lin);
 uint32_t ff802_parity(uint32_t cmd);

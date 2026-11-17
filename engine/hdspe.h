@@ -19,9 +19,11 @@
  *   hwdep SNDRV_HDSPM_IOCTL_GET_CONFIG      system sample rate and clock state.
  *
  * snd-hdspm (ALSA driver name "HDSPM") only runs the original cards properly. Cards from 2022
- * on carry RME's own PCI vendor ID (0x1d18) instead of Xilinx's; snd-hdspm still binds to them,
- * but they need snd-hdspe (driver name "HDSPe"). On such a card bound to snd-hdspm the engine
- * leaves the mixer alone and reports DFU_STATE_WRONG_DRIVER.
+ * on need snd-hdspe (driver name "HDSPe"), though snd-hdspm still binds to them. We take RME's
+ * own PCI vendor ID (0x1d18, instead of Xilinx's) as the sign of such a card; that is a guess
+ * (snd-hdspe itself goes by the firmware build), so on such a card bound to snd-hdspm the engine
+ * leaves the mixer alone and reports DFU_STATE_WRONG_DRIVER only until the user chooses "Use
+ * anyway" in the GUI, which sets dev_config.
  *
  * Mixer, meter and shared-memory channel numbers are the card's own (openface_mixer/hdspe.py
  * names them). There is no separate output fader: the output master is folded into every send
@@ -56,8 +58,12 @@ float hdspe_peak(uint32_t word);
 /* True for the model's ALSA card under either driver (driver and short name from
  * SNDRV_CTL_IOCTL_CARD_INFO). */
 bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const char *name);
-/* False for a card the driver can't run: a 2022-and-later card (PCI vendor) under snd-hdspm. */
+/* False for a card the driver may not run: a 2022-and-later card (PCI vendor) under snd-hdspm. */
 bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor);
+/* The rate a card runs at under snd-hdspm, from its measured clock (the "System Sample Rate"
+ * control: 47998, also at 96 and 192 kHz, where the clock runs at single speed) and the rate
+ * the driver set last, which holds the speed. A standard rate within 2 % is taken as that. */
+uint32_t hdspe_hdspm_rate(uint32_t measured, uint32_t set);
 
 extern const struct hdspe_model hdspe_raydat, hdspe_aio, hdspe_aio_pro, hdspe_aes;
 

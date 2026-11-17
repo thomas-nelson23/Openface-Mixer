@@ -38,7 +38,8 @@ the engine is the same for all of them.
 - A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
 - It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
   it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name), re-linking on
+  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name,
+  the FireWire Firefaces by the unit's GUID in the node name), re-linking on
   hotplug or profile changes. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. The GUI starts the
@@ -51,8 +52,9 @@ the engine is the same for all of them.
   (`matrix_file.c`): the engine logs that and starts with the default routing, playback n to
   output n, as on a fresh install. When it exits, the interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
-  mix and all settings, about 3,700 transactions (over USB, the same as register writes, spread
-  over the ticks the MIDI output buffer needs). The 800 takes its mixer as one block write
+  mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
+  heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
+  output buffer needs). The 800 takes its mixer as one block write
   per output, so a full send is about 60 transactions.
 
 ## Shared memory (`engine/shm_layout.h`)
@@ -100,14 +102,19 @@ app.MainWindow
 - **Device settings** (Firefaces) live in `state["hw"]`. `fireface802.commands()` (and
   `ucx2.usb_commands()`) turns them into the DSP command list the engine sends, in a fixed slot
   order so only changed slots go out; `fireface800.config_words()` (and `fireface400`'s) into the
-  three configuration quadlets, which are written only after the first status read has filled in
-  the options the device reports. On the 802 and UCX II the command list ends with the TotalMix FX effects
+  three configuration quadlets. Over FireWire the configuration holds the clock source and is
+  write only, so the GUI shows what the unit's status reports and sends no configuration until
+  the user changes a setting (`config_ready()` in the protocol modules, `follow_unit()` in
+  `app.py`): connecting never changes the unit's clock. On the 802 and UCX II the command list ends with the TotalMix FX effects
   (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
   parameters sit in the slots before their effect's switch and are sent whether it is on or off, so
   an effect never starts with settings another controller left in the unit. The effects follow
   the mix: a muted channel, or one left out by a solo, has its FX send off, and a linked pair
   gets its left channel's effects on both channels (the right channel's own stay stored). The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
-  and written live. The settings panel picks its layout by `Device.family` ("latter", "former",
+  and written live; what is stored is the "Use anyway" answer to the driver warning, which
+  reaches the engine as a non-zero configuration word, and the card picked among several of a
+  model, whose name is a string in the command slots (the backend's `attach()` gives it the
+  shared memory to look at when it opens the card). The settings panel picks its layout by `Device.family` ("latter", "former",
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).

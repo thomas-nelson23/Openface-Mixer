@@ -477,6 +477,9 @@ class NameTag(QPushButton):
             super().mouseDoubleClickEvent(e)
 
 
+LEVEL_TIP = "Fader level (dB) · double-click to type a level"
+
+
 class Strip(QFrame):
     """One mixer channel strip (mono or stereo), compact like a Pro Tools mix window strip:
     name tag, pan, solo/mute/stereo, fader with the scale beside its meter, and the level and
@@ -604,7 +607,8 @@ class Strip(QFrame):
         readouts = QHBoxLayout()
         readouts.setSpacing(px(2))
         self.value = lcd_label("0.0")
-        self.value.setToolTip("Fader level (dB) · double-click to type a level")
+        self.value.setToolTip(LEVEL_TIP)
+        self._limited = ""
         self.peak = lcd_label("-∞")
         self.peak.setToolTip("Peak level (dBFS) — click the meter to reset")
         readouts.addWidget(self.value)
@@ -660,6 +664,14 @@ class Strip(QFrame):
     def set_fader(self, db):
         self.fader.set_db(db)
         self.value.setText(fmt_db(db))
+
+    def set_limited(self, why):
+        """Mark the level readout, as a clipped peak, while the hardware can't play the level
+        the fader shows (why: the tooltip saying so, "" when it can)."""
+        if why != self._limited:
+            self._limited = why
+            self.value.setStyleSheet(lcd_style("#ff2a4f", "white") if why else lcd_style())
+            self.value.setToolTip(why or LEVEL_TIP)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton and self.value.geometry().contains(e.position().toPoint()):

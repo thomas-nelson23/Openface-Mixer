@@ -56,6 +56,19 @@ int main(void)
 	check("old card, snd-hdspe", hdspe_driver_usable("HDSPe", 0x10ee), 1);
 	check("unknown vendor, snd-hdspm", hdspe_driver_usable("HDSPM", 0), 1);
 
+	/* snd-hdspm: the measured clock is at single speed, the set rate holds the speed */
+	check("measured 48k", hdspe_hdspm_rate(47998, 48000), 48000);
+	check("slaved to 44.1k, set to 48k", hdspe_hdspm_rate(44101, 48000), 44100);
+	check("96k", hdspe_hdspm_rate(48001, 96000), 96000);
+	check("88.2k", hdspe_hdspm_rate(44099, 96000), 88200);
+	check("192k", hdspe_hdspm_rate(47990, 192000), 192000);
+	check("176.4k, set to 192k", hdspe_hdspm_rate(44100, 192000), 176400);
+	check("a clock measured at double speed", hdspe_hdspm_rate(96003, 96000), 96000);
+	check("and at quad speed", hdspe_hdspm_rate(191990, 48000), 192000);
+	check("varispeed stays", hdspe_hdspm_rate(46000, 48000), 46000);
+	check("varispeed at double speed", hdspe_hdspm_rate(46000, 88200), 92000);
+	check("no clock", hdspe_hdspm_rate(0, 48000), 0);
+
 	if (!failed)
 		printf("test_hdspe: ok\n");
 	return failed;

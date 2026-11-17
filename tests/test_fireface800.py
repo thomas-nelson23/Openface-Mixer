@@ -43,15 +43,29 @@ class ConfigTest(unittest.TestCase):
     def test_clock_sources(self):
         s = ff.default_settings()
         for key, bits in (("internal", 0x1), ("adat_1", 0), ("adat_2", 0x400),
-                          ("spdif", 0xC00), ("word", 0x1400)):
+                          ("spdif", 0xC00), ("word", 0x1400), ("tco", 0x1C00)):
             s["clock"] = key
             self.assertEqual(ff.config_words(s)[2] & 0x1C01, bits)
 
-    def test_nothing_sent_until_known(self):
+    def test_nothing_sent_until_the_user_changes_a_setting(self):
         s = ff.default_settings()
         self.assertEqual(ff.device_words(s), (0, []))
-        s["known"] = True
+        ff.settings_from_status(s, 0x00001000)           # the unit runs from word clock
+        self.assertEqual(ff.device_words(s), (0, []))    # read, but still the unit's own
+        s["edited"] = True
         self.assertEqual(ff.device_words(s), (1, ff.config_words(s)))
+        self.assertEqual(ff.config_words(s)[2] & 0x1C01, 0x1400)   # and it stays on word clock
+        s["known"] = False                               # changed before the unit was ever read
+        self.assertEqual(ff.device_words(s), (0, []))
+
+    def test_unknown_clock_is_never_written(self):
+        s = ff.default_settings()
+        ff.settings_from_status(s, 0x00000800)           # a source code nobody documents
+        s["edited"] = True
+        self.assertIsNone(s["clock"])
+        self.assertEqual(ff.device_words(s), (0, []))
+        s["clock"] = "adat_1"                            # the user picks one
+        self.assertEqual(ff.device_words(s)[0], 1)
 
 
 class StatusTest(unittest.TestCase):
@@ -64,6 +78,15 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(s["in_level"], "pro")           # not in the status: kept
         ff.settings_from_status(s, 0x00000001)
         self.assertEqual((s["clock"], s["spdif_in"], s["opt_out"]), ("internal", "coax", "adat"))
+
+    def test_clock_from_status(self):
+        # every configured source reads back as itself: a later write keeps the unit's clock
+        s = ff.default_settings()
+        for bits, key in ((0x0000, "adat_1"), (0x0400, "adat_2"), (0x0C00, "spdif"),
+                          (0x1000, "word"), (0x1800, "tco"), (0x1801, "internal")):
+            ff.settings_from_status(s, bits | 0x06)
+            self.assertEqual(s["clock"], key)
+            self.assertIn(key, [k for k, _label, _bits in ff.CLOCK_SOURCES])
 
     def test_decode_internal(self):
         # internal at 48 kHz; ADAT 1 locked and synced, S/PDIF locked at 44.1k
@@ -122,6 +145,10 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual((s["clock"], s["known"]), ("word", True))
         self.assertEqual(s["p48"], [False] * 4)          # wrong length: reset
         self.assertEqual(s["jacks"], ["front"] * 3)
+        # a state from before "edited": its configuration was already being sent, so it still is
+        self.assertTrue(ff.config_ready(s))
+        self.assertFalse(ff.upgrade_settings({"clock": "word"})["edited"])
+        self.assertFalse(ff.upgrade_settings(None)["edited"])
 
     def test_damaged_settings_go_back_to_their_defaults(self):
         s = ff.upgrade_settings({"clock": [], "known": "yes", "in_level": 4, "emphasis": None,
@@ -132,6 +159,14 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(s["jacks"], ["rear", "front", "front"])
         self.assertEqual(s["p48"], [True, False, False, False])
         self.assertEqual((s["limiter"], s["out_level"]), (True, "low"))     # good ones stay
+
+    def test_an_unknown_clock_source_stays_unknown_when_loaded(self):
+        s = ff.default_settings()
+        s.update(known=True, edited=True, clock=None)
+        s = ff.upgrade_settings(s)
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+        self.assertEqual(ff.device_words(s), (0, []))
 
 
 class DeviceTest(unittest.TestCase):
@@ -144,13 +179,15 @@ class DeviceTest(unittest.TestCase):
 
 
 class FileTest(unittest.TestCase):
-    def test_matrix_file_carries_config_once_known(self):
+    def test_matrix_file_carries_config_once_ready(self):
         dev = devices.DEVICES["ff800"]
         st = m.default_state(dev.phones_pair(1))
         dev.upgrade_settings(st)
         base = 4 + (m.N_OUT * m.N_SRC + m.N_OUT) * 4
         self.assertEqual(len(config.matrix_file_bytes(st, dev)), base)
         st["hw"]["known"] = True
+        self.assertEqual(len(config.matrix_file_bytes(st, dev)), base)
+        st["hw"]["edited"] = True
         data = config.matrix_file_bytes(st, dev)
         self.assertEqual(len(data), base + 12 + config.N_DEV_CMD * 4)
         magic, flag, n, q0, q1, q2, unused = struct.unpack_from("<7I", data, base)

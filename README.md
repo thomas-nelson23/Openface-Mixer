@@ -250,7 +250,9 @@ mix.
 
 Openface Mixer is the source of truth for the 802's DSP, as TotalMix is: when it connects it
 sends the whole mix and all settings, including the effects (low cut, EQ, dynamics, auto level,
-FX sends and returns, reverb and echo; all off until you switch them on). Don't run
+FX sends and returns, reverb and echo; all off until you switch them on). Over FireWire the
+clock source and the options are the exception: Openface Mixer shows the clock the 802 runs
+from and does not touch them until you change one of them. Don't run
 `snd-fireface-ctl-service` alongside it.
 
 ### Fireface UCX II
@@ -272,10 +274,12 @@ The 800 works the same way: connect it over **FireWire**, pick **RME Fireface 80
 playback channels and 28 outputs (AN 1–8, phones PH 9/10, S/PDIF, ADAT 1 and 2) are in the mix.
 
 The 800's settings can't be read back, except the clock source and the S/PDIF and optical
-options. So the first time it connects, Openface Mixer takes those from the device, starts the
-rest (line levels, input jacks, 48V, instrument options) at their defaults (Lo Gain in, Hi Gain
-out, front jacks, 48V off), and from then on sends its own copy, as TotalMix does. Don't run
-`snd-fireface-ctl-service` alongside it either.
+options. Openface Mixer shows those as the 800 reports them and changes nothing on the unit
+until you change a setting. That first change sends all of them: the clock the 800 reported,
+and for the rest (line levels, input jacks, 48V, instrument options) what the panel shows,
+which starts at Lo Gain in, Hi Gain out, front jacks and 48V off. From then on Openface Mixer
+sends its own copy on every connect, as TotalMix does. Don't run `snd-fireface-ctl-service`
+alongside it either.
 
 The **Fireface 400** (`openface-mixer --device ff400`, engine `openface-mixer-engine@ff400`)
 works exactly like the 800 and needs the same udev rule. All 18 inputs (AN 1–8, S/PDIF, ADAT),
@@ -307,8 +311,10 @@ Which driver the card needs depends on its age:
 
 - Cards from before 2022 run on the kernel's own `snd-hdspm`; nothing to install.
 - Cards from 2022 on need [snd-hdspe](https://github.com/Schroedingers-Cat/snd-hdspe) (its
-  `develop` branch). The kernel's `snd-hdspm` still claims them but can't run them, so Openface
-  Mixer leaves such a card alone and says so. Install snd-hdspe with DKMS as its README
+  `develop` branch). The kernel's `snd-hdspm` still claims them but doesn't run them properly,
+  so Openface Mixer leaves such a card alone and says so. Which cards those are is a guess (see
+  [Status and limitations](#status-and-limitations)): if yours works with `snd-hdspm`, choose **Use
+  anyway** in the settings panel. Otherwise install snd-hdspe with DKMS as its README
   describes (`make install`) and blacklist the old driver:
 
       echo "blacklist snd-hdspm" | sudo tee /etc/modprobe.d/hdspe.conf
@@ -319,9 +325,11 @@ Which driver the card needs depends on its age:
 
 The **Openface Mixer Playback (RayDAT)** sink feeds the driver's first two playback channels,
 which are ADAT 1 channels 1/2 (`A1 1/2`), not AES. The card has no output faders of its own, so
-the output masters are folded into every send, as TotalMix does on this card. The clock and
+the output masters are folded into every send, as TotalMix does on this card. A send and its
+output's level can add up to +6 dB at most; a fader held there shows its level in red. The clock and
 S/PDIF settings are the driver's ALSA controls, which Openface Mixer reads and writes live; they
 aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to write wins.
+With two cards of the same model, the settings panel lets you pick which one to mix.
 
 ## Files
 
@@ -370,7 +378,6 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
-  The TCO module isn't offered as a clock source.
 - Fireface UCX II support follows oscmix's register documentation, Fireface 400 support
   snd-firewire-ctl-services; neither has been checked on a unit yet.
 - HDSPe RayDAT, AIO, AIO Pro and AES support is built on the kernel's `snd-hdspm` driver, the
@@ -378,7 +385,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
   The driver only accepts mixer changes while playback and recording are opened by the same
   program (PipeWire or JACK normally do that). No TCO or pitch settings. A card counts as
-  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
+  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`; that rule is not
+  confirmed, so it only warns. With the kernel driver an AIO Pro shows up as an AIO, and on an
+  AIO at 88.2 kHz and above the ADAT channels may not line up with their strips
+  ([docs/HARDWARE.md](docs/HARDWARE.md#aio-aio-pro-and-aes)).
 - The Digiface's hardware mixer allows 2048 active routes; the settings panel warns if a mix
   needs more.
 - The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules

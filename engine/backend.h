@@ -18,9 +18,16 @@ struct ofm_backend {
 	const char *out_node_prefix;  /* PipeWire node name prefix of its ALSA playback device */
 	const char *out_node_card;    /* or, for PCI cards whose node names carry only the slot,
 	                               * the prefix of the playback node's ALSA card name */
+	/* or, for FireWire units, whose node names carry their GUID: the prefix once the unit
+	 * has been found, NULL before. With out_node_card: the full name of the card in use (one
+	 * of several of a model), NULL before one was opened */
+	const char *(*out_node)(void *h);
 	unsigned int meter_us;        /* meter poll interval */
 
 	void *(*create)(void);
+	/* Optional, called once after create: the shared memory, for a backend whose open depends
+	 * on what the GUI wrote there. */
+	void (*attach)(void *h, const struct ofm_shm *s);
 	void (*destroy)(void *h);
 	/* Opens the device. Returns a DFU_STATE_* value (digiface_usb.h); is_open() says if it is. */
 	int (*open)(void *h);

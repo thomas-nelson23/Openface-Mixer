@@ -66,6 +66,8 @@ CLOCK_SOURCES = (                       # (key, label, config bits), TotalMix's 
     ("adat_b", "ADAT B", 0x00001000),
 )
 
+CONFIG_KEYS = ("clock", "aes_in", "opt_out", "aes_pro", "word_single")   # config_word()'s
+
 OPTION_ROWS = (                 # settings panel: (label, key, ((text, value), ...))
     ("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
     ("Optical out", "opt_out", (("ADAT", "adat"), ("S/PDIF", "spdif"))),
@@ -145,7 +147,9 @@ def pair_label(kind, c):
 def default_settings():
     """Hardware settings as TotalMix shows them (settings dialog and channel settings)."""
     return {
-        "clock": "internal",
+        "known": False,           # FireWire: True once the clock was read from the unit's status
+        "edited": False,          # FireWire: True once a clock or option setting was changed here
+        "clock": "internal",      # None: the unit reports a source we don't know
         "aes_in": "xlr",          # or "optical" (AES/S/PDIF in from the second optical port)
         "opt_out": "adat",        # or "spdif" (S/PDIF out on the optical port)
         "aes_pro": False,         # AES/S/PDIF output channel status: professional
@@ -171,6 +175,10 @@ def upgrade_settings(s, base=None, fx_model=FX):
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
+    if "edited" in base and "edited" not in s:
+        # states from before the configuration was held back: it was sent on every connect, so
+        # it stays the user's if any of it was ever changed
+        s["known"] = s["edited"] = any(k in s and s[k] != base[k] for k in CONFIG_KEYS)
     for k, v in base.items():
         if k == "fx":
             s[k] = fxmod.upgrade_settings(s.get(k), fx_model)
@@ -184,8 +192,9 @@ def upgrade_settings(s, base=None, fx_model=FX):
                 part[kk] = [c if same_kind(c, d) and (kk != "level" or type(c) is int and c >= 0)
                             else d for c, d in zip(cur, vv)]
             s[k] = part
-        elif not same_kind(s.get(k), v):
-            s[k] = v
+        elif not same_kind(s.get(k), v) and not (k == "clock" and "edited" in base
+                                                 and k in s and s[k] is None):
+            s[k] = v            # FireWire: a clock of None (unknown source) is kept
     if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
         s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
@@ -253,6 +262,25 @@ def usb_commands(s, st=None):
         reg_cmd(USB_REG_AES_PRO, s["aes_pro"]),
         reg_cmd(USB_REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
     ]
+
+
+def settings_from_status(s, status):
+    """Take the clock source the unit runs from (sync status register) into s and mark it
+    known. The register does not report the options. An input counts as the source only while
+    it has lock: the unit can't run from one that has none, and the kernel driver and
+    snd-firewire-ctl-services give ADAT A and B each other's source codes (not lock bits)."""
+    source = STATUS_SOURCES.get(status & 0xE00)
+    lock = {label: bit for label, bit, _sync, _shift in STATUS_INPUTS}.get(source)
+    keys = {label: key for key, label, _ in CLOCK_SOURCES}
+    s["clock"] = keys.get(source) if lock is None or status & lock else None
+    s["known"] = True
+
+
+def config_ready(s):
+    """False while the configuration register is left alone. It is write only and holds the
+    clock source and the options together, so it is sent only once the clock has been read from
+    the unit and the user has changed a setting: connecting never changes the unit's clock."""
+    return bool(s["known"] and s["edited"] and s["clock"])
 
 
 def config_word(s):

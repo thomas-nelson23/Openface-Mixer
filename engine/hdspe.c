@@ -28,9 +28,12 @@ const struct hdspe_model hdspe_aes = { "RME AES32", 16 };
 
 struct hdspe {
 	const struct hdspe_model *model;
+	const struct ofm_shm *shm;   /* the GUI's "Use anyway" (dev_config), chosen card (dev_cmd) */
 	int ctl;      /* /dev/snd/controlC<n>, -1 while closed */
 	int hwdep;    /* /dev/snd/hwC<n>D0 */
 	unsigned int mixer_numid;
+	unsigned int rate_numid;     /* snd-hdspm's "System Sample Rate" control, 0 under snd-hdspe */
+	char card[32];               /* short name of the card last opened (as the card info's) */
 	uint16_t sent[HDSPE_MAX_CH][N_SRC_MAX];
 	int routes;
 	int check_out;   /* output whose sends the next status call reads back */
@@ -63,6 +66,21 @@ bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const cha
 bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor)
 {
 	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == HDSPE_VENDOR_RME);
+}
+
+uint32_t hdspe_hdspm_rate(uint32_t measured, uint32_t set)
+{
+	static const uint32_t std[] = { 32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400,
+					192000 };
+	uint32_t rate = measured;
+	for (size_t i = 0; i < sizeof(std) / sizeof(std[0]); i++)
+		if (measured > std[i] - std[i] / 50 && measured < std[i] + std[i] / 50)
+			rate = std[i];
+	/* as the driver's hdspm_rate_multiplier(): the card can't tell double and quad speed
+	 * from its clock, the speed is the one that was set */
+	if (rate < 56000)
+		rate *= set > 96000 ? 4 : set > 48000 ? 2 : 1;
+	return rate;
 }
 
 /* PCI vendor ID of ALSA card n, or 0 if unknown. */
@@ -115,8 +133,11 @@ static int read_gain(struct hdspe *r, int src, int dst, uint16_t *gain)
 	return mixer_io(r, SNDRV_CTL_IOCTL_ELEM_READ, src, dst, gain);
 }
 
-/* Opens the control device of the model's card. Returns its fd, or -1 with *state set. */
-static int find_card(const struct hdspe_model *m, int *card, int *state)
+/* Opens the control device of the model's card: the one named want, or with "" the first.
+ * Returns its fd and sets name, or -1 with *state set. A card the driver rule doubts is only
+ * taken with anyway. */
+static int find_card(const struct hdspe_model *m, const char *want, bool anyway, int *card,
+		     char *name, int *state)
 {
 	*state = DFU_STATE_NO_DEVICE;
 	for (int n = 0; n < MAX_CARDS; n++) {
@@ -131,9 +152,12 @@ static int find_card(const struct hdspe_model *m, int *card, int *state)
 		struct snd_ctl_card_info info;
 		memset(&info, 0, sizeof(info));
 		if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &info) == 0 &&
-		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name)) {
-			if (hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
+		    hdspe_card_match(m, (const char *)info.driver, (const char *)info.name) &&
+		    (!want[0] || strcmp((const char *)info.name, want) == 0)) {
+			if (anyway ||
+			    hdspe_driver_usable((const char *)info.driver, card_pci_vendor(n))) {
 				*card = n;
+				memcpy(name, info.name, sizeof(info.name));
 				return fd;
 			}
 			*state = DFU_STATE_WRONG_DRIVER;
@@ -153,6 +177,12 @@ static void *create(const struct hdspe_model *m)
 	r->model = m;
 	r->ctl = r->hwdep = -1;
 	return r;
+}
+
+static void attach(void *h, const struct ofm_shm *s)
+{
+	struct hdspe *r = h;
+	r->shm = s;
 }
 
 static void close_dev(void *h)
@@ -179,7 +209,15 @@ static int open_dev(void *h)
 
 	if (r->ctl >= 0)
 		return DFU_STATE_ACTIVE;
-	r->ctl = find_card(r->model, &card, &state);
+	/* with several cards of the model, the GUI names the one to use in dev_cmd (a string) */
+	char want[sizeof(r->card)];
+	memcpy(want, r->shm->dev_cmd, sizeof(want) - 1);
+	want[sizeof(want) - 1] = '\0';
+	bool anyway = r->shm->dev_config != 0;
+	r->ctl = find_card(r->model, want, anyway, &card, r->card, &state);
+	/* that card is gone: the first one, as without a choice */
+	if (r->ctl < 0 && want[0] && state != DFU_STATE_WRONG_DRIVER)
+		r->ctl = find_card(r->model, "", anyway, &card, r->card, &state);
 	if (r->ctl < 0)
 		return state;
 
@@ -193,6 +231,14 @@ static int open_dev(void *h)
 		return DFU_STATE_ERROR;
 	}
 	r->mixer_numid = info.id.numid;
+
+	/* snd-hdspm's hwdep reports the rate it last set, which is not the card's while it follows
+	 * an input at another rate (set to 48 kHz, slaved to 44.1 kHz); this control of its has
+	 * the measured clock. snd-hdspe has no such control, and its hwdep is right. */
+	memset(&info, 0, sizeof(info));
+	info.id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	snprintf((char *)info.id.name, sizeof(info.id.name), "System Sample Rate");
+	r->rate_numid = ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0 ? info.id.numid : 0;
 
 	char path[32];
 	snprintf(path, sizeof(path), "/dev/snd/hwC%dD0", card);
@@ -222,6 +268,12 @@ static bool is_open(void *h)
 	return r->ctl >= 0;
 }
 
+static const char *out_node(void *h)
+{
+	struct hdspe *r = h;
+	return r->card[0] ? r->card : NULL;
+}
+
 static int status(void *h, struct ofm_shm *s, bool *reset)
 {
 	struct hdspe *r = h;
@@ -230,6 +282,15 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_CONFIG, &cfg) < 0)
 		return -errno;
 	s->rate = cfg.system_sample_rate;
+	if (r->rate_numid) {
+		struct snd_ctl_elem_value v;
+		memset(&v, 0, sizeof(v));
+		v.id.numid = r->rate_numid;
+		if (ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) == 0 &&
+		    v.value.integer.value[0] > 0)
+			s->rate = hdspe_hdspm_rate((uint32_t)v.value.integer.value[0],
+						   cfg.system_sample_rate);
+	}
 	s->dev_status = cfg.system_clock_mode | (uint32_t)cfg.autosync_ref << 8;
 
 	/* The mixer can't be read from the card, but the driver's copy tells whether it was
@@ -304,8 +365,10 @@ static void *create_aes(void) { return create(&hdspe_aes); }
 		.key = k,				\
 		.name = n,				\
 		.out_node_card = card_name,		\
+		.out_node = out_node,			\
 		.meter_us = 20000,			\
 		.create = create_fn,			\
+		.attach = attach,			\
 		.destroy = destroy,			\
 		.open = open_dev,			\
 		.close = close_dev,			\

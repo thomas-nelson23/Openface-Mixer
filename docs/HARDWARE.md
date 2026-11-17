@@ -119,6 +119,22 @@ with `specifier_id 0x000a35`, `version 0x000005`) and sends asynchronous transac
 firewire-core character device ioctls. That needs read/write access to `/dev/fwN`:
 `packaging/70-rme-fireface.rules` gives it to the `audio` group and the logged-in user.
 
+A request that fails because the bus was reset (plugging in another FireWire device does that)
+is tried again in the new bus generation, up to three times 20 ms apart, as the kernel's
+`snd_fw_transaction` does. The engine waits for firewire-core's own 2 s transaction timeout
+instead of giving up earlier. Any other failure is logged with the request kind, the register
+and the response code, for example `FireWire write at 0xffff0000001c failed: address error
+(rcode 0x7)`; a failure that repeats is logged once a minute. A read that returns fewer bytes
+than asked for counts as a failure.
+
+A sync sends for at most 10 ms of each 20 ms engine tick and carries the rest over, so the
+full send after a connect (about 3,700 writes on the 802) takes a few seconds while the
+meters and the engine's heartbeat keep running.
+
+The playback sink is linked to the unit's own PipeWire node, `alsa_output.firewire-<GUID>…`,
+with the GUID from the node's `guid` attribute in sysfs (`0x000a35…`), so two RME FireWire
+units each get their own sink.
+
 ## Registers
 
 All values are little-endian quadlets.
@@ -131,7 +147,19 @@ All values are little-endian quadlets.
 | `0xffff'ff00'0000` | read block | meters (below) |
 
 The device can't report its DSP settings back, so the engine keeps its own copy and sends
-everything when it connects. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
+everything when it connects. The configuration register is the exception, because it holds the
+clock source: over FireWire Openface Mixer shows the clock source from the sync status and
+leaves the register alone until a clock or option setting is changed in Openface Mixer, so
+connecting never changes the unit's clock. From then on the register is the user's and is sent
+on every connect, as TotalMix does. Two limits: the status reports the source the unit is
+running from, which is Internal while the chosen input has no signal; and the options (AES
+input, optical out, AES out format, word clock single speed, effects on inputs) can't be read
+at all, so the first change writes what the Options section shows for all of them. The status
+codes for ADAT A and ADAT B above are the kernel driver's; snd-firewire-ctl-services'
+`ff802.rs` has the two the other way round (the lock bits are the same in both). So an input
+is taken as the clock source only while its lock bit is set; otherwise, as for a code that is
+not in the list, the clock box stays empty and nothing is written until the unit reports a
+source that fits or one is chosen. With both ADAT inputs locked the kernel's codes decide. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
 5 = 88.2k, 6 = 96k, 8 = 128k, 9 = 176.4k, 10 = 192k.
 
 ## DSP commands
@@ -164,8 +192,8 @@ number of ones).
   and `0xa000` = +6 dB, the same encoding as the Digiface's gains of −6 dB and up.
 
 Openface Mixer has controls for phase, gain, level, 48V and Inst, and for all of the effects
-(see [TotalMix FX effects](#totalmix-fx-effects)). The configuration word always has `0x40`
-(effects on inputs) set, as snd-firewire-ctl-services does. Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
+(see [TotalMix FX effects](#totalmix-fx-effects)). The configuration word, once it is written,
+always has `0x40` (effects on inputs) set, as snd-firewire-ctl-services does. Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
 
 ## Meters
 
@@ -235,8 +263,9 @@ answers the register dump and the level requests (if not, the status stays at "c
 reply" or the meters stay empty, and the mix is still sent). oscmix's
 notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
 follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
-the PipeWire node name of the 802's playback device (`alsa_output.firewire-0x000a35…`), mixer
-and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
+the PipeWire node name of the 802's playback device (`alsa_output.firewire-<GUID>…`), which
+status code is ADAT A and which ADAT B, mixer and channel numbers at 96/192 kHz, and the
+AN 1–8 input gain.
 
 ## Fireface UCX II over USB
 
@@ -351,8 +380,17 @@ Quadlet 0: lock/sync per input (ADAT 1 `0x1000`/`0x400`, ADAT 2 `0x2000`/`0x800`
 external rate in bits 25–28, S/PDIF rate in bits 14–17. Quadlet 1 reflects the configuration:
 clock source and rate (bits 1–4, which the kernel driver uses as the sample rate), S/PDIF in
 optical `0x200`, optical out S/PDIF `0x100`, S/PDIF out emphasis `0x40` and professional
-`0x20`, word clock single speed `0x2000`. Openface Mixer takes those options from quadlet 1 the
-first time the 800 connects; the rest of the configuration starts at defaults.
+`0x20`, word clock single speed `0x2000`. The clock source there is `0x1` internal (whatever
+the other bits say), else bits 10–12: `0x0` ADAT 1, `0x400` ADAT 2, `0xc00` S/PDIF, `0x1000`
+word clock, `0x1800` TCO. Word clock and TCO have other codes here than in the configuration.
+
+The configuration is write only and is one block, so writing any of it writes the clock
+source and the levels, jacks and phantom power too, which can't be read back. Openface Mixer
+therefore shows the clock and the options from quadlet 1 and writes nothing until a setting is
+changed in Openface Mixer; that first change sends the whole configuration, with the clock the
+unit reported and what the panel shows for the rest. A source code that is not in the list is
+never written: the clock box stays empty, and the configuration unsent, until the unit reports
+one that is or one is chosen.
 
 ## Fireface 800 not verified on hardware yet
 
@@ -383,8 +421,10 @@ Gain, `0x20000` −10 dBV, 0 +4 dBu), 48V on AN 1/2 (`0x01`, `0x80`), instrument
 in levels do too, except that two are swapped in quadlet 0: Lo Gain is `0x10` and +4 dBu `0x08`
 (`fireface400.IN_LEVELS`; this is how snd-firewire-ctl-services has them, not a typo);
 quadlet 2 needs `0x04000000` (MIDI to the low address the kernel driver registered) and has no
-ADAT 2 or TCO clock (`0x1400` is LTC). Status quadlet 0 has one ADAT lock/sync pair
-(`0x1000`/`0x400`). Not checked on a unit yet.
+ADAT 2 or TCO clock (`0x1000` is word clock, `0x1400` LTC). Status quadlet 0 has one ADAT
+lock/sync pair (`0x1000`/`0x400`). In status quadlet 1 the clock source reads `0x1000` word
+clock and `0x1400` LTC in snd-firewire-ctl-services; the kernel driver reads LTC as `0x1800`,
+and Openface Mixer takes either as LTC. Not checked on a unit yet.
 
 # RME HDSPe RayDAT
 
@@ -399,14 +439,30 @@ uses too (`engine/hdspe.c`). No low-level protocol and no udev rule are needed: 
 opens the card's `/dev/snd/controlC<n>` and `/dev/snd/hwC<n>D0`, found by driver name `HDSPM`
 or `HDSPe` and short name `RME RayDAT_<serial>`.
 
+With two cards of one model in the computer the first is used, until another is picked in the
+settings panel (the choice only shows when there are several). The choice is the card's full
+short name, serial included: it is saved with the mix and handed to the engine as a string in
+the command slots (`dev_cmd`), and the engine opens that card and links the playback sink to
+the PipeWire node with that card name. If the named card is gone, the first one is used again.
+Each model still has one mix and one engine: the second card is mixed instead of the first, not
+beside it. Two cards whose names carry no serial can't be told apart.
+
 ## Which driver
 
 Cards made from 2022 on need snd-hdspe; snd-hdspm still binds to them (its PCI table lists
 device `3fc6` under both Xilinx's vendor ID `10ee` and RME's `1d18`) but doesn't run them
 properly. Openface Mixer tells them apart by PCI vendor (`/sys/class/sound/card<n>/device/vendor`):
-a card with RME's `1d18` under snd-hdspm is left alone, and the engine reports `wrong-driver`
-instead of writing its mixer. That the vendor ID is what marks the newer cards is inferred from
-the drivers' ID tables and user reports, not from RME documentation.
+a card with RME's `1d18` under snd-hdspm is left alone at first, and the engine reports
+`wrong-driver` instead of writing its mixer. That the vendor ID is what marks the newer cards is
+a guess from the drivers' ID tables and user reports, not from RME documentation (snd-hdspe
+itself tells the generations apart by firmware build). So it is a warning, not a block: **Use
+anyway** in the settings panel stores the choice with the mix (`dev_config` = 1 in shared memory
+and `matrix.bin`), and from then on the engine and the settings controls treat the card as any
+other.
+
+When no ALSA card is found, the settings panel looks for the PCI device itself
+(`/sys/bus/pci/devices`: vendor `10ee` or `1d18`, device `3fc6`, revision 211 for the RayDAT,
+212 for the AIO and AIO Pro, 230–234 or 240 for the AES) and says that no driver is running it.
 
 ## Mixer
 
@@ -423,7 +479,9 @@ Both drivers zero the whole mixer when they load (snd-hdspm in `snd_hdspm_set_de
 snd-hdspe in `hdspe_init_mixer`), so the card is silent until a mixer program sets it up. Both
 answer writes with `EBUSY` while playback and capture are open in two different
 processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
-each send by its output's master level. The engine writes only changed crosspoints, reads one
+each send by its output's master level. The product stops at the mixer's +6 dB, so with an
+output above 0 dB its loudest sends are held there; the GUI marks those faders' level readouts
+(`hdspe.limited()`) and leaves the saved levels alone. The engine writes only changed crosspoints, reads one
 output's sends back from the driver every 500 ms, and sends everything again if they differ (the
 driver was reloaded, or another program changed the mixer). snd-hdspe also mutes the mixer
 channels that don't exist when the speed mode changes; the same read-back catches that and
@@ -449,6 +507,19 @@ other HDSPe cards with the same `Mixer` control and ioctls; they differ in the c
   Mode`, `Quad Speed Mode`, `Professional`, `Emphasis`, `Non Audio`, `Single Speed WordClk Out`,
   `Clear TMS`. (`Line Out` isn't offered.)
 
+snd-hdspm has no name of its own for the AIO Pro: it calls every revision-212 card `RME AIO`.
+So with the kernel driver an AIO Pro is found as **RME HDSPe AIO**, not as AIO Pro (the settings
+panel says so when AIO Pro is chosen and an `RME AIO` card is there).
+
+**Open question, AIO at 88.2 kHz and above.** The two drivers disagree on where the ADAT
+channels are. snd-hdspm's channel maps put them on hardware channels 12, 14, 16, 18 at double
+speed and 12, 16 at quad speed (`channel_map_aio_in_ds`/`_qs` in `sound/pci/rme9652/hdspm.c`);
+snd-hdspe's put them on 12–15 and 12–13 (`hdspe_raio.c`). Openface Mixer follows snd-hdspe at
+every speed. If snd-hdspm is right for its own streams, then under the kernel driver at double
+speed an application's ADAT channel 2 arrives on the strip labelled `A 3`, and ADAT channels 3
+and 4 have no strip. Which channels the hardware mixer really uses there can only be settled on
+a card: play to each ADAT channel at 96 kHz under snd-hdspm and see which playback meter moves.
+
 The MADI cards (HDSPe MADI, MADIface, MADI FX) use 64 channels and don't fit the 36-channel mix
 model. None of these cards has been checked with Openface Mixer.
 
@@ -465,11 +536,25 @@ node names only carry the slot.
 
 The hwdep ioctl `SNDRV_HDSPM_IOCTL_GET_PEAK_RMS` returns peak and RMS values for 64 inputs,
 playback channels and outputs. Peaks: bits 8–30 are the level, full scale `0x7fffff`; bits 0–3
-count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate.
+count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate. Under snd-hdspm that is the
+rate the driver last set, which is not the card's while it follows an input at another rate
+(set to 48 kHz and slaved to 44.1 kHz, it says 48 kHz). So there the engine reads the `System
+Sample Rate` control, the card's measured clock (47998), and takes the standard rate within
+2 % of it. The clock is measured at single speed: the control reads 48000 at 96 and 192 kHz
+too, and the driver's own `hdspm_rate_multiplier()` (as snd-hdspe's `hdspe_dds_sample_rate()`)
+multiplies it by the speed that was set, because the card can't tell double and quad speed
+from its clock. The engine does the same with the speed of the rate from the ioctl, and the
+settings panel with the `Internal Clock` control, which holds that rate. So a card
+slaved to a 96 kHz source before any stream has run shows 48 kHz: it is in single-speed mode
+until a rate of 64 kHz or more is set, and the strips follow that.
 
 The settings are ordinary ALSA controls, which the GUI reads and writes with amixer, addressed
 by `numid` (snd-hdspe puts them on the CARD interface, which `amixer cset name=…` alone doesn't
-find). Under snd-hdspm:
+find). snd-hdspm refuses a change with `EBUSY` while playback and capture are open in two
+different processes; the GUI says so, as it does when amixer is missing, does not answer or
+lists controls it doesn't know. The Clock mode light is on in Master mode, and in AutoSync while
+the card follows an input (snd-hdspe: `Current AutoSync Reference` is not `Intern`; snd-hdspm,
+which doesn't name the input in use on these cards: some input has lock). Under snd-hdspm:
 
 | Control | Access | Values |
 | --- | --- | --- |
@@ -505,7 +590,9 @@ Under snd-hdspe (`hdspe_control.c`; hdspeconf's RayDAT page shows the same):
 Nobody has run Openface Mixer on a RayDAT yet. Worth checking first: that the mixer accepts
 writes with PipeWire running (the `EBUSY` rule above compares the processes that opened
 playback and capture), the PipeWire card name property the engine matches, the meter scale,
-the channel layout at 2x/4x speed, and the driver check on a 2022-or-later card.
+the channel layout at 2x/4x speed (on an AIO see the open question above), the driver check on
+a 2022-or-later card, the sample rate shown while slaved under snd-hdspm, and picking the
+second of two cards.
 
 # RME ARC USB
 

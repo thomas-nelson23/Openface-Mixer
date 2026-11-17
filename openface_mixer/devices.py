@@ -5,6 +5,7 @@ and 36 outputs. A device says which of those channels exist at each speed mode, 
 called, and where its engine, config files and PipeWire nodes are.
 """
 import re
+import struct
 from pathlib import Path
 
 from . import fireface400, fireface800, fireface802, hdspe, ucx2
@@ -13,6 +14,7 @@ from .model import chan_label as digiface_chan_label, pair_label as digiface_pai
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
 USB_DEVICES = Path("/sys/bus/usb/devices")
+PCI_DEVICES = Path("/sys/bus/pci/devices")
 RME_OUI = 0x000A35
 RME_USB_VENDOR = 0x2a39
 # The Digiface USB product IDs with the vendor interface the kernel quirk and the engine's
@@ -187,7 +189,9 @@ class Fireface802(FireWireDevice):
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
-        return fireface802.config_word(st["hw"]), fireface802.commands(st["hw"], st)
+        hw = st["hw"]
+        return (fireface802.config_word(hw) if fireface802.config_ready(hw) else 0,
+                fireface802.commands(hw, st))
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
@@ -247,7 +251,8 @@ class FirefaceUCX2(ClassCompliantUSB, FireWireDevice):
 
 
 class FormerFireface(FireWireDevice):
-    """Fireface 800 and 400: write-only configuration that starts from the device's status."""
+    """Fireface 800 and 400: write-only configuration that follows the device's status until
+    the user changes a setting."""
     family = "former"
 
     def device_words(self, st):
@@ -299,6 +304,32 @@ class HDSPeCard(Device):
     def present(self):
         return Hardware.find_card(self.alsa_card) is not None
 
+    def upgrade_settings(self, st):
+        hw = st.get("hw") if isinstance(st.get("hw"), dict) else {}
+        card = hw.get("card")
+        st["hw"] = {"use_anyway": hw.get("use_anyway") is True,
+                    "card": card if isinstance(card, str) else None}
+
+    def device_words(self, st):
+        """The configuration word tells the engine to drive a card its driver rule doubts; the
+        commands hold the name of the card chosen among several, as a C string."""
+        name = (st["hw"]["card"] or "").encode()[:31]
+        name += bytes(-len(name) % 4)
+        return int(st["hw"]["use_anyway"]), list(struct.unpack(f"<{len(name) // 4}I", name))
+
+    def missing_hint(self):
+        if self.key == "aio" and Hardware.find_card(hdspe.MODELS["aiopro"].card) is not None:
+            return "The card in the computer is an AIO Pro: choose RME HDSPe AIO Pro as the device."
+        if self.key == "aiopro" and Hardware.find_card(hdspe.MODELS["aio"].card) is not None:
+            return ("There is an “RME AIO” card. If it is an AIO Pro, the kernel's snd-hdspm "
+                    "driver gives it that name: install the snd-hdspe driver (see the README), "
+                    "or choose RME HDSPe AIO as the device.")
+        if find_pci_card(self.model.pci_revisions):
+            return ("The card is in the computer, but no driver is running it. An snd-hdspe "
+                    "built for an older kernel has to be built again after a kernel update; "
+                    "<tt>sudo dmesg | grep -i hdsp</tt> shows what went wrong.")
+        return ""
+
 
 DEVICES = {d.key: d for d in (
     Digiface(), Fireface802(), Fireface802USB(), FirefaceUCX2(), Fireface800(), Fireface400(),
@@ -337,6 +368,18 @@ def find_firewire_unit(specifier_id, version, root=FIREWIRE_DEVICES):
         if _read_hex(u / "specifier_id") == specifier_id and _read_hex(u / "version") == version:
             return u.name.split(".")[0]
     return None
+
+
+def find_pci_card(revisions, root=PCI_DEVICES):
+    """True if an RME HDSPe card with one of these PCI revisions is in the computer, with or
+    without a driver."""
+    try:
+        devs = list(root.iterdir())
+    except OSError:
+        return False
+    return any(_read_hex(d / "vendor") in hdspe.PCI_VENDORS
+               and _read_hex(d / "device") == hdspe.PCI_DEVICE
+               and _read_hex(d / "revision") in revisions for d in devs)
 
 
 def usb_devices(vendor, root=USB_DEVICES):
