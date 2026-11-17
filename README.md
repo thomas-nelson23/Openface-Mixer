@@ -37,8 +37,10 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   again to unfold it. Which rows are folded is remembered per device.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
-  channels keep their routing.
+  channels keep their routing; hiding one switches its solo off.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
+- **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
+  centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 and UCX II also the AES/S/PDIF and optical options of TotalMix's settings
   dialog, on the Fireface 800 and 400 the line levels and the S/PDIF, optical and word clock
@@ -229,20 +231,25 @@ the output pair set as **Main Out** and are not part of presets:
 
 | Switch | What it does |
 | --- | --- |
-| Dim | Lowers Main Out by 20 dB |
+| Dim | Lowers Main Out by the amount set under *Dim* (20 dB to start with) |
+| Recall | Sets Main Out to the level set under *Recall level* |
 | Mono | Sums Main Out to mono |
 | Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level. Pick the pair under *Speaker B* first; it stays silent while Speaker B is off |
-| Talkback | Sends the talkback mic input to Phones, with the rest of the phones mix 20 dB down |
+| Talkback | Sends the talkback mic input to the Phones, with the rest of their mix turned down by the amount set under *Talkback dim* |
 | Ext In | Replaces the Main Out mix with the External In input pair |
+
+*Phones* takes up to four headphone outputs. Talkback always goes to all of them; tick further
+outputs under *Talkback to* if others should hear it too.
 
 Plug in an **RME ARC USB** (into the computer, not the Digiface) and it works with the default
 TotalMix layout printed on it:
 
 - Rows 1 and 2: recall presets 1 to 8.
-- Row 3: Mono, Phones (both phones keys), External Input.
+- Row 3: Mono, Volume Phones 1 and 2, External Input.
 - Bottom: Talkback (tap to latch, hold to talk), Speaker B, Dim.
-- Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit. Faders
-  grouped with it follow, as with the mouse.
+- Encoder: Main Out volume in 0.5 dB steps, or the volume of the first or second Phones output
+  (in the order they were ticked) while its key is lit. With one Phones output both keys
+  select it and both light up. Faders grouped with it follow, as with the mouse.
 
 Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
 it to work (its window can be hidden, see below).
@@ -427,8 +434,8 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   heard on a unit yet either; see [docs/HARDWARE.md](docs/HARDWARE.md#totalmix-fx-effects).
   They are not part of presets, and the dynamics and auto level gain-reduction meters aren't
   shown. Over USB the 802 follows the Class Compliant protocol documented by oscmix,
-  also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys both select the one Phones pair set in the
-  Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
+  also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys select PH 9/10 and
+  PH 11/12 once both are ticked under *Phones* in the Control Room box (PH 9/10 alone by default).
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
 - Fireface UCX II support follows oscmix's register documentation, Fireface 400 support

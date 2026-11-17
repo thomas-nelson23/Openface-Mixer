@@ -211,7 +211,7 @@ class StateFileTest(unittest.TestCase):
                 self.assertEqual(st["sends"]["in"][0][0], [-6.0, 0.25])
                 self.assertEqual(st["selected"], 16)
                 self.assertEqual((st["control_room"]["main"], st["control_room"]["phones"]),
-                                 (0, 16))
+                                 (0, [16]))
                 control_room.apply(st, m.compute_matrix(st), m.compute_out_gains(st))
                 self.usable(st)
 
