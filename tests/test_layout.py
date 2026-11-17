@@ -387,6 +387,24 @@ class PanelTest(WindowCase):
         self.settle()
         self.assertFalse(self.w.fx_btn.isChecked())
 
+    def test_a_panel_is_scrolled_to_sideways_only_and_from_its_left_end(self):
+        row, out = self.w.row_in, self.w.row_out
+        self.addCleanup(lambda: (self.w.resize(1280, 720), self.settle()))
+        self.w.resize(1000, 640)            # the smallest window: the strips are cut off below
+        self.settle()
+        self.open(row.strips[0], "eq")
+        self.assertEqual(row.scroll.verticalScrollBar().value(), 0)     # not above as well
+        self.w.fx_btn.click()
+        self.settle()
+        unit = self.w.fx_panels[("unit", "")]
+        self.assertGreater(unit.width(), out.scroll.viewport().width())
+        self.assertEqual(unit.mapTo(out.scroll.viewport(), QPoint()).x(), 4)
+        self.assertEqual(out.scroll.verticalScrollBar().value(), 0)
+        last = row.strips[-1]
+        dyn = self.open(last, "dyn")                                    # both fit: both show
+        self.assertEqual(last.visibleRegion().boundingRect().width(), last.width())
+        self.assertEqual(dyn.visibleRegion().boundingRect().width(), dyn.width())
+
     def test_folding_a_row_closes_its_panels(self):
         row, out = self.w.row_in, self.w.row_out
         strip = row.strips[0]

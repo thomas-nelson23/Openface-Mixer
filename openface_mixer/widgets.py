@@ -980,12 +980,13 @@ class Row(QWidget):
         lay.insertWidget(at, panel)
 
     def reveal(self, panel):
-        """Scroll as far as it takes to show the panel and, before all, its strip."""
+        """Scroll sideways as far as it takes to show the panel and, before all, its strip (a
+        panel without one: its left end)."""
         if panel in self.docks:
-            self.scroll.ensureWidgetVisible(panel, px(4), 0)
-            for s in self.strips:
-                if s.key == self.docks[panel]:
-                    self.scroll.ensureWidgetVisible(s, px(4), 0)
+            first = next((s for s in self.strips if s.key == self.docks[panel]), panel)
+            bar = self.scroll.horizontalScrollBar()
+            end = panel.x() + panel.width() + px(4) - self.scroll.viewport().width()
+            bar.setValue(min(first.x() - px(4), max(bar.value(), end)))
 
     def set_strips(self, strips):
         for panel in self.docks:            # the panels outlive the strips' container
