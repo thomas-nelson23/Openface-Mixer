@@ -34,7 +34,7 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import RemoteLink, RemotePanel, remote_settings
-from .settings_panel import SettingsPanel, Sidebar, ask
+from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
     icon_pixmap, px,
@@ -1241,18 +1241,14 @@ class MainWindow(QMainWindow):
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff2a4f'>○</span>&nbsp; ENGINE STOPPED"
+            txt = light(RED) + "&nbsp; Engine stopped"
             self.status.setToolTip("The engine is not running · click for details")
         else:
-            hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting", "no-reply", "wrong-driver")
-                      else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
                       else "no reply" if s["hw"] == "no-reply" else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting", "no-reply") else "○"
-            txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
+            txt = (light(hw_color(s["hw"])) + "&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:

@@ -287,13 +287,13 @@ class RemotePanel(Section):
 
     def set_status(self, s, target_error=None):
         if target_error:
-            self.status.setText(light(RED, "Unknown host", False))
+            self.status.setText(light(RED, "Unknown host"))
             self.status.setToolTip(f"{s}; Send to host “{target_error}” could not be resolved")
         elif s.startswith("error"):
-            self.status.setText(light(RED, "Error", False))
+            self.status.setText(light(RED, "Error"))
             self.status.setToolTip(s)
         elif s == "off":
-            self.status.setText(light(OFF, "Off", False))
+            self.status.setText(light(OFF, "Off"))
             self.status.setToolTip("")
         else:
             self.status.setText(light(CYAN, s.replace("listening on UDP ", "Listening · ", 1)))
