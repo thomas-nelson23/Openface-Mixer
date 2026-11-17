@@ -134,7 +134,10 @@ app.MainWindow
 - **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
   unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
-  `upgrade_state` clears it) and is not part of a mix.
+  `upgrade_state` clears it) and is not part of a mix. Only a channel with a strip can be
+  soloed: whenever the strips are rebuilt (a strip or channel group hidden, a recall, another
+  sample rate), `MainWindow.solo_as_shown` switches solo off for every channel without one,
+  so nothing out of sight can silence a submix.
 - `compute_matrix()` folds sends, pan, source mutes and solo into the 36×72 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader

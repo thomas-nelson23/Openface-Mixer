@@ -1,5 +1,5 @@
 """The window's part in protecting the mix: damaged files, failed imports and exports, the mix
-kept before a recall, and what a stereo link keeps. Opens
+kept before a recall, what a stereo link keeps, and solo on strips that go out of sight. Opens
 the real main window offscreen with a stand-in engine and a throwaway config folder; skipped
 where PySide6 is not installed."""
 import copy
@@ -367,6 +367,53 @@ class MixWindowTest(unittest.TestCase):
         self.close(w)
         unlinks_to_before(self.window())
         self.warning.assert_not_called()
+
+    # ---------------------------------------------------------------- solo out of sight
+    def solo(self, w, key):
+        w.strips[key].solo.click()
+        self.assertTrue(m.any_solo(w.st))
+
+    def test_hiding_a_strip_clears_its_solo(self):
+        w = self.window()
+        pushed = []
+        w.engine.write_matrix = lambda gains, out: pushed.append(list(gains))
+        self.solo(w, "in:2")
+        self.solo(w, "play:0")                      # a linked pair: both channels
+        self.assertEqual(w.st["solo"]["play"][:2], [True, True])
+        w.hide_strip(w.strips["play:0"])
+        self.assertEqual(w.st["solo"]["play"][:2], [False, False])
+        self.assertTrue(w.st["solo"]["in"][2])      # the one still in view stays
+        w.hide_strip(w.strips["in:2"])
+        self.assertFalse(m.any_solo(w.st))
+        self.assertEqual(pushed[-1], list(m.compute_matrix(w.st)))      # and it is heard
+        w.unhide_all()
+        self.assertFalse(w.strips["in:2"].solo.isChecked())
+
+    def test_hiding_a_group_clears_its_solos(self):
+        w = self.window()
+        self.solo(w, "in:8")                        # AD2 1
+        self.solo(w, "in:0")
+        w.settings._show_toggled("AD2", False)
+        self.assertEqual([c for c, on in enumerate(w.st["solo"]["in"]) if on], [0])
+        w.settings._show_toggled("AD1", False)
+        self.assertFalse(m.any_solo(w.st))
+
+    def test_nothing_out_of_sight_is_soloed_after_a_recall_a_rate_change_or_a_remote(self):
+        w = self.window()
+        w.presets.store(0, "A", m.extract_mix(w.st))
+        w.st["hidden_strips"] = ["in:3"]
+        w.st["solo"]["in"][3] = w.st["solo"]["in"][20] = True
+        w.recall_slot(0)                            # the strips are rebuilt
+        self.assertEqual([c for c, on in enumerate(w.st["solo"]["in"]) if on], [20])
+        w.engine.status = lambda: {      # found, but not yet active: nothing to enable
+            "processing": True, "rate": 96000, "sink_linked": True, "hw": "no-nodes",
+            "hw_nodes": 0, "hw_levels": True, "dev_status": 0, "dev_status2": 0}
+        w.poll_engine()                             # AD3 5 is not there at 96 kHz
+        self.assertFalse(m.any_solo(w.st))
+        w.remote_message("/mix/in/3/0/solo", [1.0])
+        self.assertFalse(m.any_solo(w.st))
+        w.remote_message("/mix/in/2/0/solo", [1.0])
+        self.assertTrue(w.strips["in:2"].solo.isChecked())
 
 
 if __name__ == "__main__":

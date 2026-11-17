@@ -538,6 +538,21 @@ class MainWindow(QMainWindow):
         self.refresh_settings_buttons()
         self.refresh_sends(kind)
         self.matrix.rebuild()
+        if self.solo_as_shown(kind):
+            self.push_matrix()
+
+    def solo_as_shown(self, kind):
+        """Solo is what the strips show: off for a channel without one (hidden, or not there
+        at this sample rate), which would silence the submix with nothing on screen to say
+        why, and the same on both channels of a linked pair. True if that changed any."""
+        solo = self.st["solo"][kind]
+        shown = [False] * len(solo)
+        for s in (self.row_in if kind == "in" else self.row_play).strips:
+            for c in s.channels:
+                shown[c] = solo[s.channels[0]]
+        changed = shown != solo
+        solo[:] = shown
+        return changed
 
     def rebuild_outputs(self):
         self.strips = {k: s for k, s in self.strips.items() if not k.startswith("out:")}
@@ -1191,6 +1206,8 @@ class MainWindow(QMainWindow):
         """A controller on the network changed something (osc_remote.apply says what)."""
         res = osc_remote.apply(self.st, self.dev, self.mode, address, args)
         if res.kind == "changed":
+            for kind in ("in", "play"):
+                self.solo_as_shown(kind)        # a remote can't solo what is hidden here
             if res.selected is not None and res.selected != self.submix.currentData():
                 self.select_out(res.selected, by_pair=True)
             self.sync_strips()

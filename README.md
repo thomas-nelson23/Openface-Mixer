@@ -33,7 +33,7 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   ones.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
-  channels keep their routing.
+  channels keep their routing; hiding one switches its solo off.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
 - **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
   centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
