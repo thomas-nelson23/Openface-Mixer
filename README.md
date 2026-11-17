@@ -31,6 +31,10 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   instrument, studio and device icons on the tag (all saved per device). *Custom channel
   names* in the Display section of the settings switches between your names and the standard
   ones.
+- **Fold a row:** click the title of the Hardware Inputs, Playback or Hardware Outputs row to
+  fold it to a slim strip of channel names over their meters; the other rows take the height.
+  A folded row still shows which channels are soloed, muted or have clipped. Click the title
+  again to unfold it. Which rows are folded is remembered per device.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing.
@@ -48,11 +52,13 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **TotalMix FX effects (Fireface 802 and UCX II):** the **EQ** and **D** buttons on every
   hardware input and output strip open TotalMix's EQ panel (Low Cut and a 3-band parametric EQ
   with its response curve) and Dynamics panel (compressor, expander and Auto Level); they light
-  while an effect is on. **FX** in the top bar (Ctrl+E) opens Reverb and Echo, fed by the **FX
-  Send** in each input and playback channel's settings and heard through each output's **FX
-  Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
+  while an effect is on. A panel opens inside the row, right of its strip: the strips after it
+  move right and the row scrolls, and several strips can have their panels open at once. A
+  second click on the button closes it. **FX** in the top bar (Ctrl+E) opens Reverb and Echo at
+  the end of the outputs row, fed by the **FX Send** in each input and playback channel's
+  settings and heard through each output's **FX Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
   a stereo pair uses its left channel's effects on both sides. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
-  bands) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
+  bands, in a window of its own) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
   to reuse settings.
 
   ![EQ, Dynamics, Reverb and Echo panels beside a UCX II input strip](docs/screenshots/effects.png)

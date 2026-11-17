@@ -5,7 +5,7 @@ import html
 import math
 import time
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
@@ -443,10 +443,13 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
     return b
 
 
-def fx_button_style(on):
+def fx_button_style(on, opened=False):
     """EQ / D: quiet when the effect is off, lit when it is on (they are not toggles: a click
-    opens the panel)."""
+    opens the panel, another closes it). opened: the panel is showing, so the button has a
+    white edge."""
     lit = "background:#2ad4ff;color:#021012;border-color:#2ad4ff;" if on else ""
+    if opened:
+        lit += "border-color:#f5f8fa;" + ("" if on else "color:#f5f8fa;background:#12293a;")
     return (f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid "
             f"rgba(255,255,255,0.09);border-radius:{px(3)}px;{lit}}}"
             "QToolButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
@@ -457,7 +460,7 @@ def fx_button(text, tip):
     b = QToolButton()
     b.setText(text)
     b.setFixedSize(QSize(px(26), px(18)))
-    b.setToolTip(f"{tip} — click to open (lit while on)")
+    b.setToolTip(f"{tip} — click to open or close (lit while on)")
     b.setCursor(Qt.PointingHandCursor)
     b.setFont(font(SANS, 9, QFont.DemiBold))
     return b
@@ -716,10 +719,12 @@ class Strip(QFrame):
             f"color:{RED.name() if on else '#7d9299'}}}"
             "QToolButton:hover{background:#12293a;color:white}")
 
-    def set_fx_active(self, eq, dyn):
-        for b, on in ((self.eq_btn, eq), (self.dyn_btn, dyn)):
+    def set_fx_active(self, eq, dyn, opened=()):
+        """Light EQ and D while their effect is on. opened: those of "eq" and "dyn" whose panel
+        is showing."""
+        for which, b, on in (("eq", self.eq_btn, eq), ("dyn", self.dyn_btn, dyn)):
             b.setProperty("on", on)
-            b.setStyleSheet(fx_button_style(on))
+            b.setStyleSheet(fx_button_style(on, which in opened))
 
     def set_fader(self, db):
         self.fader.set_db(db)
@@ -852,7 +857,11 @@ class RowTitle(QAbstractButton):
 
 class Row(QWidget):
     """One row of strips under its title. A click on the title folds the row to its strips'
-    names and meters, so the other rows get its height; another click unfolds it."""
+    names and meters, so the other rows get its height; another click unfolds it.
+
+    An effects panel can be docked in the row, right of its strip: the strips after it move
+    right and the row scrolls. A panel is a widget with a closed signal that deletes itself
+    when it is closed (fx_panels.FxPanel)."""
     fold_changed = Signal()
 
     def __init__(self, kind, title, subtitle, color, parent=None):
@@ -880,6 +889,7 @@ class Row(QWidget):
         self.scroll.setFrameShape(QFrame.NoFrame)
         lay.addWidget(self.scroll, 1)
         self.strips = []
+        self.docks = {}             # docked panel -> key of the strip it is right of, or None
         self._stretch()
 
     def set_subtitle(self, text):
@@ -908,6 +918,8 @@ class Row(QWidget):
             return
         self.folded = on
         self.fold_btn.setChecked(on)
+        for panel in list(self.docks):      # a folded row has no room for a panel
+            panel.close()
         for s in self.strips:
             s.set_folded(on)
         self._stretch()
@@ -938,7 +950,38 @@ class Row(QWidget):
         super().resizeEvent(e)
         self._fit()
 
+    def dock(self, panel, key=None, first=False):
+        """Put a panel in the row: right of the strip with that key, after the panels that are
+        there (first: before them), or at the end of the row without a key. The row scrolls
+        to show the panel and its strip."""
+        self.docks[panel] = key
+        panel.closed.connect(lambda: self.docks.pop(panel, None))
+        self._place(panel, first)
+        panel.show()
+        QTimer.singleShot(0, lambda: self.reveal(panel))    # once the row is laid out again
+
+    def _place(self, panel, first=False):
+        lay = self.scroll.widget().layout()
+        strip = next((s for s in self.strips if s.key == self.docks[panel]), None)
+        if strip is None:
+            at = lay.count() - 1                            # before the stretch
+        else:
+            at = lay.indexOf(strip) + 1
+            while not first and lay.itemAt(at).widget() in self.docks:
+                at += 1
+        lay.insertWidget(at, panel)
+
+    def reveal(self, panel):
+        """Scroll as far as it takes to show the panel and, before all, its strip."""
+        if panel in self.docks:
+            self.scroll.ensureWidgetVisible(panel, px(4), 0)
+            for s in self.strips:
+                if s.key == self.docks[panel]:
+                    self.scroll.ensureWidgetVisible(s, px(4), 0)
+
     def set_strips(self, strips):
+        for panel in self.docks:            # the panels outlive the strips' container
+            panel.setParent(None)
         inner = QWidget()
         hl = QHBoxLayout(inner)
         hl.setContentsMargins(0, 0, 0, 0)
@@ -962,5 +1005,12 @@ class Row(QWidget):
             old.deleteLater()
         self.scroll.setWidget(inner)
         self.strips = strips
+        keys = {s.key for s in strips} | {None}
+        for panel, key in list(self.docks.items()):
+            if key in keys:
+                self._place(panel)
+                panel.show()
+            else:                           # its strip is gone
+                panel.close()
         self._fit()
         self._show_head()

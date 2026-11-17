@@ -86,6 +86,7 @@ app.MainWindow
  ├─ model.py        state dict  ──compute_matrix()──▶ engine.write_matrix()
  ├─ presets.py      PresetBank (8 slots) + mix file import/export
  ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
+ │                  Row = a title that folds the row + its Strips + the effects panels open in it
  ├─ matrix_view.py  grid editor for the same sends
  ├─ fx.py / fx_panels.py  TotalMix FX effects (802, UCX II): model and commands / EQ, D, FX panels
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)

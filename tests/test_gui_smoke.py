@@ -82,6 +82,13 @@ def exercise(app, w, check):
         pump(app)
         want = {("eq", s.key) for s in strips} | {("dyn", s.key) for s in strips} | {("unit", "")}
         check(set(w.fx_panels) == want, f"effects panels open: {sorted(w.fx_panels)}")
+        check(all(p.window() is w and p.isVisible() for p in w.fx_panels.values()),
+              "an effects panel is not in its row")
+        strips[0].eq_btn.click()                    # the button closes its panel again
+        pump(app)
+        check(("eq", strips[0].key) not in w.fx_panels, "EQ did not close its panel")
+        strips[0].eq_btn.click()
+        pump(app)
     for strip in strips:                            # the channel settings popup, where there is one
         if strip.settings_btn.isHidden():
             continue
