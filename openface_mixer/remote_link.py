@@ -192,9 +192,14 @@ class RemoteLink(QObject):
         if diff:
             self._send(osc_remote.encode_bundles(osc_remote.messages(diff)), targets)
 
+    def wants_levels(self):
+        """True while peak levels go out to someone: the window keeps reading the meters for
+        that, shown or not."""
+        return self.sock is not None and self.levels_on and bool(self.clients or self.target)
+
     def add_peaks(self, kind, channels, peaks):
         """Linear peaks read from the engine; the highest per channel is kept until sent."""
-        if not self.levels_on or not (self.clients or self.target):
+        if not self.wants_levels():
             return
         seg = osc_remote.LEVEL_SEGS[kind]
         for c in channels:

@@ -33,7 +33,7 @@ from .model import (
     strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
-from .remote_link import RemoteLink, RemotePanel, remote_settings
+from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import SettingsPanel, Sidebar, ask
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
@@ -77,6 +77,11 @@ class MainWindow(QMainWindow):
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
         self._last_meter = time.monotonic()
+        self._shown = False                # the polls follow it, see pace_timers()
+        self._meter_timer = QTimer(self, timeout=self.update_meters)
+        self._engine_timer = QTimer(self, timeout=self.poll_engine)
+        self._hw_timer = QTimer(self, timeout=self.poll_hw)
+        self._profile_timer = QTimer(self, timeout=self.poll_profile)
 
         central = QWidget()
         outer = QHBoxLayout(central)          # the mixer, then the settings sidebar
@@ -138,6 +143,7 @@ class MainWindow(QMainWindow):
         self.remote.received.connect(self.remote_message)
         self.remote.status_changed.connect(
             lambda st: self.remote_panel.set_status(st, self.remote.target_error))
+        self.remote.status_changed.connect(lambda _st: self.pace_timers())
         self.remote_panel.changed.connect(self.apply_remote_settings)
         self._hw_active = False
         compact_boxes(self.settings)
@@ -162,18 +168,11 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
-        self.poll_hw()
         self.rebuild_all()
         self.refresh_slots()
         self.ensure_engine()
         self.push_matrix()
-        self.apply_remote_settings()
-
-        QTimer(self, interval=33, timeout=self.update_meters).start()
-        QTimer(self, interval=1000, timeout=self.poll_hw).start()
-        QTimer(self, interval=500, timeout=self.poll_engine).start()
-        QTimer(self, interval=3000, timeout=self.poll_profile).start()
-        self.poll_profile()
+        self.apply_remote_settings()    # also starts the polls a hidden window needs
         self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
         # reopen as it was left: window size and the settings sidebar
         size, sidebar_open = load_window()
@@ -331,9 +330,40 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, e):
         super().showEvent(e)
+        if not self._shown:
+            self._shown = True
+            self.engine.read_peaks()    # tells the engine to read the meters again, and
+            self._last_meter = time.monotonic()    # drops the peaks held while nobody looked
+            self.pace_timers()
+            for poll in (self.poll_engine, self.poll_hw, self.poll_profile):
+                poll()                  # what the window shows is as old as the last hide
         if self._load_notice:
             QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
             self._load_notice = None
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._shown = False
+        self.pace_timers()
+
+    def pace_timers(self):
+        """Nothing polls for a window nobody sees (closed with --background, never opened, or
+        minimised where the desktop says so). Shown: the meters 30 times a second, the engine
+        status twice, the ALSA controls every second (amixer) and the PipeWire profile every
+        3 s (pactl). Hidden: amixer and pactl stop. The engine status is still read, every 2 s:
+        it is also how the window follows the interface for the ARC and the network remote
+        (connected or not, sample rate, a FireWire unit's clock). The meters are only read
+        while the remote sends levels to a controller, at the rate it sends them; while
+        nobody reads them the engine leaves the device's meters alone too."""
+        levels = LEVEL_MS if self.remote.wants_levels() else 0
+        for timer, ms in ((self._meter_timer, 33 if self._shown else levels),
+                          (self._engine_timer, 500 if self._shown else 2000),
+                          (self._hw_timer, 1000 if self._shown else 0),
+                          (self._profile_timer, 3000 if self._shown else 0)):
+            if not ms:
+                timer.stop()
+            elif not timer.isActive() or timer.interval() != ms:
+                timer.start(ms)
 
     @staticmethod
     def _caption(text):
@@ -1194,6 +1224,7 @@ class MainWindow(QMainWindow):
             self.remote.stop()
         elif port != r["port"]:
             self.remote.start(r["port"])
+        self.pace_timers()
         self.schedule_save()
 
     def remote_snapshot(self):

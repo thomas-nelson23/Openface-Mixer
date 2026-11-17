@@ -48,6 +48,16 @@ def exercise(app, w, check):
         w.settings_btn.click()
         pump(app)
         check(w.sidebar.is_open() == want_open, f"sidebar open is not {want_open}")
+    # a hidden window stops polling for itself and starts again when it is shown
+    polls = (w._meter_timer, w._hw_timer, w._profile_timer)
+    check(all(t.isActive() for t in polls), "a poll does not run while the window is shown")
+    w.hide()
+    pump(app)
+    check(not any(t.isActive() for t in polls) and w._engine_timer.isActive(),
+          "the polls of a hidden window")
+    w.show()
+    pump(app)
+    check(all(t.isActive() for t in polls), "a poll did not start again when shown")
     # the engine is enabled for login once it reports its interface, not before
     w.poll_engine()
     check(w.engine.enabled == 0, "the engine was enabled before the interface was seen")
