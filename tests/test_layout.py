@@ -243,6 +243,18 @@ class FoldTest(WindowCase):
         self.click(self.w.row_in.fold_btn)
         self.assertTrue(self.w.row_in.strips[0].fader.isVisible())
 
+    def test_folding_ends_typing_a_level(self):
+        from openface_mixer.widgets import LevelEdit
+        row = self.w.row_play
+        strip = row.strips[0]
+        level = strip.fader.db()
+        strip.type_level()
+        strip.findChild(LevelEdit).setText("-3")
+        self.click(row.fold_btn)            # the title takes no focus, so the editor kept it
+        self.assertTrue(row.folded)
+        self.assertIsNone(strip.findChild(LevelEdit))
+        self.assertEqual(strip.fader.db(), level)
+
     def test_folded_rows_are_remembered_with_the_device(self):
         from openface_mixer import app, config
         self.click(self.w.row_play.fold_btn)

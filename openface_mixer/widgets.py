@@ -692,6 +692,8 @@ class Strip(QFrame):
             return
         self.folded = on
         if on:
+            for edit in self.findChildren(LevelEdit):   # a level being typed: left as it was
+                edit._end()
             self._put_away = [w for w in (
                 self.settings_btn, self.pan, self.pan_text, self.solo, self.mute, self.stereo,
                 self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak) if not w.isHidden()]
