@@ -1,5 +1,5 @@
 """Routing matrix view: columns = inputs/playback strips, rows = output pairs (TotalMix "Matrix")."""
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QFrame, QScrollArea, QWidget
 
@@ -137,13 +137,18 @@ class MatrixView(QWidget):
         c = self._cell(e.position())
         if c != self.hover:
             self.hover = c
-            if c:
-                g = self._gain(*c)
-                self.setToolTip(f"{self.cols[c[0]][2]} → {self.rows[c[1]][1]}: {fmt_db(g)} dB\n"
-                                "Click an empty cell to turn it on · drag to set the level\n"
-                                "Double-click or Delete to clear · Ctrl+scroll to adjust · "
-                                "Enter to type a level")
             self.update()
+
+    def event(self, e):
+        if e.type() == QEvent.ToolTip:     # written when it is shown, so the level is current
+            c = self._cell(e.pos())
+            self.setToolTip("" if c is None else
+                            f"{self.cols[c[0]][2]} → {self.rows[c[1]][1]}: "
+                            f"{fmt_db(self._gain(*c))} dB\n"
+                            "Click an empty cell to turn it on · drag to set the level\n"
+                            "Double-click or Delete to clear · Ctrl+scroll to adjust · "
+                            "Enter to type a level")
+        return super().event(e)
 
     def leaveEvent(self, e):
         self.hover = None

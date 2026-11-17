@@ -10,7 +10,7 @@ from unittest import mock
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 try:
     from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
-    from PySide6.QtGui import QPalette, QWheelEvent
+    from PySide6.QtGui import QHelpEvent, QPalette, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QComboBox, QMenu
 except ImportError:
@@ -310,6 +310,19 @@ class MatrixTest(WindowCase):
         down = m._gain(3, 2)
         QTest.mouseMove(m, p + QPoint(0, 60))
         self.assertEqual(m._gain(3, 2), down)
+
+    def test_the_tooltip_has_the_level_as_it_is_now(self):
+        m = self.m
+        m._set(3, 2, -18.0)
+
+        def tip(pos):
+            QApplication.sendEvent(m, QHelpEvent(QEvent.ToolTip, pos, m.mapToGlobal(pos)))
+            return m.toolTip().split("\n")[0]
+
+        self.assertTrue(tip(self.at(3, 2)).endswith(": -18.0 dB"))
+        m._set(3, 2, -6.0)                               # by a drag, say
+        self.assertTrue(tip(self.at(3, 2)).endswith(": -6.0 dB"))
+        self.assertEqual(tip(QPoint(5, m.HH + 5)), "")   # the names have none
 
     def test_wheel_scrolls_the_grid_and_changes_a_level_only_with_ctrl(self):
         m = self.m
