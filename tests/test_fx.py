@@ -166,11 +166,13 @@ class SettingsTest(unittest.TestCase):
 
     def test_a_send_or_return_level_that_is_not_a_number_is_off(self):
         s = ff.default_settings()
-        s["fx"]["send"]["in"][:3] = [float("nan"), "x", -12.0]
+        s["fx"]["send"]["in"][:4] = [float("nan"), "x", -12.0, 10 ** 400]
         s["fx"]["ret"][0] = float("inf")
+        s["fx"]["in"][0]["eq_g1"] = 10 ** 400       # too large for a float: the default
         f = ff.upgrade_settings(s)["fx"]
-        self.assertEqual(f["send"]["in"][:3], [None, None, -12.0])
+        self.assertEqual(f["send"]["in"][:4], [None, None, -12.0, None])
         self.assertIsNone(f["ret"][0])
+        self.assertEqual(f["in"][0]["eq_g1"], 0.0)
 
     def test_good_settings_are_not_changed(self):
         for proto in (ucx2, ff):

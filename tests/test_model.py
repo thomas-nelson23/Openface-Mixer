@@ -26,10 +26,10 @@ def damaged_mixes():
     yield "a stereo link that is no bool", mix(lambda mx: mx["stereo"]["play"].__setitem__(0, 1))
     yield "a channel's sends are a string", mix(lambda mx: mx["sends"]["in"].__setitem__(3, "x"))
     for send in ("x", [1], [0.0, 0.0, 0.0], ["loud", "left"], [0.0, None], [float("nan"), 0.0],
-                 [0.0, float("inf")], [True, 0.0]):
+                 [0.0, float("inf")], [True, 0.0], [10 ** 400, 0.0], [0.0, -10 ** 400]):
         yield f"a send is {send!r}", mix(lambda mx: mx["sends"]["play"][2].__setitem__(1, send))
     for out in (5, "x", {}, {"gain": 0.0}, {"mute": False}, {"gain": "x", "mute": False},
-                {"gain": 0.0, "mute": 1}):
+                {"gain": 0.0, "mute": 1}, {"gain": 10 ** 400, "mute": False}):
         yield f"an output is {out!r}", mix(lambda mx: mx["out"].__setitem__(2, out))
     for groups in ({"in:0": "x"}, {"bogus": 2}, {"in:99": 1}, {"in:0": 9}, {"in:0": 0},
                    {"out:1": 1.5}, {"in:0": True}, {7: 1}):

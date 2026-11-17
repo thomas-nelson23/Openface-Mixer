@@ -21,6 +21,7 @@ Concepts
 """
 import copy
 import math
+import sys
 from array import array
 
 N_IN, N_PLAY, N_OUT = 36, 36, 36
@@ -132,7 +133,10 @@ def default_state(selected=N_PAIRS - 1):
 
 
 def is_num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """True for a number a level or setting can be: not a switch, NaN or an infinity, and not
+    a whole number too large for a float (JSON can hold all of these)."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and abs(v) <= sys.float_info.max)
 
 
 def is_index(v, n):

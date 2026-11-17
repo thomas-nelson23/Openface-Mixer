@@ -25,6 +25,8 @@ them into raw values. A switched-off effect sends only its switch: its parameter
 """
 import math
 
+from .model import is_num
+
 # ------------------------------------------------------------------ parameters
 # (key, scale (raw = value * scale), low, high, default), low/high/default in display units.
 LOWCUT = ("lc", (
@@ -292,7 +294,7 @@ def _fill(cur, base):
         if isinstance(v, bool):
             ok = isinstance(c, bool)
         elif isinstance(v, (int, float)):
-            ok = isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c)
+            ok = is_num(c)
         else:
             ok = isinstance(c, type(v))
         if not ok:
@@ -303,8 +305,7 @@ def _fill(cur, base):
 def _levels(cur, n):
     if not isinstance(cur, list) or len(cur) != n:
         return [None] * n
-    return [v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            else None for v in cur]
+    return [v if is_num(v) else None for v in cur]
 
 
 def _hold(cur, params, prefix=""):
