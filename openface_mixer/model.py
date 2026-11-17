@@ -448,7 +448,8 @@ def apply_mix(st, mix):
 
 def clear_sends_outside(st, channels):
     """Switch off every send from a source or into an output pair the interface doesn't have,
-    so a mix made on a bigger interface leaves no routing that no strip shows. channels(kind)
+    so a mix made on a bigger interface leaves no routing that no strip shows, and take such
+    strips out of their fader groups, so that no group can bring a send back. channels(kind)
     gives the interface's channels of a kind at any sample rate (Device.all_channels): what a
     higher rate hides for a while is kept."""
     outs = channels("out")
@@ -458,3 +459,9 @@ def clear_sends_outside(st, channels):
             for p, send in enumerate(row):
                 if c not in have or 2 * p not in outs:
                     send[:] = [None, 0.0]
+
+    def missing(key):
+        kind, idx = parse_key(key)
+        return (2 * idx if kind == "out" else idx) not in channels(kind)
+    for key in [k for k in st["groups"] if missing(k)]:
+        del st["groups"][key]

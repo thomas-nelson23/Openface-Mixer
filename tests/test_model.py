@@ -404,6 +404,17 @@ class MissingChannelsTest(unittest.TestCase):
                     kind, c = ("in", s) if s < m.N_IN else ("play", s - m.N_IN)
                     self.assertTrue(c in have[kind] and o in have["out"], (o, s))
 
+    def test_a_fader_group_cant_bring_a_missing_channels_send_back(self):
+        have = {"in": {0, 1}, "play": {0, 1}, "out": {0, 1, 4, 5}}
+        st = m.default_state(0)
+        st["groups"] = {"in:0": 1, "in:2": 1, "play:0": 2, "play:7": 2, "out:0": 3, "out:1": 3,
+                        "out:2": 3}
+        m.clear_sends_outside(st, have.__getitem__)
+        self.assertEqual(st["groups"], {"in:0": 1, "play:0": 2, "out:0": 3, "out:2": 3})
+        m.set_strip_db(st, "in:0", 0.0)
+        self.assertEqual(m.group_follow(st, "in:0", m.NEG_INF, 0.0), {})
+        self.assertEqual(st["sends"]["in"][2][0], [None, 0.0])
+
 
 class LabelTest(unittest.TestCase):
     def test_labels(self):

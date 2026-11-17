@@ -134,8 +134,9 @@ app.MainWindow
   damaged shows as empty; the next save keeps that `presets.json` as `presets.json.bak`.
 - **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
   which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
-  for *Restore previous mix*, then clears the sends on channels the device doesn't have at any
-  sample rate (`model.clear_sends_outside`, also run when the state is loaded).
+  for *Restore previous mix*, then clears the sends and fader groups of channels the device
+  doesn't have at any sample rate (`model.clear_sends_outside`, also run when the state is
+  loaded).
 
 ### Updating flow
 
