@@ -611,6 +611,12 @@ int main(int argc, char *argv[])
 	if (shm < 0)
 		return shm == -EBUSY ? EXIT_RUNNING : 1;
 
+	/* The signals go to the main loop. Set up before any thread exists (libusb starts one in
+	 * create), or SIGTERM would end the process through that thread with nothing cleaned up. */
+	d.loop = pw_main_loop_new(NULL);
+	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGINT, do_quit, &d);
+	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGTERM, do_quit, &d);
+
 	d.hw = d.be->create();
 	if (d.hw == NULL) {
 		fprintf(stderr, "openface-mixer: cannot initialise the %s backend\n", d.be->name);
@@ -624,10 +630,6 @@ int main(int argc, char *argv[])
 	pthread_condattr_init(&monotonic);
 	pthread_condattr_setclock(&monotonic, CLOCK_MONOTONIC);
 	pthread_cond_init(&d.meter_wake, &monotonic);
-
-	d.loop = pw_main_loop_new(NULL);
-	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGINT, do_quit, &d);
-	pw_loop_add_signal(pw_main_loop_get_loop(d.loop), SIGTERM, do_quit, &d);
 
 	d.context = pw_context_new(pw_main_loop_get_loop(d.loop), NULL, 0);
 	d.core = pw_context_connect(d.context, NULL, 0);
