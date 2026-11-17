@@ -1175,7 +1175,9 @@ class MainWindow(QMainWindow):
         active = s is not None and s["hw"] == "active"
         self._hw_active = active
         if self.dev.family == "latter":
-            self.settings.update_latter_status(s["dev_status"] if active else None)
+            # "no-reply" is connected too: the clock shows as unknown, not as not connected
+            connected = active or (s is not None and s["hw"] == "no-reply")
+            self.settings.update_latter_status(s["dev_status"] if connected else None)
         elif self.dev.family == "former":
             hw = self.st["hw"]
             if active and not hw["known"]:
