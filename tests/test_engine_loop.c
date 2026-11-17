@@ -1,6 +1,7 @@
 /* Unit test for the engine's own logic, with a fake backend in place of an interface: when it
  * opens, reads the status of and syncs the device (and sends everything again), how often it
- * reads the meters with and without a GUI, the one-engine lock, and the PipeWire object cap.
+ * reads the meters with and without a GUI, the one-engine lock, the PipeWire object cap, and
+ * which PipeWire error ends it.
  * The engine's source is included as it is, so nothing in it is built differently for the test;
  * its main() is not run, and nothing here talks to PipeWire or to a device. The shared memory is
  * a segment of its own, named after this process, and the config a temporary directory. */
@@ -399,6 +400,24 @@ static void check_object_cap(struct ofm_shm *s)
 	check("once", line && strstr(line + 1, "more than 2048") == NULL, 1);
 }
 
+/* ---------- losing PipeWire ---------- */
+
+static void check_pipewire_loss(void)
+{
+	static struct data d;
+
+	pw_init(NULL, NULL);
+	d.loop = pw_main_loop_new(NULL);     /* only to be told to quit; it is never run */
+	if (d.loop == NULL)
+		return;
+	core_error(&d, 31, 0, -EPIPE, "some other object's error");
+	core_error(&d, PW_ID_CORE, 0, -ENOENT, "an error that is not the end of the connection");
+	check("other errors leave the engine running", d.pw_lost, 0);
+	core_error(&d, PW_ID_CORE, 0, -EPIPE, "connection error");
+	check("a lost connection ends it with an error", d.pw_lost, 1);
+	pw_main_loop_destroy(d.loop);
+}
+
 int main(void)
 {
 	char config[] = "/tmp/ofm-test-XXXXXX";
@@ -414,6 +433,7 @@ int main(void)
 	check_tick(s);
 	check_meters(s);
 	check_object_cap(s);
+	check_pipewire_loss();
 	rmdir(config);
 	if (!failed)
 		printf("test_engine_loop: ok\n");
