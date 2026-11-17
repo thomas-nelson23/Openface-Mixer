@@ -179,7 +179,7 @@ number of ones).
   | `0x04` | | stereo link |
   | `0x06` / `0x07` | phase invert / AN 1–8 gain (0–120 = 0–12 dB) | — / phase invert |
   | `0x08` | AN 1–8 level (0 Lo Gain, 1 +4 dBu); AN 9–12 48V | AN 1–8 level (0 −10 dBV, 1 +4 dBu, 2 Hi Gain) |
-  | `0x09` | AN 9–12 Inst | |
+  | `0x09` | AN 9–12 Inst (Openface Mixer switches 48V off with it and clears the stored 48V, so it stays off when Inst goes off) | |
   | `0x20`–`0x22` | low cut on, frequency, slope | same |
   | `0x40`–`0x4b` | 3-band EQ | same |
   | `0x60`–`0x67` | dynamics | same |
@@ -242,14 +242,25 @@ configuration register, CC mode has registers for clock and options:
 The engine reaches the port through the ALSA sequencer, which shares it with PipeWire's MIDI
 bridge. The sequencer drops events that don't fit in the port's MIDI output buffer, so the engine
 sends at most what `/proc/asound/cardN/midi0` says is free on each tick and carries the rest
-over. A full send (every crosspoint and setting) is about 2,300 register writes, 28 KB.
+over. A full send (every crosspoint and setting) is about 3,700 register writes, 45 KB.
+
+The engine reports the hardware mixer as active only once the unit has sent a SysEx message of
+its own (the register dump it is asked for on connect, or a level packet). Until then the state
+is "connected, no reply from the DSP". Once level packets have come, 3 seconds without any
+message mean the link is dead: the engine closes the port, opens it again and resends
+everything. Silence does not count while a send is still going out, and a unit that has sent no
+levels is not reopened, because that would resend the whole mix every few seconds. The engine
+also reopens the port when its subscription to it is gone, which is what is left when the port
+was removed and came back between two status polls.
 
 ## Not verified on hardware yet
 
 Everything above comes from snd-firewire-ctl-services, the kernel driver and oscmix's notes, not
 from captures on an 802 with Openface Mixer. Over USB, worth checking first: that the mixer and
 settings take effect, the level packets' channel order, the clock option registers (`0x3d40`,
-`0x3d46` are oscmix's best guesses), and whether the 802 needs the `0x3f00` keep-alive. oscmix's
+`0x3d46` are oscmix's best guesses), whether the 802 needs the `0x3f00` keep-alive, and that it
+answers the register dump and the level requests (if not, the status stays at "connected, no
+reply" or the meters stay empty, and the mix is still sent). oscmix's
 notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
 follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
 the PipeWire node name of the 802's playback device (`alsa_output.firewire-<GUID>…`), which
@@ -268,7 +279,9 @@ are the inputs and `0x20`–`0x33` playback, output volumes are register `0x0500
 register writes `(channel << 6) | setting`, channels 0–19 inputs and 20–39 outputs: phase `0x07`
 (inputs) / `0x08` (outputs), gain `0x08` (0.1 dB; 0–75 dB on AN 1/2, 0–24 dB on AN 3–8), 48V or
 level `0x09`, Autoset `0x0a` (AN 1–4), Hi-Z `0x0b`, output level `0x09`; the effects are below
-([TotalMix FX effects](#totalmix-fx-effects)). Input and output mute (`0x00`, `0x02`) cleared, and *CC mix* (`0x307b`) set to 0 =
+([TotalMix FX effects](#totalmix-fx-effects)). Input and output mute (`0x00`, `0x02`) cleared (input 1's is register 0 = 0, an all-zero word,
+which marks an unused command slot; the GUI passes it as `0x80000000`, with the parity bit the
+engine adds in any case), and *CC mix* (`0x307b`) set to 0 =
 TotalMix so the DSP mixer is used rather than one of the fixed Class Compliant routings. Options:
 word clock single speed `0x3067`, optical out S/PDIF `0x3078`, S/PDIF professional `0x3079`.
 Not checked on a unit with Openface Mixer yet.
@@ -277,8 +290,15 @@ Not checked on a unit with Openface Mixer yet.
 
 The Fireface 802 and the UCX II have the same TotalMix FX effects, with the parameters in the
 same order: `openface_mixer/fx.py` holds both. The settings live in `st["hw"]["fx"]` in display
-units; a switched-off effect sends only its switch and leaves its parameter slots empty (0), so
-the engine sends them when the effect is switched on. Every value is a signed 16-bit integer.
+units. Each effect's parameters are sent before its switch, whether the effect is on or off, so
+an effect never runs with settings another controller left in the unit. Every value is a signed
+16-bit integer.
+
+The effects follow the mix. A muted input or playback channel, and one left out because another
+channel is soloed, has its FX send off until the mute or solo ends; the stored send level is
+kept. A stereo-linked input pair gets the left channel's Low Cut, EQ, Dynamics, Auto Level and
+FX send on both channels; the right channel's own settings stay stored and return when the pair
+is unlinked.
 
 | Effect | 802 command (channel 0–29 in, 30–59 out) | UCX II register `(channel << 6) \|` | Parameters, in order |
 | --- | --- | --- | --- |
@@ -300,8 +320,8 @@ release), Space (time, high damp).
 Playback channels reach the FX unit through mixers 30 (left) and 31 (right) of the DSP matrix,
 on both interfaces: register `0x4000 + 0x40 × mixer + 0x20 + playback` (the UCX II's `0x47a0` /
 `0x47e0` in oscmix's notes), in the mixer's gain encoding. A stereo-linked playback pair sends its
-left channel to the left FX input and its right channel to the right one; a mono channel feeds
-both.
+left channel to the left FX input and its right channel to the right one, both at the left
+channel's send level; a mono channel feeds both.
 
 UCX II only: Room EQ per output at `0x3400 + 0x20 × output`: delay (0.1 ms, 0–42.5 ms), on, then
 the 9 bands (gain, frequency, Q; bands 1, 8 and 9 first have a type, as the EQ's bands 1 and 3),

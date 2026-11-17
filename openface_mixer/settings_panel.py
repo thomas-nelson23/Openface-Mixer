@@ -67,6 +67,9 @@ def hw_state(dev, state):
                          "driver, and this one runs on snd-hdspm, so the mixer is left alone. "
                          "Install snd-hdspe and blacklist snd-hdspm (see the README), or choose "
                          "Use anyway if the card works for you as it is."),
+        "no-reply": (light(AMBER, "Connected, no reply from the DSP"),
+                     f"The {short} is connected but has not answered, so changes may not "
+                     "reach it."),
     }.get(state, (state, ""))
 
 

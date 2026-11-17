@@ -29,7 +29,7 @@ struct ofm_backend {
 	 * on what the GUI wrote there. */
 	void (*attach)(void *h, const struct ofm_shm *s);
 	void (*destroy)(void *h);
-	/* Opens the device. Returns a DFU_STATE_* value (digiface_usb.h); ACTIVE when open. */
+	/* Opens the device. Returns a DFU_STATE_* value (digiface_usb.h); is_open() says if it is. */
 	int (*open)(void *h);
 	void (*close)(void *h);
 	bool (*is_open)(void *h);
@@ -43,6 +43,8 @@ struct ofm_backend {
 	int (*routes)(void *h);
 	/* Reads the meters and raises the peaks in s. Returns 0 or < 0. */
 	int (*meters)(void *h, struct ofm_shm *s);
+	/* Optional: false while the open device has not answered (hw_state NO_REPLY, not ACTIVE). */
+	bool (*answered)(void *h);
 };
 
 /* Max-hold for the shared-memory peak meters. */

@@ -618,12 +618,12 @@ class PanelTest(unittest.TestCase):
     def test_limited_readout(self):
         from openface_mixer import widgets
         s = self.keep(widgets.Strip("in:0", "AN 1", [0], "in"))
-        plain = s.value.styleSheet()
+        plain = s.value.styleSheet(), s.value.toolTip()
         s.set_limited("Held at +6 dB")
-        self.assertNotEqual(s.value.styleSheet(), plain)
+        self.assertNotEqual(s.value.styleSheet(), plain[0])
         self.assertEqual(s.value.toolTip(), "Held at +6 dB")
         s.set_limited("")
-        self.assertEqual((s.value.styleSheet(), s.value.toolTip()), (plain, "Fader level (dB)"))
+        self.assertEqual((s.value.styleSheet(), s.value.toolTip()), plain)
 
 
 if __name__ == "__main__":

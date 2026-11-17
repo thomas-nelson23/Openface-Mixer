@@ -47,7 +47,7 @@ the engine is the same for all of them.
   to date; files from before the 36-channel layout are moved into place. When it exits, the
   interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
-  mix and all settings, about 2,300 transactions, 10 ms of them per tick so the meters and the
+  mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
   heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
   output buffer needs). The 800 takes its mixer as one block write
   per output, so a full send is about 60 transactions.
@@ -102,7 +102,10 @@ app.MainWindow
   the user changes a setting (`config_ready()` in the protocol modules, `follow_unit()` in
   `app.py`): connecting never changes the unit's clock. On the 802 and UCX II the command list ends with the TotalMix FX effects
   (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
-  parameters stay 0 (unused slots) while their effect is off. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
+  parameters sit in the slots before their effect's switch and are sent whether it is on or off, so
+  an effect never starts with settings another controller left in the unit. The effects follow
+  the mix: a muted channel, or one left out by a solo, has its FX send off, and a linked pair
+  gets its left channel's effects on both channels (the right channel's own stay stored). The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
   and written live; what is stored is the "Use anyway" answer to the driver warning, which
   reaches the engine as a non-zero configuration word, and the card picked among several of a
   model, whose name is a string in the command slots (the backend's `attach()` gives it the
