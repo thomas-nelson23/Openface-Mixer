@@ -93,6 +93,8 @@ def write_failure(why, dev, tool="amixer"):
         why = f"{tool} did not answer"
     elif dev.family == "hdspe" and "busy" in why:
         why = "the driver is busy while playback and recording are open in two programs"
+    else:   # "amixer: Control hw:1 element write error: Device or resource busy": the reason
+        why = why.rsplit(": ", 1)[-1]
     return f"Not changed: {why}"
 
 

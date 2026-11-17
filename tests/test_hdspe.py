@@ -563,9 +563,10 @@ class PanelTest(unittest.TestCase):
                                     "Not changed: amixer did not answer"])
         self.assertEqual(settings_panel.write_failure("timeout", devices.DEFAULT, "pactl"),
                          "Not changed: pactl did not answer")
-        # on other interfaces "busy" is whatever amixer says it is
-        self.assertEqual(settings_panel.write_failure("amixer: busy", devices.DEFAULT),
-                         "Not changed: amixer: busy")
+        # on other interfaces the reason is the end of what amixer says
+        self.assertEqual(settings_panel.write_failure(
+            "amixer: Control hw:0 element write error: Device or resource busy",
+            devices.DEFAULT), "Not changed: Device or resource busy")
 
     def test_use_anyway(self):
         p = self.panel("aio")
