@@ -397,7 +397,8 @@ class MainWindow(QMainWindow):
         return self.dev.pair_label(k, c, self.mode) if pair else self.dev.chan_label(k, c, self.mode)
 
     def label(self, kind, c, pair=False):
-        """The strip's name: its custom name (while NAMES is on) or the standard one."""
+        """The strip's name: its custom name (while custom names are on) or the standard
+        one."""
         key = strip_key("out", c // 2) if kind == "out" else strip_key(kind, c)
         return display_name(self.st, key, self.standard_label(kind, c, pair))
 

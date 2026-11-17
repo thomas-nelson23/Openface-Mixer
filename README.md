@@ -92,14 +92,18 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 On Arch / CachyOS:
 
 ```sh
-sudo pacman -S --needed pyside6 libpipewire libusb alsa-utils libpulse gcc pkgconf make
+sudo pacman -S --needed pyside6 qt6-svg libpipewire libusb alsa-utils libpulse gcc pkgconf make
 ```
 
-On Debian / Ubuntu:
+On Debian 13 / Ubuntu 25.04 or newer:
 
 ```sh
-sudo apt install python3-pyside6.qtwidgets python3-pyside6.qtsvg libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
+sudo apt install python3-pyside6.qtwidgets python3-pyside6.qtnetwork python3-pyside6.qtsvg libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
 ```
+
+Ubuntu 24.04 and Debian 12 have no PySide6 packages. There, leave the three `python3-pyside6`
+packages out and install PySide6 for your user with pip:
+`pip install --user --break-system-packages PySide6-Essentials`.
 
 ## Install
 
@@ -109,8 +113,17 @@ cd Openface-Mixer
 make install
 ```
 
-This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enables the
-`openface-mixer-engine` user service. Remove it with `make uninstall`.
+This installs to `~/.local` (or `make install PREFIX=/somewhere/else`), adds **Openface Mixer**
+to your app menu and installs the engine's user services. An interface's engine is switched on
+for every login the first time Openface Mixer sees that interface, so there is no engine or
+playback sink for hardware you don't have.
+
+Remove it with `make uninstall`. That also removes the *Start at login* entries. The udev
+rules belong to root, so it prints the one command that removes them. Mixes and presets stay.
+
+On Arch, [packaging/aur](packaging/aur) has a recipe for a system package
+(`openface-mixer-git`). A packaged copy is updated by the package manager, not by the
+**Updates** section.
 
 To update later, use **Updates** in the settings panel: it checks GitHub for new commits on
 `main` and, on **Update and restart**, backs up `~/.config/openface-mixer`, pulls the checkout
@@ -218,7 +231,7 @@ quits. Each device has its own window and login entry, so two interfaces can run
 Connect the 802 over **FireWire** or **USB**. Openface Mixer opens the connected interface, or
 pick it under **Device** in the settings panel: **RME Fireface 802** is the FireWire connection
 (`openface-mixer --device ff802`), **RME Fireface 802 (USB)** the USB one
-(`openface-mixer --device ff802usb`). The first time, the GUI starts and enables the device's
+(`openface-mixer --device ff802usb`). The first time the GUI finds the 802, it enables the device's
 engine (`openface-mixer-engine@ff802` or `@ff802usb`), which then restores the 802's mix at every
 login. Its playback sink is called **Openface Mixer Playback (Fireface 802)** or **(Fireface 802
 USB)**. The two connections keep separate mixes.
@@ -281,9 +294,9 @@ login. Everything below about the RayDAT applies to all four; their channels are
 On the RayDAT, pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
 (`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
 channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
-then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). The driver
+then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). `snd-hdspm`
 starts with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
-it up.
+it up. `snd-hdspe` leaves the card's last routing in place until the engine sends the mix.
 
 Which driver the card needs depends on its age:
 
@@ -319,7 +332,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
 | `~/.config/openface-mixer/ui.json` | Window (UI) scale, shared by all devices |
-| `~/.config/autostart/openface-mixer.desktop` | Starts Openface Mixer at login without a window (when ticked) |
+| `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
@@ -327,6 +340,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 ```sh
 make          # build the engine
 make test     # unit tests (no hardware or display needed)
+make lint     # byte-compile and pyflakes
 make run      # run the GUI from the source tree
 make help     # list all targets
 ```
@@ -359,6 +373,17 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
 - The Digiface's hardware mixer allows 2048 active routes; the settings panel warns if a mix
   needs more.
+- The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
+  `make install` installs, which need sudo once). Without them nothing is mixed, and the
+  settings panel says why.
+- Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
+- Solo has no PFL / live mode or exclusive mode yet.
+- No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
+- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
+  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
+  (before version 2.1) are not supported.
+- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
+  supported (it sent nothing in testing).
 
 ### Interfaces not supported yet
 
@@ -373,17 +398,6 @@ These TotalMix interfaces are left out for now:
 | Babyface, Babyface Pro, Fireface UC | No Linux access to their mixers |
 | HDSP 9632/9652, Multiface, Digiface (PCI), RPM | The older `snd-hdsp` driver: firmware loading and a different mixer; the RPM has no mixer |
 | Digiface Dante, AVB and Ravenna interfaces | Network audio with no Linux control path |
-- The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
-  `make install` installs, which need sudo once). Without them nothing is mixed, and the
-  settings panel says why.
-- Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
-- Solo has no PFL / live mode or exclusive mode yet.
-- No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
-- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
-  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
-  (before version 2.1) are not supported.
-- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
-  supported (it sent nothing in testing).
 
 ## Acknowledgements
 
