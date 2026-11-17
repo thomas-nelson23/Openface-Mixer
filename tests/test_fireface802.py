@@ -1,3 +1,4 @@
+import copy
 import struct
 import tempfile
 import unittest
@@ -194,6 +195,33 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(s["clock"], "aes")
         self.assertEqual(len(s["in"]["phase"]), ff.N_PHYS_IN)   # wrong length: reset
         self.assertEqual(s["out"], ff.default_settings()["out"])
+
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        base = ff.default_settings()
+        s = ff.default_settings()
+        s.update(clock=[], aes_in=3, aes_pro="x", word_single=None)
+        s["in"].update(phase=["x"] + [True] * (ff.N_PHYS_IN - 1),
+                       gain=[None, float("nan"), 6.5, 3] + [0.0] * (ff.N_LINE_IN - 4),
+                       level=[1.5, -1, "x", True, 0] + [1] * (ff.N_LINE_IN - 5))
+        s["out"] = "x"
+        s = ff.upgrade_settings(s)
+        self.assertEqual({k: s[k] for k in ("clock", "aes_in", "aes_pro", "word_single")},
+                         {k: base[k] for k in ("clock", "aes_in", "aes_pro", "word_single")})
+        self.assertEqual(s["in"]["phase"], [False] + [True] * (ff.N_PHYS_IN - 1))
+        self.assertEqual(s["in"]["gain"][:4], [0.0, 0.0, 6.5, 3])
+        self.assertEqual(s["in"]["level"][:5], [1, 1, 1, 1, 0])
+        self.assertEqual(s["out"], base["out"])
+        ff.commands(s)                      # what the damaged values used to break
+        ff.usb_commands(s)
+        ff.config_word(s)
+
+    def test_good_settings_are_kept(self):
+        s = ff.default_settings()
+        s.update(clock="adat_b", aes_in="optical", opt_out="spdif", aes_pro=True)
+        s["in"].update(gain=[12.0] * ff.N_LINE_IN, level=[0] * ff.N_LINE_IN,
+                       p48=[True] * ff.N_MIC_IN)
+        s["out"]["level"] = [2] * ff.N_LINE_OUT
+        self.assertEqual(ff.upgrade_settings(copy.deepcopy(s)), s)
 
 
 class DeviceTest(unittest.TestCase):

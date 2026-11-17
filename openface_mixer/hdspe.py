@@ -31,6 +31,7 @@ class Model:
     # (label, snd-hdspm sync check, frequency control) for the INPUT STATUS box; snd-hdspe
     # reports the same inputs, named after its Preferred AutoSync Reference items
     status_inputs = ()
+    extension = ()            # channels of optional boards: no strips yet, the engine mixes them
 
     def channels(self, kind, mode):
         raise NotImplementedError
@@ -90,6 +91,7 @@ class AIO(Model):
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT", "TCO", "Sync In")
     NAMES = {0: "AN 1", 1: "AN 2", 6: "PH L", 7: "PH R", 8: "AES L", 9: "AES R",
              10: "SPDIF L", 11: "SPDIF R"}
+    extension = (2, 3, 4, 5)          # AI4S/AO4S
 
     def channels(self, kind, mode):
         fixed = [0, 1] + ([6, 7] if kind != "in" else []) + [8, 9, 10, 11]

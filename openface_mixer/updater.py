@@ -13,6 +13,7 @@ from .config import CONFIG_DIR
 
 SOURCE_FILE = Path(__file__).resolve().parent.parent / "install-source"
 BRANCH = "main"
+KEEP_BACKUPS = 3             # config backups kept, one is made before every update
 
 
 class UpdateError(Exception):
@@ -52,10 +53,15 @@ def check(src, installed):
 
 
 def backup_config():
+    """Copy the config directory beside itself, and keep only the newest KEEP_BACKUPS copies."""
     if not CONFIG_DIR.is_dir():
         return None
     dest = CONFIG_DIR.with_name(f"{CONFIG_DIR.name}.backup-{time.strftime('%Y-%m-%d-%H%M%S')}")
     shutil.copytree(CONFIG_DIR, dest)
+    # the time stamps sort by age; a folder that isn't named exactly like a backup is left alone
+    stamp = "-".join("[0-9]" * n for n in (4, 2, 2, 6))
+    for old in sorted(CONFIG_DIR.parent.glob(f"{CONFIG_DIR.name}.backup-{stamp}"))[:-KEEP_BACKUPS]:
+        shutil.rmtree(old, ignore_errors=True)
     return dest
 
 
