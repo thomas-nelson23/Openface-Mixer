@@ -1068,6 +1068,9 @@ class MainWindow(QMainWindow):
         if ask(self, "Clear preset", f"Clear “{self.presets.name(i)}” from slot {i + 1}? "
                "This can't be undone.", "Clear"):
             self.presets.clear(i)
+            if self.st.get("active_slot") == i:
+                self.st["active_slot"] = None       # nothing is recalled from an empty slot
+                self.schedule_save()
             self.refresh_slots()
 
     def export_mix(self):
@@ -1185,6 +1188,8 @@ class MainWindow(QMainWindow):
 
     def update_arc_leds(self):
         slot = self.st.get("active_slot")
+        if slot is not None and not self.presets.slots[slot]:
+            slot = None                 # an empty slot's key stays dark, whatever the state says
         self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
 
     def schedule_save(self):

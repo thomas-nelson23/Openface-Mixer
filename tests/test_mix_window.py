@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import config, engine, model as m
+from openface_mixer import arc, config, engine, model as m
 from openface_mixer.devices import DEVICES
 
 try:
@@ -283,6 +283,20 @@ class MixWindowTest(unittest.TestCase):
         w.clear_slot(2)
         self.assertIsNone(w.presets.slots[2])
         self.assertIsNone(self.app_module.PresetBank(config.presets_file(self.dev)).slots[2])
+
+    def test_clearing_the_recalled_slot_puts_its_arc_key_out(self):
+        w = self.window()
+        key = arc.DEFAULT_KEYS.index("snapshot:3")
+        w.presets.store(2, "Keep", m.extract_mix(w.st))
+        with mock.patch.object(w.arc, "set_leds") as leds:
+            w.recall_slot(2)
+            self.assertTrue(leds.call_args.args[0][key])
+            w.clear_slot(2)
+            self.assertFalse(leds.call_args.args[0][key])
+            self.assertIsNone(w.st["active_slot"])
+            w.st["active_slot"] = 2             # a state saved before Clear did that
+            w.update_arc_leds()
+            self.assertFalse(leds.call_args.args[0][key])
 
 
 if __name__ == "__main__":
