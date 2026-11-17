@@ -1,9 +1,12 @@
 /* Unit test for the Fireface 802 and UCX II USB (Class Compliant) SysEx encoding and decoding. */
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "../engine/digiface_usb.h"   /* DFU_STATE_* */
+#include "../engine/fireface_fw.h"
 #include "../engine/fireface_usb.h"
 
 static int failed;
@@ -47,6 +50,16 @@ int main(void)
 					  0x00, 0x12, 0x00, 0x78, 0x0b, 0xf7 };
 	ff802usb_reg_msg(0x3f000900, msg);
 	check_bytes("serial msg", msg, serial, sizeof(serial));
+	/* the UCX II's input 1 mute off is register 0 = 0. The GUI sends it as 0x80000000 (with its
+	 * parity bit) because a 0 word is an empty slot; on the wire it is the same message */
+	static const uint8_t in1_mute[] = { 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x00,
+					    0x00, 0x00, 0x00, 0x00, 0x08, 0xf7 };
+	ff802usb_reg_msg(0x80000000, msg);
+	check_bytes("input 1 mute msg", msg, in1_mute, sizeof(in1_mute));
+	ff802usb_reg_msg(0, msg);
+	check_bytes("register 0 = 0 msg", msg, in1_mute, sizeof(in1_mute));
+	check("parity of 0", ff802_parity(0), 0x80000000);
+	check("parity is idempotent", ff802_parity(0x80c00000), 0x80c00000);
 
 	check("gain off", ff802usb_encode_gain(0.0f), 0);
 	check("gain unity", ff802usb_encode_gain(1.0f), 0x9000);
@@ -67,9 +80,22 @@ int main(void)
 	put_word(pkt + 6, 0x3d200003);
 	put_word(pkt + 11, 0x3d210005);
 	pkt[16] = 0xf7;
+	/* link health: no reply until the unit sends something, however long that takes */
+	check("link: opened", ffusb_link_state(&info, 0), DFU_STATE_NO_REPLY);
+	check("link: never answered", ffusb_link_state(&info, 10 * FFUSB_REPLY_TIMEOUT_MS),
+	      DFU_STATE_NO_REPLY);
+	pkt[3] = 0x0e;   /* not RME's header: not a reply */
+	check("foreign sysex", ff802usb_handle_sysex(pkt, 17, &info, &s), -1);
+	check("foreign sysex is no reply", info.replies, 0);
+	pkt[3] = 0x0d;
 	check("subid", ff802usb_handle_sysex(pkt, 17, &info, &s), 0);
 	check("clock", info.clock, 3);
 	check("rate", info.rate, 5);
+	check("replies", info.replies, 1);
+	check("link: answered", ffusb_link_state(&info, 0), DFU_STATE_ACTIVE);
+	/* it has sent no levels yet, so silence says nothing: no reopen and resend */
+	check("link: no levels, silent", ffusb_link_state(&info, FFUSB_REPLY_TIMEOUT_MS),
+	      DFU_STATE_ACTIVE);
 
 	/* levels: subid 4 (inputs), channel 3 at half scale; delivered in two pieces */
 	memset(pkt, 0, sizeof(pkt));
@@ -80,6 +106,10 @@ int main(void)
 	ff802usb_rx_feed(&rx, pkt, 100, &info, &s);
 	ff802usb_rx_feed(&rx, pkt + 100, sizeof(pkt) - 100, &info, &s);
 	check("level packets", info.level_packets, 1);
+	check("level packets are replies", info.replies, 2);
+	/* once levels have come, they come all the time: 3 s without any is a dead link */
+	check("link: levels", ffusb_link_state(&info, FFUSB_REPLY_TIMEOUT_MS - 1), DFU_STATE_ACTIVE);
+	check("link: levels stopped", ffusb_link_state(&info, FFUSB_REPLY_TIMEOUT_MS), -ENODATA);
 	if (fabsf(s.peak_src[2] - 0.5f) > 1e-6f || s.peak_src[1] != 0.0f) {
 		fprintf(stderr, "input meters: %g %g\n", s.peak_src[1], s.peak_src[2]);
 		failed = 1;

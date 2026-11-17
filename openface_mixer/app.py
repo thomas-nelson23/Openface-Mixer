@@ -649,17 +649,18 @@ class MainWindow(QMainWindow):
     def refresh_settings_buttons(self):
         f = self.st["hw"].get("fx") if self.dev.fx is not None else None
         for s in self.strips.values():
+            own = fx.effect_channels(s.kind, s.channels)
             if s.kind == "play":
                 s.set_settings_active(bool(f) and any(f["send"]["play"][c] is not None
-                                                      for c in s.channels))
+                                                      for c in own))
                 continue
             on = any(self.dev.channel_settings_active(self.st, s.kind, c) for c in s.channels)
             if f:
                 values = f["ret"] if s.kind == "out" else f["send"]["in"]
-                on = on or any(values[c] is not None for c in s.channels) or (
+                on = on or any(values[c] is not None for c in own) or (
                     s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
-                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in s.channels),
-                                any(fx.dyn_active(f, s.kind, c) for c in s.channels))
+                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in own),
+                                any(fx.dyn_active(f, s.kind, c) for c in own))
             s.set_settings_active(on)
 
     # ------------------------------------------------------------------ TotalMix FX effects
@@ -733,7 +734,8 @@ class MainWindow(QMainWindow):
         self.notify(f"Copied the effects of {strip.name}")
 
     def paste_effects(self, strip):
-        fx.paste_channel(self.st["hw"]["fx"], strip.kind, strip.channels, self.fx_clipboard,
+        fx.paste_channel(self.st["hw"]["fx"], strip.kind,
+                         fx.effect_channels(strip.kind, strip.channels), self.fx_clipboard,
                          self.dev.fx)
         for which in ("eq", "dyn"):
             panel = self.fx_panels.get((which, strip.key))
@@ -1159,12 +1161,12 @@ class MainWindow(QMainWindow):
             self.status.setToolTip("The engine is not running · click for details")
         else:
             hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
+                      "#ffb020" if s["hw"] in ("no-nodes", "starting", "no-reply") else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
-                      else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
+                      else "no reply" if s["hw"] == "no-reply" else "offline")
+            dot = "●" if s["hw"] in ("active", "no-nodes", "starting", "no-reply") else "○"
             txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
@@ -1175,7 +1177,9 @@ class MainWindow(QMainWindow):
         active = s is not None and s["hw"] == "active"
         self._hw_active = active
         if self.dev.family == "latter":
-            self.settings.update_latter_status(s["dev_status"] if active else None)
+            # "no-reply" is connected too: the clock shows as unknown, not as not connected
+            connected = active or (s is not None and s["hw"] == "no-reply")
+            self.settings.update_latter_status(s["dev_status"] if connected else None)
         elif self.dev.family == "former":
             hw = self.st["hw"]
             if active and not hw["known"]:
