@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest import mock
 
 from openface_mixer import arc
 from openface_mixer import control_room as cr
@@ -78,6 +80,31 @@ class DecodeTest(unittest.TestCase):
         self.assertTrue(arc.key_lit(st, "snapshot:3", 2))
         self.assertFalse(arc.key_lit(st, "snapshot:3", None))
         self.assertFalse(arc.key_lit(st, "phones", None))
+
+
+class PortTest(unittest.TestCase):
+    def port(self, fd):
+        with mock.patch.object(arc.os, "open", return_value=fd):
+            port = arc.ArcPort("/dev/snd/midiC5D0")
+        self.addCleanup(port.close)
+        return port
+
+    def test_reads_what_is_there_and_writes(self):
+        ours, its = os.pipe()
+        self.addCleanup(os.close, ours)
+        port = self.port(its)
+        port.write(arc.led_message(0, True))
+        self.assertEqual(os.read(ours, 16), bytes((0x90, 0x36, 0x7F)))
+
+    def test_a_write_to_an_unplugged_arc_is_dropped(self):
+        ours, its = os.pipe()
+        os.close(ours)                              # nobody at the other end any more
+        port = self.port(its)
+        port.write(arc.led_message(0, True))        # EPIPE here, ENODEV from the real device
+        with mock.patch.object(arc.os, "write", side_effect=OSError(19, "No such device")):
+            port.write(arc.led_message(0, False))
+        with mock.patch.object(arc.os, "write", side_effect=BlockingIOError):   # buffer full
+            port.write(arc.led_message(0, False))
 
 
 if __name__ == "__main__":
