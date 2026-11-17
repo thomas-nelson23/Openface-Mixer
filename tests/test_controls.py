@@ -327,6 +327,8 @@ class MatrixTest(WindowCase):
             self.wheel(m, 0, -30, Qt.ControlModifier, pos=self.at(3, 2))
         self.assertEqual(m._gain(3, 2), -18.0)
         self.assertEqual(self.hbar.value(), 0)
+        self.wheel(m, -120, 0, Qt.ControlModifier, pos=self.at(3, 2))    # not a page sideways
+        self.assertEqual((m._gain(3, 2), self.hbar.value()), (-18.0, 0))
 
     def test_wheel_up_on_an_empty_cell_makes_no_send(self):
         self.wheel(self.m, 0, 120, pos=self.at(3, 2))

@@ -116,6 +116,7 @@ class MatrixView(QWidget):
             e.ignore()            # the grid scrolls
             return
         n = self._wheel.steps(e)
+        e.accept()                # with Ctrl held, a sideways movement would jump a page
         g = self._gain(*c)
         if n and g is not None:   # an empty cell stays empty
             g += n
