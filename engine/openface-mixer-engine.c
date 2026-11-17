@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -54,6 +55,10 @@
 #define HW_LOG_EVERY     60  /* a device that keeps failing is logged once in this many rounds */
 #define HW_STABLE_TICKS  500 /* and counts as working again once it has stayed open for 10 s */
 #define HW_WATCH_TICKS   25  /* the meters count as watched for 500 ms after a GUI last read them */
+
+#define LOCK_TRIES       20  /* an engine on its way out gets a second to let go of the device */
+#define EXIT_RUNNING     3   /* another engine has the device; the service units tell systemd
+                              * not to try again (RestartPreventExitStatus) */
 
 #define MAX_OBJ 2048
 
@@ -132,6 +137,7 @@ static void matrix_path(const struct data *d, char *buf, size_t len)
 			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep);
 }
 
+/* Returns 0, -EBUSY if another engine runs for the device, or another error < 0. */
 static int shm_setup(struct data *d)
 {
 	char name[64];
@@ -144,15 +150,32 @@ static int shm_setup(struct data *d)
 		perror("shm_open");
 		return -1;
 	}
+	/* One engine per device: a lock on the segment, held through the descriptor for as long
+	 * as this process lives. The kernel drops it however the process ends, so an engine
+	 * that was killed leaves nothing behind. */
+	for (int tries = LOCK_TRIES; flock(fd, LOCK_EX | LOCK_NB) < 0;) {
+		bool busy = errno == EWOULDBLOCK;
+		if (busy && --tries > 0) {
+			usleep(50000);
+			continue;
+		}
+		if (busy)
+			fprintf(stderr, "openface-mixer: an engine for the %s is already running; "
+				"this one stops\n", d->be->name);
+		else
+			perror("flock");
+		close(fd);
+		return busy ? -EBUSY : -1;
+	}
 	if (ftruncate(fd, sizeof(struct ofm_shm)) < 0) {
 		perror("ftruncate");
 		close(fd);
 		return -1;
 	}
 	d->shm = mmap(NULL, sizeof(struct ofm_shm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	close(fd);
 	if (d->shm == MAP_FAILED) {
 		perror("mmap");
+		close(fd);
 		return -1;
 	}
 
@@ -557,8 +580,9 @@ int main(int argc, char *argv[])
 	pw_init(&argc, &argv);
 	spa_list_init(&d.links);
 
-	if (shm_setup(&d) < 0)
-		return 1;
+	int shm = shm_setup(&d);
+	if (shm < 0)
+		return shm == -EBUSY ? EXIT_RUNNING : 1;
 
 	d.hw = d.be->create();
 	if (d.hw == NULL) {

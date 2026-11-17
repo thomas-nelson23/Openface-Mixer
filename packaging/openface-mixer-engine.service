@@ -8,6 +8,8 @@ Requires=pipewire.service
 ExecStart="@BINDIR@/openface-mixer-engine"
 Restart=on-failure
 RestartSec=2
+# 3: another engine already runs for the device
+RestartPreventExitStatus=3
 
 [Install]
 WantedBy=pipewire.service
