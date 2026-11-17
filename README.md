@@ -119,8 +119,9 @@ to your app menu and installs the engine's user services. An interface's engine 
 for every login the first time Openface Mixer sees that interface, so there is no engine or
 playback sink for hardware you don't have.
 
-Remove it with `make uninstall`. That also removes the *Start at login* entries. The udev
-rules belong to root, so it prints the one command that removes them. Mixes and presets stay.
+Remove it with `make uninstall` (with the same `PREFIX=` if you gave one). That also removes
+the *Start at login* entries. The udev rules belong to root, so it prints the one command that
+removes them. Mixes and presets stay.
 
 On Arch, [packaging/aur](packaging/aur) has a recipe for a system package
 (`openface-mixer-git`). A packaged copy is updated by the package manager, not by the
