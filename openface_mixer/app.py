@@ -76,6 +76,9 @@ class MainWindow(QMainWindow):
         self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
+        self._engine_up = False            # the engine answered the last poll
+        self._engine_due = 0.0             # until when a started engine may take to answer
+        self._start_timer = QTimer(self, singleShot=True, interval=300, timeout=self.start_engine)
         self._last_meter = time.monotonic()
         self._shown = False                # the polls follow it, see pace_timers()
         self._meter_timer = QTimer(self, timeout=self.update_meters)
@@ -1193,26 +1196,26 @@ class MainWindow(QMainWindow):
     def ensure_engine(self):
         if self.engine.outdated():
             self.restart_engine()   # an older engine from before an upgrade is still running
-            time.sleep(0.5)
-        if self.engine.status() is None:
-            self.save()   # so a freshly started engine loads our matrix
-            ok, msg = self.engine.start()
-            if not ok:
-                # shown in the Status section instead of an alert at launch
-                self.engine_error = msg
-                return
-            for _ in range(30):
-                time.sleep(0.05)
-                if self.engine.status() is not None:
-                    break
+        elif self.engine.status() is None:
+            self.start_engine()
+
+    def start_engine(self):
+        """Starts the engine and returns at once. poll_engine then looks for it every 50 ms, for
+        1.5 s at most, without calling it stopped meanwhile, and sends it the mix as it is by
+        then."""
+        self.save()   # so a freshly started engine loads our matrix
+        ok, msg = self.engine.start()
+        # shown in the Status section instead of an alert at launch
+        self.engine_error = None if ok else msg
+        if ok:
+            self._engine_due = time.monotonic() + 1.5
+            self._engine_timer.start(50)
 
     def restart_engine(self):
         self.engine_error = None
-        self.save()
         self.engine.stop()
-        time.sleep(0.3)
-        self.engine.start()
-        QTimer.singleShot(600, self.push_matrix)
+        self._engine_due = time.monotonic() + 2.0
+        self._start_timer.start()   # once the old engine has had time to go
 
     # ------------------------------------------------------------------ network remote (OSC)
     def apply_remote_settings(self):
@@ -1269,6 +1272,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
+        if self._engine_due:
+            if s is None and time.monotonic() < self._engine_due:
+                return                  # still starting
+            self._engine_due = 0.0
+            self.pace_timers()
+        if s is not None and not self._engine_up:
+            self.push_matrix()          # a (re)started engine: the mix as it is now
+        self._engine_up = s is not None
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
