@@ -155,8 +155,8 @@ class Engine:
         device they don't have."""
         try:
             subprocess.run(["systemctl", "--user", "enable", self.dev.service],
-                           capture_output=True)
-        except OSError:
+                           capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
             pass
 
     def stop(self):

@@ -26,8 +26,9 @@ class ServiceTest(unittest.TestCase):
             self.assertEqual(self.run_recorded(e.enable), [["enable", unit]])
 
     def test_enable_without_systemd(self):
-        with mock.patch.object(engine.subprocess, "run", side_effect=FileNotFoundError):
-            engine.Engine(DEVICES["digiface"]).enable()
+        for error in (FileNotFoundError, engine.subprocess.TimeoutExpired("systemctl", 5)):
+            with mock.patch.object(engine.subprocess, "run", side_effect=error):
+                engine.Engine(DEVICES["digiface"]).enable()
 
 
 if __name__ == "__main__":
