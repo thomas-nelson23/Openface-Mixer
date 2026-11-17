@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         self.settings.eng_btn.clicked.connect(self.restart_engine)
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
+        self.settings.notice.connect(self.notify)
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
         self.settings.export_btn.clicked.connect(self.export_mix)

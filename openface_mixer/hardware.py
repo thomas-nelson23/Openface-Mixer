@@ -4,12 +4,32 @@ The snd-usb-audio Digiface quirk exposes clock source, per-port output format an
 input status as ALSA controls, and snd-hdspm or snd-hdspe the RayDAT's clock settings and input
 status; we drive them with amixer. See docs/HARDWARE.md.
 """
+import os
 import re
 import subprocess
 from pathlib import Path
 
 
 DIGIFACE_CARD = "Digiface USB"
+
+
+def run(cmd, timeout=2):
+    """Runs amixer or pactl without ever hanging the window. Returns (its output, None), or
+    (None, why it failed): "missing" (no such program), "timeout", or its own complaint (the
+    last line, in English: "amixer: Control hw:1 element write error: Device or resource
+    busy")."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=dict(os.environ, LC_ALL="C"))
+    except FileNotFoundError:
+        return None, "missing"
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except OSError as e:
+        return None, str(e)
+    if p.returncode:
+        return None, (p.stderr.strip().splitlines() or [f"{cmd[0]} failed"])[-1]
+    return p.stdout, None
 
 
 class Hardware:
@@ -19,6 +39,7 @@ class Hardware:
         self.card_name = card_name
         self.card = None
         self.ctrls = {}
+        self.error = None       # why read() could not read a card that is there (see run())
 
     @staticmethod
     def find_card(card_name=DIGIFACE_CARD):
@@ -59,25 +80,24 @@ class Hardware:
         int}} or None if absent. "value" is the first of "values"; switches read as 1 (on) or 0
         (off)."""
         self.card = self.find_card(self.card_name)
+        self.error = None
         if self.card is None:
             return None
-        try:
-            out = subprocess.run(["amixer", "-c", str(self.card), "contents"],
-                                 capture_output=True, text=True, timeout=2).stdout
-        except (OSError, subprocess.TimeoutExpired):
+        out, self.error = run(["amixer", "-c", str(self.card), "contents"])
+        if out is None:
             return None
         self.ctrls = parse_amixer_contents(out)
         return self.ctrls
 
     def write(self, name, value):
         """Sets a control by name. Controls seen by the last read() are addressed by numid, so
-        it works for any interface (snd-hdspe's settings are CARD controls, not MIXER)."""
+        it works for any interface (snd-hdspe's settings are CARD controls, not MIXER).
+        Returns None, or why the control was not set (see run())."""
         if self.card is None:
-            return
+            return None
         c = self.ctrls.get(name)
         ident = f"numid={c['numid']}" if c else f"name={name}"
-        subprocess.run(["amixer", "-q", "-c", str(self.card), "cset", ident, str(value)],
-                       capture_output=True, timeout=2)
+        return run(["amixer", "-q", "-c", str(self.card), "cset", ident, str(value)])[1]
 
 
 def parse_amixer_contents(out):
@@ -130,4 +150,5 @@ def pw_digiface_card():
 
 
 def set_card_profile(card_name, profile):
-    subprocess.run(["pactl", "set-card-profile", card_name, profile])
+    """Returns None, or why the profile was not set (see run())."""
+    return run(["pactl", "set-card-profile", card_name, profile], timeout=3)[1]

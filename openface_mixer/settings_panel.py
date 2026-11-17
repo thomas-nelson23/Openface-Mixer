@@ -70,6 +70,29 @@ def hw_state(dev, state):
     }.get(state, (state, ""))
 
 
+def read_failure(hw, short):
+    """(short text, tooltip) for the Sample rate row when the card's settings can't be shown
+    (hw: the Hardware after a read() that gave nothing usable)."""
+    if hw.card is None:
+        return f"{short} not found", ""
+    if hw.error == "missing":
+        return "amixer is not installed", "Install the alsa-utils package."
+    if hw.error == "timeout":
+        return "amixer did not answer", ""
+    return "Can't read settings", hw.error or "The card's ALSA controls are not the expected ones."
+
+
+def write_failure(why, dev):
+    """The toast for a setting amixer could not change (why: Hardware.write()'s answer)."""
+    if why == "missing":
+        why = "amixer is not installed (package alsa-utils)"
+    elif why == "timeout":
+        why = "amixer did not answer"
+    elif dev.family == "hdspe" and "busy" in why:
+        why = "the driver is busy while playback and recording are open in two programs"
+    return f"Not changed: {why}"
+
+
 def ask(parent, title, text, action):
     """A question with a button named for what it does and Cancel (the safe default), instead
     of Yes / No."""
@@ -177,6 +200,7 @@ class Sidebar(QFrame):
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface) changed in st["hw"]
+    notice = Signal(str)             # a short message for the window to show
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
@@ -508,18 +532,21 @@ class SettingsPanel(QWidget):
             lay.addWidget(sync)
         return cl
 
-    def _show_fw_status(self, st):
-        """st: the device's decode_status() dict, or None while it is not connected."""
+    def _show_fw_status(self, st, why=None):
+        """st: the device's decode_status() dict, or None while it is not connected (why:
+        another reason it can't be shown, as read_failure())."""
         if st is None:
+            text, tip = why or (f"{self.dev.name.replace('RME ', '')} not connected", "")
             self.cur_src.set_current(None)
-            self.rate.setText(f"<span style='color:#ff2a4f'>{self.dev.name.replace('RME ', '')} "
-                              "not connected</span>")
+            self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+            self.rate.setToolTip(tip)
             for led, rate in self.sync_widgets:
                 led.set_state(None)
                 rate.setText("—")
             return
         self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        self.rate.setToolTip("")
         for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
             led.set_state(state)
             rate.setText(f"{r / 1000:g}k" if r else "—")
@@ -659,7 +686,7 @@ class SettingsPanel(QWidget):
             self._write(name, value)
 
     def update_hdspe(self, ctrls):
-        """ctrls: the card's ALSA controls (Hardware.read()), or None if it is not found."""
+        """ctrls: the card's ALSA controls (Hardware.read()), or None if they can't be read."""
         st = hdspe.decode_status(ctrls, self.dev.model)
         usable = True
         if st:
@@ -697,7 +724,7 @@ class SettingsPanel(QWidget):
         self.rd_opts.setVisible(st is not None)
         if st is None:
             self.rd_info.setText("")
-            self._show_fw_status(None)
+            self._show_fw_status(None, read_failure(self.hw, "Card"))
             return
         if not usable:
             self.rd_info.setText(f"<span style='color:{AMBER}'>Settings are off: see the driver "
@@ -709,6 +736,7 @@ class SettingsPanel(QWidget):
             self.rd_info.setText(info)
         self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        self.rate.setToolTip("")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}
         for (led, rate), (label, *_unused) in zip(self.sync_widgets, self.dev.model.status_inputs):
             state, r = shown.get(label, (None, None))
@@ -720,7 +748,11 @@ class SettingsPanel(QWidget):
 
     def _write(self, name, value):
         if not self._updating:
-            self.hw.write(name, value)
+            self._report(self.hw.write(name, value))
+
+    def _report(self, why):
+        if why:
+            self.notice.emit(write_failure(why, self.dev))
 
     def _enable_pro(self):
         if not self._card_name:
@@ -730,14 +762,17 @@ class SettingsPanel(QWidget):
                "This lets apps record all 32 hardware inputs. The output device will be renamed "
                "to '…pro-output-0' (your existing combine-stream config already matches it). "
                "Audio may briefly drop out.", "Switch profile"):
-            set_card_profile(self._card_name, "pro-audio")
+            self._report(set_card_profile(self._card_name, "pro-audio"))
 
     def update_hw(self, ctrls):
         self._updating = True
         try:
             if ctrls is None:
-                self.rate.setText("<span style='color:#ff2a4f'>Digiface not found</span>")
+                text, tip = read_failure(self.hw, "Digiface")
+                self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+                self.rate.setToolTip(tip)
                 return
+            self.rate.setToolTip("")
             src = ctrls.get("Sync Source")
             if src:
                 if self.sync_src.count() != len(src["items"]):

@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import os
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -274,14 +275,49 @@ class StatusTest(unittest.TestCase):
         self.assertFalse(rd.driver_usable(rd.HDSPM, rd.VENDOR_RME))
         self.assertTrue(rd.driver_usable(rd.HDSPE, rd.VENDOR_RME))
 
+    def test_run(self):
+        done = subprocess.CompletedProcess([], 0, "out", "")
+        for effect, want in ((FileNotFoundError(), (None, "missing")),
+                             (subprocess.TimeoutExpired("amixer", 2), (None, "timeout")),
+                             (PermissionError(13, "Permission denied"),
+                              (None, "[Errno 13] Permission denied")),
+                             ([done], ("out", None)),
+                             ([subprocess.CompletedProcess([], 1, "", "x\namixer: busy\n")],
+                              (None, "amixer: busy")),
+                             ([subprocess.CompletedProcess([], 1, "", "")],
+                              (None, "amixer failed"))):
+            with mock.patch.object(hardware.subprocess, "run", side_effect=effect) as run:
+                self.assertEqual(hardware.run(["amixer"]), want)
+            self.assertEqual(run.call_args.kwargs["timeout"], 2)
+            self.assertEqual(run.call_args.kwargs["env"]["LC_ALL"], "C")
+
+    def test_read_says_why(self):
+        hw = hardware.Hardware(RAYDAT.card)
+        with mock.patch.object(Path, "read_text", return_value=CARDS), \
+                mock.patch.object(hardware.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertIsNone(hw.read())
+        self.assertEqual((hw.card, hw.error), (1, "missing"))
+        with mock.patch.object(Path, "read_text", return_value=""):
+            self.assertIsNone(hw.read())
+        self.assertEqual((hw.card, hw.error), (None, None))
+
     def test_write_by_numid(self):
         hw = hardware.Hardware(RAYDAT.card)
         hw.card, hw.ctrls = 1, hardware.parse_amixer_contents(AMIXER_HDSPE)
-        with mock.patch.object(hardware.subprocess, "run") as run:
-            hw.write("Clock Mode", 1)
-            hw.write("Unknown", 0)
+        refused = subprocess.CompletedProcess(
+            [], 1, "", "amixer: Control hw:1 element write error: Device or resource busy\n")
+        with mock.patch.object(hardware.subprocess, "run", side_effect=[
+                subprocess.CompletedProcess([], 0, "", ""), refused,
+                subprocess.TimeoutExpired("amixer", 2)]) as run:
+            self.assertIsNone(hw.write("Clock Mode", 1))
+            self.assertIn("busy", hw.write("Unknown", 0))
+            self.assertEqual(hw.write("Clock Mode", 0), "timeout")
         self.assertEqual(run.call_args_list[0].args[0][4:], ["cset", "numid=11", "1"])
         self.assertEqual(run.call_args_list[1].args[0][4:], ["cset", "name=Unknown", "0"])
+
+    def test_set_card_profile(self):
+        with mock.patch.object(hardware.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertEqual(hardware.set_card_profile("card", "pro-audio"), "missing")
 
     def test_not_found(self):
         self.assertIsNone(rd.decode_status(None))
@@ -381,6 +417,39 @@ class PanelTest(unittest.TestCase):
     @staticmethod
     def lit(light):
         return "●" in light.text()
+
+    def test_read_failures(self):
+        p = self.panel()
+        for card, error, ctrls, want in ((None, None, None, "Card not found"),
+                                         (1, "missing", None, "amixer is not installed"),
+                                         (1, "timeout", None, "amixer did not answer"),
+                                         (1, "amixer: no", None, "Can't read settings"),
+                                         (1, None, {}, "Can't read settings")):
+            p.hw.card, p.hw.error = card, error
+            p.update_hdspe(ctrls)
+            self.assertIn(want, p.rate.text())
+        self.assertIn("ALSA controls", p.rate.toolTip())
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(hardware.parse_amixer_contents(AMIXER))
+        self.assertEqual((p.rate.text(), p.rate.toolTip()), ("96 kHz", ""))
+
+    def test_refused_setting_says_why(self):
+        from openface_mixer import settings_panel
+        p = self.panel()
+        said = []
+        p.notice.connect(said.append)
+        for why in ("amixer: Control hw:1 element write error: Device or resource busy",
+                    "missing", "timeout", None):
+            with mock.patch.object(p.hw, "write", return_value=why):
+                p._write("Clock Mode", 1)
+        self.assertEqual(len(said), 3)
+        self.assertIn("playback and recording are open in two programs", said[0])
+        self.assertIn("alsa-utils", said[1])
+        self.assertIn("did not answer", said[2])
+        # on other interfaces "busy" is whatever amixer says it is
+        self.assertEqual(settings_panel.write_failure("amixer: busy", devices.DEFAULT),
+                         "Not changed: amixer: busy")
 
     def test_use_anyway(self):
         p = self.panel("aio")
