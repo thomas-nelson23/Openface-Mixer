@@ -106,19 +106,21 @@ class InstallTest(unittest.TestCase):
         prefix = self.home / "my apps"            # a prefix other than ~/.local, with a space
         _, calls = self.run_script("install.sh", PREFIX=str(prefix))
         units = self.config / "systemd/user"
+        # the checkout it came from is recorded for the update button; a tarball has none
+        checkout = (["my apps/share/openface-mixer/install-source"]
+                    if (REPO / ".git").exists() else [])
         self.assertEqual(self.files(self.home), [
             ".config/systemd/user/openface-mixer-engine.service",
             ".config/systemd/user/openface-mixer-engine@.service",
             "my apps/bin/openface-mixer", "my apps/bin/openface-mixer-engine",
             "my apps/share/applications/openface-mixer.desktop",
-            "my apps/share/icons/hicolor/scalable/apps/openface-mixer.svg",
-            "my apps/share/openface-mixer/install-source"])
+            "my apps/share/icons/hicolor/scalable/apps/openface-mixer.svg"] + checkout)
         self.assertIn(f'\nExec="{prefix}/bin/openface-mixer"\n',
                       (prefix / "share/applications/openface-mixer.desktop").read_text())
         self.assertIn(f'\nExecStart="{prefix}/bin/openface-mixer-engine" --device %i\n',
                       (units / "openface-mixer-engine@.service").read_text())
-        source = (prefix / "share/openface-mixer/install-source").read_text().splitlines()
-        if (REPO / ".git").exists():
+        if checkout:
+            source = (prefix / "share/openface-mixer/install-source").read_text().splitlines()
             self.assertEqual(source[0], str(REPO))
         # engines are stopped by the 15 characters the kernel keeps of their name
         self.assertIn(f"pkill -u {os.getuid()} -x openface-mixer-", calls)

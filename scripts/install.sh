@@ -11,10 +11,10 @@ PREFIX="${PREFIX:-$HOME/.local}"
 DESTDIR="${DESTDIR:-}"
 case "$PREFIX" in /*) ;; *) echo "PREFIX must be an absolute path" >&2; exit 1 ;; esac
 SHARE="$PREFIX/share/openface-mixer"
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 if [ -n "$DESTDIR" ]; then
     UNIT_DIR="$PREFIX/lib/systemd/user"
 else
+    CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
     UNIT_DIR="$CONFIG/systemd/user"
 fi
 
