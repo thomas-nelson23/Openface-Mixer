@@ -487,7 +487,11 @@ count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate.
 
 The settings are ordinary ALSA controls, which the GUI reads and writes with amixer, addressed
 by `numid` (snd-hdspe puts them on the CARD interface, which `amixer cset name=…` alone doesn't
-find). Under snd-hdspm:
+find). snd-hdspm refuses a change with `EBUSY` while playback and capture are open in two
+different processes; the GUI says so, as it does when amixer is missing, does not answer or
+lists controls it doesn't know. The Clock mode light is on in Master mode, and in AutoSync while
+the card follows an input (snd-hdspe: `Current AutoSync Reference` is not `Intern`; snd-hdspm,
+which doesn't name the input in use on these cards: some input has lock). Under snd-hdspm:
 
 | Control | Access | Values |
 | --- | --- | --- |

@@ -264,9 +264,10 @@ def _hdspe_rate(ctrls):
 
 def decode_status(ctrls, model=MODELS["raydat"]):
     """The CLOCK and INPUT STATUS boxes from amixer's controls (hardware.parse_amixer_contents):
-    {"driver", "source", "rate", "inputs": [(label, state, rate text)], "running",
-    "firmware"}, inputs without the optional TCO module left out. None if the card's controls
-    are missing."""
+    {"driver", "source", "mode", "rate", "inputs": [(label, state, rate text)], "running",
+    "firmware"}, inputs without the optional TCO module left out. "mode" is the clock mode the
+    card really runs in: "AutoSync" only while it follows an input, None while it waits for
+    one on its own clock. None if the card's controls are missing."""
     drv = profile(ctrls)
     if drv is None:
         return None
@@ -290,8 +291,12 @@ def decode_status(ctrls, model=MODELS["raydat"]):
         source = "AutoSync, prefers " + (_label(item(ctrls, control(ctrls, "pref")[0])) or "?")
         if current:
             source = f"AutoSync, on {current}"
+        # snd-hdspm doesn't name the input in use on these cards; AutoSync takes any valid one
+        if current == "Internal" or not (current or any(i[1] in ("Lock", "Sync")
+                                                          for i in inputs)):
+            mode = None
     else:
         source = mode or "—"
     running = (ctrls.get("Running") or {}).get("value")
-    return {"driver": drv, "source": source, "rate": rate, "inputs": inputs,
+    return {"driver": drv, "source": source, "mode": mode, "rate": rate, "inputs": inputs,
             "running": bool(running), "firmware": (ctrls.get("Firmware Build") or {}).get("value")}

@@ -117,23 +117,23 @@ class Led(QLabel):
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
     from the chosen source, dark while it does not (or the state is unknown). The tooltip
-    names the current source."""
+    names the current source; item is the combo's entry for it where the two differ."""
     ON, OFF = "#56e39f", "#6f8a94"
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
         self.combo = combo
-        self.current = None
+        self.current = self.item = None
         self.setFont(font(SANS, 9))
         combo.currentIndexChanged.connect(lambda _i: self.refresh())
         self.refresh()
 
-    def set_current(self, source):
-        self.current = source
+    def set_current(self, source, item=None):
+        self.current, self.item = source, item or source
         self.refresh()
 
     def refresh(self):
-        on = self.current not in (None, "—") and self.current == self.combo.currentText()
+        on = self.current not in (None, "—") and self.item == self.combo.currentText()
         # filled and green while in use, an empty ring otherwise (shape, not only colour)
         self.setText(f"<span style='color:{self.ON if on else self.OFF}'>{'●' if on else '○'}"
                      "</span>")
@@ -734,7 +734,7 @@ class SettingsPanel(QWidget):
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
             self.rd_info.setText(info)
-        self.cur_src.set_current(st["source"])
+        self.cur_src.set_current(st["source"], st["mode"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
         self.rate.setToolTip("")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}

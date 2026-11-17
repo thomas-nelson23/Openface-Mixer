@@ -275,6 +275,21 @@ class StatusTest(unittest.TestCase):
         self.assertFalse(rd.driver_usable(rd.HDSPM, rd.VENDOR_RME))
         self.assertTrue(rd.driver_usable(rd.HDSPE, rd.VENDOR_RME))
 
+    def test_clock_mode_in_effect(self):
+        # what the Clock light compares with the chosen mode
+        hdspm = hardware.parse_amixer_contents(AMIXER)
+        self.assertEqual(rd.decode_status(hdspm)["mode"], "AutoSync")      # ADAT 1 in sync
+        hdspm["ADAT1 SyncCheck"]["value"] = hdspm["ADAT1 SyncCheck"]["values"][0] = 0
+        self.assertIsNone(rd.decode_status(hdspm)["mode"])                 # nothing to follow
+        hdspm["Clock Mode"]["value"] = hdspm["Clock Mode"]["values"][0] = 0
+        self.assertEqual(rd.decode_status(hdspm)["mode"], "Master")
+        c = hardware.parse_amixer_contents(AMIXER_HDSPE)
+        self.assertEqual(rd.decode_status(c)["mode"], "AutoSync")          # on ADAT 1
+        cur = c["Current AutoSync Reference"]
+        cur["value"] = cur["values"][0] = cur["items"].index("Intern")
+        st = rd.decode_status(c)
+        self.assertEqual((st["mode"], st["source"]), (None, "AutoSync, on Internal"))
+
     def test_run(self):
         done = subprocess.CompletedProcess([], 0, "out", "")
         for effect, want in ((FileNotFoundError(), (None, "missing")),
@@ -417,6 +432,23 @@ class PanelTest(unittest.TestCase):
     @staticmethod
     def lit(light):
         return "●" in light.text()
+
+    def test_clock_light_in_autosync(self):
+        p = self.panel()
+        ctrls = hardware.parse_amixer_contents(AMIXER)
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(ctrls)
+            self.assertEqual(p.rd_combos["clock"].currentText(), "AutoSync")
+            self.assertTrue(self.lit(p.cur_src))               # following ADAT 1
+            self.assertIn("this source", p.cur_src.toolTip())
+            ctrls["ADAT1 SyncCheck"]["value"] = ctrls["ADAT1 SyncCheck"]["values"][0] = 0
+            p.update_hdspe(ctrls)
+            self.assertFalse(self.lit(p.cur_src))              # no input to follow
+            self.assertIn("AutoSync, prefers ADAT 1", p.cur_src.toolTip())
+            ctrls["Clock Mode"]["value"] = ctrls["Clock Mode"]["values"][0] = 0
+            p.update_hdspe(ctrls)
+            self.assertTrue(self.lit(p.cur_src))               # Master
 
     def test_read_failures(self):
         p = self.panel()
