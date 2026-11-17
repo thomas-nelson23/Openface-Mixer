@@ -92,6 +92,13 @@ uint32_t ffusb_vol_cmd(const struct ffusb_model *m, int out, int16_t vol)
 	return (uint32_t)(m->vol_reg + m->vol_step * out) << 16 | (uint16_t)vol;
 }
 
+int ffusb_link_state(const struct ff802usb_info *info, long silent_ms)
+{
+	if (info->level_packets && silent_ms >= FFUSB_REPLY_TIMEOUT_MS)
+		return -ENODATA;
+	return info->replies ? DFU_STATE_ACTIVE : DFU_STATE_NO_REPLY;
+}
+
 uint32_t ff802usb_rate(unsigned int value)
 {
 	static const uint32_t rates[] = {
@@ -128,6 +135,7 @@ int ff802usb_handle_sysex(const uint8_t *msg, size_t len, struct ff802usb_info *
 	int subid = msg[5];
 	const uint8_t *p = msg + 6;
 	size_t n_words = (len - 7) / 5;
+	info->replies++;
 
 	if (subid == 0) {
 		for (size_t i = 0; i < n_words; i++) {
@@ -203,6 +211,7 @@ struct ff802usb {
 	struct ff802usb_info info;
 	unsigned int seen_levels;
 	struct timespec last_levels;
+	struct timespec last_reply;  /* the unit's last SysEx, or when the port was opened */
 	unsigned int serial;
 
 	long budget;                /* bytes this sync may still send */
@@ -448,11 +457,12 @@ static int open_dev(void *h)
 	f->info = (struct ff802usb_info){ .m = f->m, .clock = -1, .rate = -1 };
 	f->seen_levels = 0;
 	clock_gettime(CLOCK_MONOTONIC, &f->last_levels);
+	f->last_reply = f->last_levels;
 	forget_sent(f);
 	/* ask for every register, for the clock source and sample rate */
 	f->budget = FF802USB_MSG_LEN;
 	write_reg(f, f->m->dump);
-	return DFU_STATE_ACTIVE;
+	return DFU_STATE_NO_REPLY;   /* open; ACTIVE once the unit has answered (link_state) */
 
 fail:
 	close(f->fd);
@@ -460,14 +470,38 @@ fail:
 	return state;
 }
 
-/* Is the interface's sequencer client still there (it goes away when unplugged)? */
+/* Is the interface's sequencer client still there (it goes away when unplugged), and our
+ * subscription to its control port with it? A port that was removed and came back between two
+ * polls has the old address but no subscribers, so nothing we send would arrive. */
 static bool device_present(struct ff802usb *f)
 {
 	struct snd_seq_client_info ci;
+	struct snd_seq_port_subscribe sub;
 	memset(&ci, 0, sizeof(ci));
 	ci.client = f->dev.client;
+	memset(&sub, 0, sizeof(sub));
+	sub.sender = f->me;
+	sub.dest = f->dev;
 	return ioctl(f->fd, SNDRV_SEQ_IOCTL_GET_CLIENT_INFO, &ci) == 0 &&
-	       strcmp(ci.name, f->dev_name) == 0;
+	       strcmp(ci.name, f->dev_name) == 0 &&
+	       ioctl(f->fd, SNDRV_SEQ_IOCTL_GET_SUBSCRIPTION, &sub) == 0;
+}
+
+static long ms_since(const struct timespec *t)
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec - t->tv_sec) * 1000 + (now.tv_nsec - t->tv_nsec) / 1000000;
+}
+
+static int link_state(struct ff802usb *f)
+{
+	return ffusb_link_state(&f->info, ms_since(&f->last_reply));
+}
+
+static bool answered(void *h)
+{
+	return link_state(h) == DFU_STATE_ACTIVE;
 }
 
 static int status(void *h, struct ofm_shm *s, bool *reset)
@@ -475,6 +509,8 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 	struct ff802usb *f = h;
 	if (!device_present(f))
 		return -ENODEV;
+	if (link_state(f) < 0)
+		return -ENODATA;
 	s->rate = f->info.rate >= 0 ? ff802usb_rate((unsigned int)f->info.rate) : 0;
 	s->dev_status = f->info.rate >= 0 && f->info.clock >= 0
 		? FF802USB_STATUS_VALID | (uint32_t)(f->info.rate & 0xff) << 8 |
@@ -492,7 +528,7 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 
 	if (full)
 		forget_sent(f);
-	f->budget = output_room(f);
+	long budget = f->budget = output_room(f);
 	bool room = true;
 
 	/* the mix first, it's what is heard; then the channel settings */
@@ -526,6 +562,10 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 		f->sent_cmd[i] = c;
 	}
 	f->routes = routes;
+	/* more to send and the port is taking it: the unit's replies wait behind that, so this
+	 * is not silence yet */
+	if (!room && f->budget < budget)
+		clock_gettime(CLOCK_MONOTONIC, &f->last_reply);
 	return 0;   /* what didn't fit goes out on the next ticks */
 }
 
@@ -534,17 +574,13 @@ static int routes(void *h)
 	return ((struct ff802usb *)h)->routes;
 }
 
-static long ms_since(const struct timespec *t)
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (now.tv_sec - t->tv_sec) * 1000 + (now.tv_nsec - t->tv_nsec) / 1000000;
-}
-
 static int meters(void *h, struct ofm_shm *s)
 {
 	struct ff802usb *f = h;
+	unsigned int replies = f->info.replies;
 	seq_drain(f, s);
+	if (f->info.replies != replies)
+		clock_gettime(CLOCK_MONOTONIC, &f->last_reply);
 	if (f->info.level_packets != f->seen_levels) {
 		f->seen_levels = f->info.level_packets;
 		clock_gettime(CLOCK_MONOTONIC, &f->last_levels);
@@ -578,6 +614,7 @@ static int meters(void *h, struct ofm_shm *s)
 		.sync = sync_mix,			\
 		.routes = routes,			\
 		.meters = meters,			\
+		.answered = answered,			\
 	}
 
 const struct ofm_backend ofm_backend_ff802usb =

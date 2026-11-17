@@ -55,6 +55,24 @@ def fmt_db(db):
     return f"{db:+.1f}" if abs(db) >= 0.05 else "0.0"
 
 
+def parse_db(text):
+    """A typed level: "-12", "-12.5", "+3", "-12,5" or "-12 dB" give the number, "-inf", "-∞"
+    and "off" give NEG_INF. None for anything else."""
+    t = text.strip().lower().removesuffix("db").strip().replace(",", ".").replace("−", "-")
+    if t in ("-inf", "-∞", "off"):
+        return NEG_INF
+    try:
+        db = float(t)
+    except ValueError:
+        return None
+    return db if math.isfinite(db) else None
+
+
+def fader_db(db):
+    """db brought into a fader's range: up to FADER_MAX_DB, and -∞ below FADER_MIN_DB."""
+    return NEG_INF if db < FADER_MIN_DB else min(FADER_MAX_DB, db)
+
+
 # Fader taper (position 0..1 <-> dB): piecewise linear with most travel around 0 dB, like Logic.
 TAPER = [(0.0, -90.0), (0.05, -60.0), (0.12, -45.0), (0.25, -30.0), (0.40, -20.0),
          (0.60, -10.0), (0.80, 0.0), (1.0, 6.0)]

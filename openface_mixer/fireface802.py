@@ -179,7 +179,18 @@ def upgrade_settings(s, base=None, fx_model=FX):
             s[k] = part
         else:
             s.setdefault(k, v)
+    if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
+        s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
+
+
+def set_inst(s, mics, on):
+    """Inst on AN 9-12 (mics: 0-3). Switching it on switches 48V off, as on the unit, and
+    clears the stored 48V so phantom power can't come back when Inst is switched off."""
+    for m in mics:
+        s["in"]["inst"][m] = on
+        if on:
+            s["in"]["p48"][m] = False
 
 
 def phys_cmd(ch, cmd, value):
@@ -196,10 +207,10 @@ def with_parity(word):
     return word if bin(word).count("1") % 2 else word | 0x80000000
 
 
-def commands(s, play_stereo=None, usb=False):
+def commands(s, st=None, usb=False):
     """All DSP setting commands for settings s, in the order they are sent: the channel
     settings, then the effects (fx.commands: channel strip effects, FX sends and returns, reverb
-    and echo). play_stereo: the playback pairs' stereo flags, for the playback FX sends."""
+    and echo). st: the mixer state, for the stereo links, mutes and solos the effects follow."""
     cmds = []
     i, o = s["in"], s["out"]
     for c in range(N_PHYS_IN):
@@ -211,24 +222,24 @@ def commands(s, play_stereo=None, usb=False):
     for m in range(N_MIC_IN):
         ch = N_LINE_IN + m
         cmds.append(phys_cmd(ch, IN_MIC_INST, i["inst"][m]))
-        # Inst switches phantom power off, as on the unit
+        # never 48V with Inst (set_inst() clears it; this guards a state that holds both)
         cmds.append(phys_cmd(ch, IN_MIC_POWER, i["p48"][m] and not i["inst"][m]))
     for c in range(N_PHYS_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_PHASE, o["phase"][c]))
     for c in range(N_LINE_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_LINE_LEVEL, o["level"][c]))
-    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb)
+    return cmds + fxmod.commands(s["fx"], FX, st, usb)
 
 
 def reg_cmd(reg, value):
     return (reg << 16) | (int(value) & 0xFFFF)
 
 
-def usb_commands(s, play_stereo=None):
+def usb_commands(s, st=None):
     """commands(s), plus the clock and option registers that FireWire sets with config_word()."""
     keys = [k for k, _, _ in CLOCK_SOURCES]
     clock = keys.index(s["clock"]) if s["clock"] in keys else 0
-    return commands(s, play_stereo, usb=True) + [
+    return commands(s, st, usb=True) + [
         reg_cmd(USB_REG_CLOCK, clock),
         reg_cmd(USB_REG_WORD_SINGLE, s["word_single"]),
         reg_cmd(USB_REG_OPT_IN_SPDIF, s["aes_in"] == "optical"),

@@ -9,8 +9,8 @@ from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap,
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from . import APP_ID, APP_NAME
@@ -98,12 +98,9 @@ class MainWindow(QMainWindow):
         for r in (self.row_in, self.row_play, self.row_out):
             rows.addWidget(r, 1)
         self.matrix = MatrixView(self)
-        mscroll = QScrollArea()
-        mscroll.setWidget(self.matrix)
-        mscroll.setFrameShape(QFrame.NoFrame)
         self.tabs = QStackedWidget()
         self.tabs.addWidget(mixer_page)
-        self.tabs.addWidget(mscroll)
+        self.tabs.addWidget(self.matrix.scroll)
         self.tabs.currentChanged.connect(self._tab_changed)
         body.addWidget(self.tabs, 1)
         self.settings = SettingsPanel(self.hw, dev, self.st, self.ui_scale)
@@ -370,6 +367,8 @@ class MainWindow(QMainWindow):
     def _fill_presets_menu(self):
         """The Presets menu of a narrow window: recall a slot, or store into one."""
         menu = self.presets_menu
+        for old in menu.findChildren(QMenu):     # the last Store submenu
+            old.deleteLater()
         menu.clear()
         active = self.st.get("active_slot")
         for i in range(N_SLOTS):
@@ -450,6 +449,7 @@ class MainWindow(QMainWindow):
         else:       # a context menu shows only what can be done (HIG: hide, don't dim)
             menu.addAction("No hidden channels").setEnabled(False)
         menu.exec(pos)
+        menu.deleteLater()
 
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
@@ -650,17 +650,18 @@ class MainWindow(QMainWindow):
     def refresh_settings_buttons(self):
         f = self.st["hw"].get("fx") if self.dev.fx is not None else None
         for s in self.strips.values():
+            own = fx.effect_channels(s.kind, s.channels)
             if s.kind == "play":
                 s.set_settings_active(bool(f) and any(f["send"]["play"][c] is not None
-                                                      for c in s.channels))
+                                                      for c in own))
                 continue
             on = any(self.dev.channel_settings_active(self.st, s.kind, c) for c in s.channels)
             if f:
                 values = f["ret"] if s.kind == "out" else f["send"]["in"]
-                on = on or any(values[c] is not None for c in s.channels) or (
+                on = on or any(values[c] is not None for c in own) or (
                     s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
-                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in s.channels),
-                                any(fx.dyn_active(f, s.kind, c) for c in s.channels))
+                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in own),
+                                any(fx.dyn_active(f, s.kind, c) for c in own))
             s.set_settings_active(on)
 
     # ------------------------------------------------------------------ TotalMix FX effects
@@ -734,7 +735,8 @@ class MainWindow(QMainWindow):
         self.notify(f"Copied the effects of {strip.name}")
 
     def paste_effects(self, strip):
-        fx.paste_channel(self.st["hw"]["fx"], strip.kind, strip.channels, self.fx_clipboard,
+        fx.paste_channel(self.st["hw"]["fx"], strip.kind,
+                         fx.effect_channels(strip.kind, strip.channels), self.fx_clipboard,
                          self.dev.fx)
         for which in ("eq", "dyn"):
             panel = self.fx_panels.get((which, strip.key))
@@ -867,6 +869,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
+        menu.deleteLater()
 
     @staticmethod
     def _swatch(hexcol):
@@ -961,6 +964,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             menu.addAction("Clear", lambda: (self.presets.clear(i), self.refresh_slots()))
         menu.exec(self.slot_btns[i].mapToGlobal(self.slot_btns[i].rect().bottomLeft()))
+        menu.deleteLater()
 
     def _rename_slot(self, i):
         name, ok = QInputDialog.getText(self, "Rename preset", f"Name for slot {i + 1}:",
@@ -1158,12 +1162,12 @@ class MainWindow(QMainWindow):
             self.status.setToolTip("The engine is not running · click for details")
         else:
             hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
+                      "#ffb020" if s["hw"] in ("no-nodes", "starting", "no-reply") else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
-                      else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
+                      else "no reply" if s["hw"] == "no-reply" else "offline")
+            dot = "●" if s["hw"] in ("active", "no-nodes", "starting", "no-reply") else "○"
             txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
@@ -1176,7 +1180,9 @@ class MainWindow(QMainWindow):
             self.engine.enable()        # the interface is there: restore its mix at every login
         self._hw_active = active
         if self.dev.family == "latter":
-            self.settings.update_latter_status(s["dev_status"] if active else None)
+            # "no-reply" is connected too: the clock shows as unknown, not as not connected
+            connected = active or (s is not None and s["hw"] == "no-reply")
+            self.settings.update_latter_status(s["dev_status"] if connected else None)
         elif self.dev.family == "former":
             hw = self.st["hw"]
             if active and not hw["known"]:

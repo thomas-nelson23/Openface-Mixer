@@ -122,7 +122,7 @@ def gain_max(c):
     return MIC_GAIN_MAX_DB if c in MIC_INPUTS else LINE_GAIN_MAX_DB
 
 
-def usb_commands(s, play_stereo=None):
+def usb_commands(s, st=None):
     """All register writes for settings s: the channel settings, the effects (fx.commands), and
     TotalMix's own mute and balance cleared and CC mix set to TotalMix so the DSP mixer is what
     is heard."""
@@ -146,8 +146,9 @@ def usb_commands(s, play_stereo=None):
         cmds.append(reg(OUT_CH + c, OUT_LEVEL, o["level"][c]))
 
     for c in range(N_IN):
-        # (input 1's mute is register 0 = 0, which the engine skips like any empty command)
-        cmds.append(reg(c, IN_MUTE, 0))
+        # input 1's mute is register 0 = 0, and a 0 word is an empty slot to the engine: every
+        # word here carries the parity bit the engine puts on the wire anyway, so none is 0
+        cmds.append(ff802.with_parity(reg(c, IN_MUTE, 0)))
     for c in range(N_OUT):
         cmds += [reg(OUT_CH + c, OUT_MUTE, 0), reg(OUT_CH + c, OUT_BALANCE, 0)]
     clock = dict((k, v) for k, _, v in CLOCK_SOURCES).get(s["clock"], 0)
@@ -158,7 +159,7 @@ def usb_commands(s, play_stereo=None):
         ff802.reg_cmd(REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
         ff802.reg_cmd(REG_SPDIF_PRO, s["spdif_pro"]),
     ]
-    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb=True)
+    return cmds + fxmod.commands(s["fx"], FX, st, usb=True)
 
 
 def decode_usb_status(word):
