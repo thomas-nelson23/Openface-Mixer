@@ -377,7 +377,7 @@ static void hw_lost(struct data *d, int err)
 {
 	fprintf(stderr, "openface-mixer: lost the %s mixer: %d\n", d->be->name, err);
 	d->be->close(d->hw);
-	d->shm->hw_state = DFU_STATE_ERROR;
+	d->shm->hw_state = err == -ENODATA ? DFU_STATE_NO_REPLY : DFU_STATE_ERROR;
 	d->shm->hw_nodes = 0;
 	d->shm->rate = 0;
 }
@@ -440,7 +440,8 @@ static void hw_tick_locked(struct data *d)
 		d->hw_need_full = false;
 		fprintf(stderr, "openface-mixer: hardware mixer on, %d routes\n", be->routes(d->hw));
 	}
-	s->hw_state = r == -ENOSPC ? DFU_STATE_NO_NODES : DFU_STATE_ACTIVE;
+	s->hw_state = r == -ENOSPC ? DFU_STATE_NO_NODES :
+		      be->answered && !be->answered(d->hw) ? DFU_STATE_NO_REPLY : DFU_STATE_ACTIVE;
 	s->hw_nodes = (uint32_t)be->routes(d->hw);
 }
 

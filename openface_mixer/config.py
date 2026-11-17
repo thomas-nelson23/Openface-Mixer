@@ -126,7 +126,8 @@ def matrix_file_bytes(st, dev=DEFAULT):
     gains, out_gains = control_room.apply(st, compute_matrix(st, solo=False),
                                           compute_out_gains(st), talkback=False)
     data = struct.pack("<I", MATRIX_MAGIC) + gains.tobytes() + out_gains.tobytes()
-    block = device_block(st, dev)
+    no_solo = {k: [False] * len(v) for k, v in st["solo"].items()}   # FX sends follow solo too
+    block = device_block({**st, "solo": no_solo}, dev)
     if block is not None:
         config, cmds = block
         data += struct.pack(f"<III{N_DEV_CMD}I", DEVICE_MAGIC, config, N_DEV_CMD, *cmds)

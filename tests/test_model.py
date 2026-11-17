@@ -48,6 +48,31 @@ class TaperTest(unittest.TestCase):
         self.assertAlmostEqual(m.pos2db(1.0), m.FADER_MAX_DB)
 
 
+class TypedLevelTest(unittest.TestCase):
+    def test_numbers(self):
+        for text, db in (("-12", -12.0), ("-12.5", -12.5), ("+3", 3.0), ("0", 0.0),
+                         (" -6 ", -6.0), ("-12,5", -12.5), ("-12 dB", -12.0), ("3db", 3.0),
+                         ("−6", -6.0)):
+            self.assertEqual(m.parse_db(text), db, text)
+
+    def test_off(self):
+        for text in ("-inf", "-INF", "-∞", "off", "Off"):
+            self.assertEqual(m.parse_db(text), m.NEG_INF, text)
+
+    def test_not_a_level(self):
+        # "inf" and "nan" are numbers to float(); they must never reach a fader
+        for text in ("", "abc", "inf", "+inf", "nan", "infinity", "-infinity", "--3", "1 2", "dB"):
+            self.assertIsNone(m.parse_db(text), text)
+
+    def test_fader_range(self):
+        self.assertEqual(m.fader_db(99.0), m.FADER_MAX_DB)
+        self.assertEqual(m.fader_db(6.0), 6.0)
+        self.assertEqual(m.fader_db(-12.5), -12.5)
+        self.assertEqual(m.fader_db(m.FADER_MIN_DB), m.FADER_MIN_DB)
+        self.assertEqual(m.fader_db(m.FADER_MIN_DB - 0.1), m.NEG_INF)
+        self.assertEqual(m.fader_db(m.NEG_INF), m.NEG_INF)
+
+
 class MatrixTest(unittest.TestCase):
     def test_default_is_passthrough(self):
         g = m.compute_matrix(m.default_state())

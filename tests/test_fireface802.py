@@ -11,8 +11,8 @@ class CommandTest(unittest.TestCase):
     def test_commands_fit_the_engine(self):
         cmds = ff.commands(ff.default_settings())
         self.assertLessEqual(len(cmds), config.N_DEV_CMD)
-        used = [c for c in cmds if c]          # 0 marks an unused slot (an effect that is off)
-        self.assertEqual(len(used), len(set(used)))
+        self.assertNotIn(0, cmds)              # 0 would be an unused slot: the engine skips it
+        self.assertEqual(len(cmds), len(set(cmds)))
         s = ff.default_settings()              # everything on: every slot in use, none twice
         for ch in s["fx"]["in"] + s["fx"]["out"]:
             ch.update(lc=True, eq=True, dyn=True, al=True)
@@ -50,6 +50,30 @@ class CommandTest(unittest.TestCase):
         self.assertIn(0x0A090001, cmds)                  # AN 11 Inst
         self.assertIn(0x0A080000, cmds)                  # AN 11 48V off
         self.assertNotIn(0x0A080001, cmds)
+
+    def test_inst_clears_the_stored_phantom_power(self):
+        """48V must not come back by itself when Inst is switched off again."""
+        s = ff.default_settings()
+        s["in"]["p48"][2] = s["in"]["p48"][3] = True
+        self.assertIn(0x0A080001, ff.commands(s))        # AN 11 48V on
+        ff.set_inst(s, [2], True)
+        self.assertEqual(s["in"]["p48"], [False, False, False, True])   # AN 12 keeps its own
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090001, cmds)
+        self.assertIn(0x0A080000, cmds)
+        ff.set_inst(s, [2], False)
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090000, cmds)                  # Inst off
+        self.assertIn(0x0A080000, cmds)                  # ... and 48V stays off
+        self.assertIn(0x0B080001, cmds)
+
+    def test_a_saved_state_with_inst_and_phantom_loses_the_phantom(self):
+        s = ff.default_settings()
+        s["in"]["p48"] = [True, True, False, False]
+        s["in"]["inst"] = [True, False, False, True]
+        s = ff.upgrade_settings(s)
+        self.assertEqual(s["in"]["p48"], [False, True, False, False])
+        self.assertEqual(s["in"]["inst"], [True, False, False, True])
 
     def test_output_commands(self):
         s = ff.default_settings()
@@ -225,7 +249,9 @@ class DeviceTest(unittest.TestCase):
         usb = devices.DEVICES["ff802usb"]
         self.assertEqual(usb.service, "openface-mixer-engine@ff802usb.service")
         self.assertEqual(usb.family, "latter")
-        self.assertEqual(usb.device_words({"hw": ff.default_settings()})[0], 0)
+        st = m.default_state(4)
+        usb.upgrade_settings(st)
+        self.assertEqual(usb.device_words(st)[0], 0)
         self.assertEqual(config.state_file(usb), config.CONFIG_DIR / "ff802usb" / "state.json")
 
     def test_digiface_layout_unchanged(self):

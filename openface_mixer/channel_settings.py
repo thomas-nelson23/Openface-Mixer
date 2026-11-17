@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from . import fireface400 as ff400
 from . import fireface800 as ff800
 from . import fireface802 as ff
+from . import fx
 from . import ucx2
 from .fx_panels import LevelKnob
 from .theme import key_label, px
@@ -67,7 +68,8 @@ class ChannelSettings(QFrame):
         knob.setToolTip(("How much of the reverb and echo this output hears"
                          if self.kind == "out" else "Level into the reverb and echo")
                         + " · " + knob.toolTip().split("\n", 1)[1])
-        knob.changed.connect(lambda _v: self._set(values, self.channels, knob.level()))
+        knob.changed.connect(lambda _v: self._set(
+            values, fx.effect_channels(self.kind, self.channels), knob.level()))
         row.addWidget(knob)
         if self.kind == "out" and model.room_eq:
             room = QPushButton("Room EQ…")
@@ -131,7 +133,22 @@ class ChannelSettings(QFrame):
             row = self._gain(grid, row, part["gain"], line, ff.LINE_GAIN_MAX_DB)
         if kind == "in" and mic:
             row = self._check(grid, row, "48V phantom power", part["p48"], mic)
-            row = self._check(grid, row, "Inst (Hi-Z)", part["inst"], mic)
+            p48 = grid.itemAtPosition(row - 1, 0).widget()
+            inst_on = any(part["inst"][m] for m in mic)   # either side of a linked pair
+            p48.setEnabled(not inst_on)
+            inst = QCheckBox("Inst (Hi-Z)")
+            inst.setChecked(inst_on)
+            inst.setToolTip("Instrument input. Switches 48V off")
+
+            def set_inst(on):
+                ff.set_inst(self.s, mic, on)
+                if on:
+                    p48.setChecked(False)       # set_inst() cleared the stored 48V
+                p48.setEnabled(not on)
+                self.changed.emit()
+            inst.toggled.connect(set_inst)
+            grid.addWidget(inst, row, 0, 1, 2)
+            row += 1
         if kind == "out" and line:
             row = self._combo(grid, row, "Level", ff.OUT_LEVELS, part["level"], line)
 

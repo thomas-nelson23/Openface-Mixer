@@ -199,8 +199,7 @@ class Fireface802(FireWireDevice):
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
-        return (fireface802.config_word(st["hw"]),
-                fireface802.commands(st["hw"], st.get("stereo", {}).get("play")))
+        return fireface802.config_word(st["hw"]), fireface802.commands(st["hw"], st)
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
@@ -223,7 +222,7 @@ class ClassCompliantUSB:
         return card is not None and Hardware.card_driver(card) == "USB-Audio"
 
     def device_words(self, st):
-        return 0, self.proto.usb_commands(st["hw"], st.get("stereo", {}).get("play"))
+        return 0, self.proto.usb_commands(st["hw"], st)
 
     def missing_hint(self):
         return (f"Over USB the {self.name.replace('RME ', '').replace(' (USB)', '')} works on "
