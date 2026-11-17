@@ -35,6 +35,16 @@ class CommandTest(unittest.TestCase):
         # the engine's ff802_parity() drops bit 31 and sets it again: the same on the wire
         self.assertEqual(ff802.with_parity(0x80000000), ff802.with_parity(0))
 
+    def test_the_inst_rule_is_the_802s(self):
+        """The 802 drops a stored 48V where Inst is on. The UCX II has no Inst: a stray key in
+        its state must not switch AN 1/2's 48V off."""
+        s = ucx2.default_settings()
+        s["in"]["p48"] = [True, True]
+        s["in"]["inst"] = [True, True]
+        self.assertEqual(ucx2.upgrade_settings(s)["in"]["p48"], [True, True])
+        s["in"]["inst"] = 1
+        self.assertEqual(ucx2.upgrade_settings(s)["in"]["p48"], [True, True])
+
     def test_status(self):
         st = ucx2.decode_usb_status(0x80000000 | 5 << 8 | 4)
         self.assertEqual((st["rate"], st["source"]), (96000, "Optical"))

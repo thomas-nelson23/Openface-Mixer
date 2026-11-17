@@ -179,7 +179,7 @@ def upgrade_settings(s, base=None, fx_model=FX):
             s[k] = part
         else:
             s.setdefault(k, v)
-    if "inst" in s["in"]:           # states from before set_inst() may hold Inst and 48V
+    if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
         s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
 
