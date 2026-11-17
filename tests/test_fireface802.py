@@ -10,8 +10,8 @@ class CommandTest(unittest.TestCase):
     def test_commands_fit_the_engine(self):
         cmds = ff.commands(ff.default_settings())
         self.assertLessEqual(len(cmds), config.N_DEV_CMD)
-        used = [c for c in cmds if c]          # 0 marks an unused slot (an effect that is off)
-        self.assertEqual(len(used), len(set(used)))
+        self.assertNotIn(0, cmds)              # 0 would be an unused slot: the engine skips it
+        self.assertEqual(len(cmds), len(set(cmds)))
         s = ff.default_settings()              # everything on: every slot in use, none twice
         for ch in s["fx"]["in"] + s["fx"]["out"]:
             ch.update(lc=True, eq=True, dyn=True, al=True)

@@ -20,8 +20,9 @@ Playback channels reach the FX unit through mixers 30 (left) and 31 (right) of t
 both: 0x4000 + 0x40 * mixer + 0x20 + playback channel as a register (UCX II 0x47a0/0x47e0).
 
 The settings live in st["hw"]["fx"] in display units (dB, Hz, ms, seconds); commands() turns
-them into raw values. A switched-off effect sends only its switch: its parameter slots are 0
-(unused), so the engine leaves them alone until the effect is switched on again.
+them into raw values. An effect's parameters are sent whether it is on or off, in slots before
+its switch: the engine sends the slots in order, so an effect never starts with settings
+another controller left in the unit.
 """
 import math
 
@@ -354,37 +355,33 @@ def mixer_gain(db, usb):
 
 
 def _strip_words(m, ch_id, ch):
+    """Each effect's parameters, then its switch (register 0 of the effect)."""
     words = []
     for section in STRIP_SECTIONS:
         name = section[0]
-        on = bool(ch[name])
-        words.append(m.strip_word(ch_id, name, 0, on))
         for i, (key, scale, lo, hi, _) in enumerate(m.params(section)):
             words.append(m.strip_word(ch_id, name, i + 1,
-                                      raw_value(ch[f"{name}_{key}"], scale, lo, hi)) if on else 0)
+                                      raw_value(ch[f"{name}_{key}"], scale, lo, hi)))
+        words.append(m.strip_word(ch_id, name, 0, bool(ch[name])))
     return words
 
 
 def _unit_words(m, section, unit):
-    on = bool(unit["on"])
-    words = [m.fx_word(section[0], 0, on)]
-    for i, (key, scale, lo, hi, _) in enumerate(m.params(section)):
-        words.append(m.fx_word(section[0], i + 1, raw_value(unit[key], scale, lo, hi))
-                     if on else 0)
-    return words
+    words = [m.fx_word(section[0], i + 1, raw_value(unit[key], scale, lo, hi))
+             for i, (key, scale, lo, hi, _) in enumerate(m.params(section))]
+    return words + [m.fx_word(section[0], 0, bool(unit["on"]))]
 
 
 def _room_words(m, out, room):
-    on = bool(room["on"])
     _, scale, lo, hi, _ = ROOM_DELAY
-    words = [m.room_word(out, 0, raw_value(room["delay"], scale, lo, hi)),
-             m.room_word(out, 1, on)]
+    words = [m.room_word(out, 0, raw_value(room["delay"], scale, lo, hi))]
     i = 2
     for b in range(1, ROOM_BANDS + 1):
         for key in room_band_keys(b):
             scale, lo, hi, _ = room_param(m, key)
-            words.append(m.room_word(out, i, raw_value(room[key], scale, lo, hi)) if on else 0)
+            words.append(m.room_word(out, i, raw_value(room[key], scale, lo, hi)))
             i += 1
+    words.append(m.room_word(out, 1, bool(room["on"])))
     _, scale, lo, hi, _ = VOLUME_CAL
     words.append(m.volcal_word(out, raw_value(room["volcal"], scale, lo, hi)))
     return words

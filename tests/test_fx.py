@@ -53,26 +53,61 @@ class AddressTest(unittest.TestCase):
         self.assertEqual(r[0x050B], -125 & 0xFFFF)      # output 1 volume calibration
         self.assertIn(0x47A0, r)                        # playback 1 FX send left
         self.assertIn(0x47E0, r)
-        self.assertNotIn(0x35D1, r)                     # the room EQ read-back address
+        # 0x35D1 is output 15's band 5 Q, not output 1's switch (which the unit reports there)
+        self.assertEqual(r[0x35D1], 10)
 
     def test_room_eq_layout(self):
         words = fx._room_words(fx.MODELS["ucx2"], 0, dict(fx.default_room(fx.MODELS["ucx2"]),
                                                             on=True))
         addrs = [w >> 16 for w in words]
-        self.assertEqual(addrs[:-1], list(range(0x3400, 0x3420)))   # delay, on, 9 bands
+        self.assertEqual(sorted(addrs[:-1]), list(range(0x3400, 0x3420)))   # delay, on, 9 bands
+        self.assertEqual(addrs[-2], 0x3401)                 # the switch after the bands
         self.assertEqual(addrs[-1], 20 << 6 | 0x0B)
 
 
 class CommandTest(unittest.TestCase):
-    def test_off_effects_leave_their_parameters_alone(self):
+    def test_parameters_of_an_off_effect_are_sent(self):
+        """With everything off, every parameter still goes out once (the engine sends every
+        non-zero slot when it connects), so no effect starts with another controller's
+        settings."""
+        cmds = ff.commands(ff.default_settings())
+        self.assertNotIn(0, cmds)
+        for word in (0x03410000, 0x03420000, 0x03430064, 0x0344000A,   # AN 4 EQ band 1
+                     0x03400000,                                       # AN 4 EQ off
+                     0x2164FF38, 0x21600000,          # AN 4 out compressor threshold -20 dB, off
+                     0x3C010001, 0x3C0D0064, 0x3C000000,               # reverb type, width, off
+                     0x3C22001E, 0x3C200000):                          # echo delay 0.3 s, off
+            self.assertIn(word, cmds, hex(word))
+        cmds = ucx2.usb_commands(ucx2.default_settings())
+        for word in (0x000D0064, 0x000C0000,          # input 1 low cut 100 Hz, off
+                     0x3016012C, 0x30140000,          # echo delay 300 ms, off
+                     0x3404003C, 0x3401 << 16,        # output 1 room EQ band 1 60 Hz, off
+                     0x365F000A, 0x3661 << 16):       # output 20 band 9 Q, room EQ off
+            self.assertIn(word, cmds, hex(word))
+
+    def test_parameters_come_before_the_switch(self):
+        """The engine sends the slots in order, at the first sync and when they change."""
+        for cmds, switches in (
+                (ff.commands(ff.default_settings()),
+                 {0x0020: 2, 0x0040: 11, 0x0060: 7, 0x0080: 3, 0x3B20: 2, 0x3B40: 11,
+                  0x3B60: 7, 0x3B80: 3, 0x3C00: 13, 0x3C20: 6}),
+                (ucx2.usb_commands(ucx2.default_settings()),
+                 {0x000C: 2, 0x000F: 11, 0x001B: 7, 0x0023: 3, 0x09CC: 2, 0x09CF: 11,
+                  0x09DB: 7, 0x09E3: 3, 0x3000: 13, 0x3014: 6, 0x3401: 30, 0x3661: 30})):
+            addrs = [w >> 16 & 0x7FFF for w in cmds]
+            for switch, n in switches.items():
+                at = addrs.index(switch)
+                self.assertEqual(sorted(addrs[at - n:at]), list(range(switch + 1, switch + 1 + n)),
+                                 hex(switch))
+
+    def test_switching_on_changes_only_the_switch(self):
         s = ff.default_settings()
         off = ff.commands(s)
         s["fx"]["in"][3]["eq"] = True
+        s["fx"]["reverb"]["on"] = True
         on = ff.commands(s)
-        self.assertEqual(len(off), len(on))
-        changed = [i for i, (a, b) in enumerate(zip(off, on)) if a != b]
-        self.assertEqual(len(changed), 12)              # the switch and its 11 parameters
-        self.assertTrue(all(off[i] == 0 for i in changed[1:]))
+        changed = [(a, b) for a, b in zip(off, on) if a != b]
+        self.assertEqual(changed, [(0x03400000, 0x03400001), (0x3C000000, 0x3C000001)])
 
     def test_values_are_clamped(self):
         s = ucx2.default_settings()
