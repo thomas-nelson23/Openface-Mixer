@@ -494,6 +494,13 @@ class PanelTest(unittest.TestCase):
         from PySide6.QtWidgets import QApplication
         cls.app = QApplication.instance() or QApplication([])
 
+    def keep(self, widget):
+        """Have the widget deleted when its test is over: one that is still there when the
+        interpreter exits can crash Qt on the way out."""
+        import shiboken6
+        self.addCleanup(shiboken6.delete, widget)
+        return widget
+
     def panel(self, key="raydat", **hw):
         from openface_mixer import settings_panel
         dev = devices.DEVICES[key]
@@ -501,7 +508,8 @@ class PanelTest(unittest.TestCase):
         dev.upgrade_settings(st)
         st["hw"].update(hw)
         with mock.patch.object(settings_panel.updater, "install_source", return_value=None):
-            return settings_panel.SettingsPanel(hardware.Hardware(dev.alsa_card), dev, st)
+            return self.keep(settings_panel.SettingsPanel(hardware.Hardware(dev.alsa_card),
+                                                          dev, st))
 
     @staticmethod
     def lit(light):
@@ -607,7 +615,7 @@ class PanelTest(unittest.TestCase):
 
     def test_limited_readout(self):
         from openface_mixer import widgets
-        s = widgets.Strip("in:0", "AN 1", [0], "in")
+        s = self.keep(widgets.Strip("in:0", "AN 1", [0], "in"))
         plain = s.value.styleSheet()
         s.set_limited("Held at +6 dB")
         self.assertNotEqual(s.value.styleSheet(), plain)
