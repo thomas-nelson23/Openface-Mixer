@@ -349,8 +349,8 @@ class FxPanel(QWidget):
 
 # ------------------------------------------------------------------ channel EQ and dynamics
 class StripPanel(FxPanel):
-    """Base for the EQ and Dynamics panels of a strip: edits channels (both sides of a stereo
-    strip) of fx[kind]."""
+    """Base for the EQ and Dynamics panels of a strip: edits the strip's effects in fx[kind]
+    (fx.effect_channels)."""
 
     def __init__(self, title, fxs, model, kind, channels, parent=None):
         super().__init__(title, parent)
@@ -367,7 +367,7 @@ class StripPanel(FxPanel):
             v = int(round(v))
         else:
             v = round(float(v), 3)
-        for c in self.channels:
+        for c in fx.effect_channels(self.kind, self.channels):
             self.fx[self.kind][c][key] = v
         self.emit()
 

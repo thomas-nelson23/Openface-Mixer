@@ -128,14 +128,17 @@ class CommandTest(unittest.TestCase):
         s["fx"]["send"]["in"][2] = -12.0
         s["fx"]["ret"][4] = 0.0
         s["fx"]["send"]["play"][0] = 0.0
-        s["fx"]["send"]["play"][1] = -6.0
+        s["fx"]["send"]["play"][1] = -6.0             # the right channel's own, kept for unlink
+        s["fx"]["send"]["play"][3] = -6.0
         r = regs(ff.usb_commands(s, st))
         self.assertEqual(r[0x0201], -120 & 0xFFFF)
         self.assertEqual(r[0x2203], 0)
-        # a linked pair: left channel to the left FX input only, right to the right
+        # a linked pair: left channel to the left FX input only, right to the right, both at
+        # the left channel's level
         self.assertEqual((r[0x47A0], r[0x47E0]), (0x9000, 0))
-        self.assertEqual(r[0x47A1], 0)
-        self.assertEqual(r[0x47E1], fx.mixer_gain(-6.0, True))
+        self.assertEqual((r[0x47A1], r[0x47E1]), (0, 0x9000))
+        self.assertEqual(r[0x47A3], r[0x47E3])
+        self.assertEqual(r[0x47E3], fx.mixer_gain(-6.0, True))
         # FireWire uses the engine's 0x8000 | gain * 0x1000 form
         self.assertEqual(fx.mixer_gain(-12.0, False), 0x8000 | round(10 ** (-12 / 20) * 0x1000))
         self.assertEqual(fx.mixer_gain(None, True), 0)
@@ -212,6 +215,55 @@ class MuteSoloTest(unittest.TestCase):
         self.assertIn(0x0201FD76, dev.device_words(self.st)[1])
         osc_remote.apply(self.st, dev, 1, "/input/2/mute", [0.0])
         self.assertIn(0x0201FF88, dev.device_words(self.st)[1])
+
+
+class LinkTest(unittest.TestCase):
+    """A linked pair runs on its left channel's effects; the right channel's own stay stored
+    and come back when the pair is unlinked."""
+
+    def setUp(self):
+        self.st = state()
+        f = self.st["hw"]["fx"]
+        f["in"][2].update(dyn=True, dyn_gain=3.0)                    # AN 3: dynamics
+        f["in"][3].update(eq=True, eq_g1=-3.5, al=True)              # AN 4: EQ and auto level
+        f["send"]["in"][2] = -12.0
+
+    def test_left_channel_applies_to_both(self):
+        unlinked = ff.commands(self.st["hw"], self.st)
+        for word in (0x02600001, 0x02400000,                 # AN 3: dynamics on, EQ off
+                     0x03600000, 0x03400001, 0x0342FFDD, 0x03800001,   # AN 4: its own
+                     0x0201FF88, 0x0301FD76):                # FX sends: -12.0 dB and off
+            self.assertIn(word, unlinked, hex(word))
+        stored = [dict(ch) for ch in self.st["hw"]["fx"]["in"]]
+        self.st["stereo"]["in"][1] = True
+        linked = ff.commands(self.st["hw"], self.st)
+        for word in (0x02600001, 0x0261001E, 0x02400000,     # AN 3 as before
+                     0x03600001, 0x0361001E,                 # AN 4: AN 3's dynamics and gain
+                     0x03400000, 0x03420000, 0x03800000,     # ... EQ and auto level off
+                     0x0201FF88, 0x0301FF88):                # ... and AN 3's FX send
+            self.assertIn(word, linked, hex(word))
+        self.assertEqual(self.st["hw"]["fx"]["in"], stored)  # nothing was overwritten
+        self.assertEqual(self.st["hw"]["fx"]["send"]["in"][3], None)
+        self.st["stereo"]["in"][1] = False
+        self.assertEqual(ff.commands(self.st["hw"], self.st), unlinked)
+        # only AN 4's slots differ while linked
+        changed = {a >> 24 for a, b in zip(unlinked, linked) if a != b}
+        self.assertEqual(changed, {3})
+
+    def test_ucx2(self):
+        st = state("ucx2")
+        st["hw"]["fx"]["in"][4]["lc"] = True
+        st["hw"]["fx"]["in"][5]["lc_freq"] = 250
+        st["stereo"]["in"][2] = True
+        r = regs(ucx2.usb_commands(st["hw"], st))
+        self.assertEqual((r[0x010C], r[0x010D]), (1, 100))   # AN 5 low cut on at 100 Hz
+        self.assertEqual((r[0x014C], r[0x014D]), (1, 100))   # AN 6 the same while linked
+
+    def test_strip_shows_and_edits_the_left_channel(self):
+        self.assertEqual(fx.effect_channels("in", [2, 3]), [2])
+        self.assertEqual(fx.effect_channels("play", [0, 1]), [0])
+        self.assertEqual(fx.effect_channels("in", [5]), [5])
+        self.assertEqual(fx.effect_channels("out", [2, 3]), [2, 3])   # outputs are always pairs
 
 
 class SettingsTest(unittest.TestCase):

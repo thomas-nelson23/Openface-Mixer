@@ -649,17 +649,18 @@ class MainWindow(QMainWindow):
     def refresh_settings_buttons(self):
         f = self.st["hw"].get("fx") if self.dev.fx is not None else None
         for s in self.strips.values():
+            own = fx.effect_channels(s.kind, s.channels)
             if s.kind == "play":
                 s.set_settings_active(bool(f) and any(f["send"]["play"][c] is not None
-                                                      for c in s.channels))
+                                                      for c in own))
                 continue
             on = any(self.dev.channel_settings_active(self.st, s.kind, c) for c in s.channels)
             if f:
                 values = f["ret"] if s.kind == "out" else f["send"]["in"]
-                on = on or any(values[c] is not None for c in s.channels) or (
+                on = on or any(values[c] is not None for c in own) or (
                     s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
-                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in s.channels),
-                                any(fx.dyn_active(f, s.kind, c) for c in s.channels))
+                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in own),
+                                any(fx.dyn_active(f, s.kind, c) for c in own))
             s.set_settings_active(on)
 
     # ------------------------------------------------------------------ TotalMix FX effects
@@ -733,7 +734,8 @@ class MainWindow(QMainWindow):
         self.notify(f"Copied the effects of {strip.name}")
 
     def paste_effects(self, strip):
-        fx.paste_channel(self.st["hw"]["fx"], strip.kind, strip.channels, self.fx_clipboard,
+        fx.paste_channel(self.st["hw"]["fx"], strip.kind,
+                         fx.effect_channels(strip.kind, strip.channels), self.fx_clipboard,
                          self.dev.fx)
         for which in ("eq", "dyn"):
             panel = self.fx_panels.get((which, strip.key))

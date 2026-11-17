@@ -397,32 +397,47 @@ def play_send_word(mixer, p, gain):
     return 0x40000000 | ((0x40 * mixer + PLAY_SOURCE + p) << 16) | (gain & 0xFFFF)
 
 
+def effect_channels(kind, channels):
+    """The channels of a strip that hold its effects, which its buttons and panels show and
+    edit. A linked input or playback pair runs on its left channel's effects (commands()); the
+    right channel's own stay stored for when the pair is unlinked. An output pair has one set
+    of effects, kept on both channels."""
+    return channels if kind == "out" else channels[:1]
+
+
 def commands(fx, m, st=None, usb=False):
     """All effect commands for fx (st["hw"]["fx"]), in a fixed slot order.
 
     st: the mixer state, for what depends on the mix (None: nothing linked, muted or soloed).
-    A linked playback pair sends its left channel to the FX unit's left input and its right
-    channel to the right, as TotalMix does; a mono playback channel goes to both.
+    A linked input or playback pair gets its left channel's effects and FX send on both
+    channels. A linked playback pair sends its left channel to the FX unit's left input and
+    its right channel to the right, as TotalMix does; a mono playback channel goes to both.
     A muted channel, and one left out because another is soloed, sends nothing to the FX unit."""
     soloing = bool(st) and any_solo(st)
+
+    def linked(kind, c):
+        return bool(st) and bool(st["stereo"][kind][c // 2])
+
+    def own(kind, c):
+        return c - 1 if c % 2 and linked(kind, c) else c
 
     def send(kind, c):
         if st and (st["mute"][kind][c] or (soloing and not st["solo"][kind][c])):
             return None
-        return fx["send"][kind][c]
+        return fx["send"][kind][own(kind, c)]
 
     words = []
     for c in range(m.n_in):
-        words += _strip_words(m, c, fx["in"][c])
+        words += _strip_words(m, c, fx["in"][own("in", c)])
     for c in range(m.n_out):
         words += _strip_words(m, m.out_offset + c, fx["out"][c])
     for c in range(m.n_in):
         words.append(m.in_send_word(c, level_raw(send("in", c))))
     for p in range(m.n_play):
-        linked = bool(st) and st["stereo"]["play"][p // 2]
         g = mixer_gain(send("play", p), usb)
         for side, mixer in enumerate(FX_MIXERS):
-            words.append(play_send_word(mixer, p, g if not linked or p % 2 == side else 0))
+            words.append(play_send_word(mixer, p,
+                                        g if not linked("play", p) or p % 2 == side else 0))
     for c in range(m.n_out):
         words.append(m.out_return_word(c, level_raw(fx["ret"][c])))
     words += _unit_words(m, REVERB, fx["reverb"])

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from . import fireface400 as ff400
 from . import fireface800 as ff800
 from . import fireface802 as ff
+from . import fx
 from . import ucx2
 from .fx_panels import LevelKnob
 from .theme import key_label, px
@@ -67,7 +68,8 @@ class ChannelSettings(QFrame):
         knob.setToolTip(("How much of the reverb and echo this output hears"
                          if self.kind == "out" else "Level into the reverb and echo")
                         + " · " + knob.toolTip().split("\n", 1)[1])
-        knob.changed.connect(lambda _v: self._set(values, self.channels, knob.level()))
+        knob.changed.connect(lambda _v: self._set(
+            values, fx.effect_channels(self.kind, self.channels), knob.level()))
         row.addWidget(knob)
         if self.kind == "out" and model.room_eq:
             room = QPushButton("Room EQ…")
