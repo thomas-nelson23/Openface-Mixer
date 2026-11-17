@@ -203,6 +203,26 @@ class FoldTest(WindowCase):
         self.assertNotIn(f"color:{theme.MUTED}", guitar.styleSheet())
         self.assertNotIn("folded", row.head.text())
 
+    def test_long_names_in_the_header_do_not_widen_the_window(self):
+        row = self.w.row_in
+        keys = [s.key for s in row.strips[:4]]
+        self.w.st["names"].update({key: f"The longest name a channel ever had {key}"
+                                   for key in keys})
+        self.addCleanup(self.w.rebuild_all)
+        self.addCleanup(lambda: [self.w.st["names"].pop(key) for key in keys])
+        self.w.rebuild_all()
+        for s in row.strips[:4]:
+            s.solo.click()
+            s.meter.push([1.0] * len(s.channels), 0.03)
+        self.settle()
+        size, least = self.w.size(), self.w.minimumSizeHint().width()
+        self.click(row.fold_btn)
+        self.assertIn("+1", row.head.text())                # three are named, one counted
+        self.assertIn("CLIP", row.head.text())
+        self.assertEqual(self.w.size(), size)
+        self.assertLessEqual(self.w.minimumSizeHint().width(), least)
+        self.assertLessEqual(row.head.geometry().right(), row.width())
+
     def test_names_in_a_folded_row(self):
         out, play = self.w.row_out, self.w.row_play
         self.click(out.fold_btn)

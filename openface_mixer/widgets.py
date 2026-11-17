@@ -889,6 +889,8 @@ class Row(QWidget):
         head.addWidget(self.fold_btn)
         self.head = QLabel()                  # the hint beside the title
         self.head.setTextFormat(Qt.RichText)
+        # cut off at the row's end when it is long: names never widen the window
+        self.head.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.set_subtitle(subtitle)
         head.addWidget(self.head, 1)
         lay.addLayout(head)
@@ -916,7 +918,7 @@ class Row(QWidget):
                     ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
                     ("Clip", RED, [s for s in self.strips if s.clipped])):
                 if strips:
-                    names = ", ".join(html.escape(s.name) for s in strips[:3])
+                    names = ", ".join(html.escape(s.title.text()) for s in strips[:3])
                     more = f" +{len(strips) - 3}" if len(strips) > 3 else ""
                     text += (f"{'&nbsp;' * 5}{caption_html('■ ' + word, color)}&nbsp;"
                              f"<span style='color:{TEXT.name()}'>{names}{more}</span>")
