@@ -538,6 +538,7 @@ class Strip(QFrame):
         self._selected = False
         self.folded = False
         self.clipped = False                 # the peak readout is red (until the meter is clicked)
+        self._flags = None                   # (solo, mute, clipped) as a folded strip shows them
         self.width_px = px(self.WIDTH)
         self.setFixedWidth(self.width_px)
         self.setObjectName("strip")
@@ -662,7 +663,8 @@ class Strip(QFrame):
         self.title.setText(QFontMetrics(self.title.font()).elidedText(self.name, Qt.ElideRight,
                                                                       width))
         name = self.name if self.name == self.standard else f"{self.name} ({self.standard})"
-        action = ("Click to edit this output's submix · " if self.kind == "out" else "")
+        action = ("Click to edit this output's submix · " if self.kind == "out" else
+                  "Click to unfold the row · " if self.folded else "")
         self.title.setToolTip(f"{name}\n{action}Double-click to rename · right-click for more")
         # names for screen readers (Orca reads these through AT-SPI)
         self.title.setAccessibleName(self.name)
@@ -702,12 +704,17 @@ class Strip(QFrame):
         self.title.setCursor(Qt.PointingHandCursor if on or self.kind == "out"
                              else Qt.ArrowCursor)
         self._set_title()
-        self.set_selected(self._selected)
+        self._flags = None
+        self.show_flags()
+        if not on:
+            self.set_selected(self._selected)
 
     def show_flags(self):
         """A folded strip shows what its buttons and readouts would: an amber edge while it is
         soloed, a red one once it clipped, a dimmed name while it is muted."""
-        if self.folded:
+        flags = (self.solo.isChecked(), self.mute.isChecked(), self.clipped)
+        if self.folded and flags != self._flags:
+            self._flags = flags
             self.set_selected(self._selected)
             self.flags_changed.emit()
 
@@ -902,14 +909,14 @@ class Row(QWidget):
         text = self._subtitle
         if self.folded:
             if self.kind != "out":
-                text = "folded · click a name to unfold"
+                text = "folded · click a name to unfold" if self.strips else "folded"
             for word, color, strips in (
                     ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
                     ("Clip", RED, [s for s in self.strips if s.clipped])):
                 if strips:
                     names = ", ".join(html.escape(s.name) for s in strips[:3])
                     more = f" +{len(strips) - 3}" if len(strips) > 3 else ""
-                    text += (f"{'&nbsp;' * 5}{caption_html(word, color)}&nbsp;"
+                    text += (f"{'&nbsp;' * 5}{caption_html('■ ' + word, color)}&nbsp;"
                              f"<span style='color:{TEXT.name()}'>{names}{more}</span>")
         self.head.setText(f"<span style='color:{MUTED};font-size:{px(10)}px'>{text}</span>")
 

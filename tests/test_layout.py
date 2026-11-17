@@ -194,8 +194,11 @@ class FoldTest(WindowCase):
         self.assertNotIn("CLIP", row.head.text())
         self.assertNotIn(f"border:1px solid {theme.RED.name()}", third.styleSheet())
         self.w.st["solo"]["in"][0] = False                              # as a remote would
-        self.w.sync_strips()
+        with mock.patch.object(guitar, "setStyleSheet") as restyled:
+            self.w.sync_strips()
+        restyled.assert_not_called()                                    # nothing of its changed
         self.assertNotIn("SOLO", row.head.text())
+        self.assertNotIn(theme.SOLO.name(), vocal.styleSheet())
         self.click(row.fold_btn)
         self.assertNotIn(f"color:{theme.MUTED}", guitar.styleSheet())
         self.assertNotIn("folded", row.head.text())
@@ -209,9 +212,12 @@ class FoldTest(WindowCase):
         self.assertEqual(self.w.st["selected"], first.pair)             # an output: its submix
         self.assertTrue(out.folded)
         self.assertNotIn("unfold", out.head.text())
+        self.assertNotIn("unfold", first.title.toolTip())
         self.assertIn("click a name to unfold", play.head.text())
+        self.assertIn("Click to unfold the row", play.strips[1].title.toolTip())
         self.click(play.strips[1].title)                                # a source: unfolds
         self.assertFalse(play.folded)
+        self.assertNotIn("unfold", play.strips[1].title.toolTip())
         self.click(play.strips[1].title)
         self.assertFalse(play.folded)
 
@@ -231,6 +237,7 @@ class FoldTest(WindowCase):
         self.w.channels_shown()
         self.settle()
         self.assertEqual(self.w.row_in.strips, [])
+        self.assertNotIn("click a name", self.w.row_in.head.text())     # there is none to click
         self.w.st["hidden"] = []
         self.w.channels_shown()
         self.click(self.w.row_in.fold_btn)
