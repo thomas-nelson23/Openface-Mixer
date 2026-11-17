@@ -1,10 +1,11 @@
+# Installed by scripts/install.sh, which fills in the full path of the command.
 [Desktop Entry]
 Type=Application
 Name=Openface Mixer
 GenericName=Audio Interface Mixer
-Comment=TotalMix-style mixer and settings for the RME Digiface USB
-Exec=openface-mixer
+Comment=TotalMix-style mixer and settings for RME audio interfaces
+Exec="@BINDIR@/openface-mixer"
 Icon=openface-mixer
 Terminal=false
 Categories=AudioVideo;Audio;Mixer;
-Keywords=RME;Digiface;TotalMix;ADAT;mixer;
+Keywords=RME;Digiface;Fireface;HDSPe;RayDAT;TotalMix;ADAT;mixer;
