@@ -95,7 +95,13 @@ app.MainWindow
 
 ### The mixer model
 
-- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked.
+- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked
+  (`model.set_stereo`): the pair then has one strip, and the right channel takes the left one's
+  level and mute. What the two channels had on their own (sends, mutes, the right channel's
+  fader group) is kept in `state["unlinked"]`, which is part of the mix, and comes back on
+  unlink; the right channel's name, colour, icon and effect settings simply stay stored. A
+  submix whose level or balance was changed while linked, and a pair with nothing kept, unlink
+  as in TotalMix: both channels at the pair's level, panned hard left and right.
 - **Outputs** are stereo pairs (0–17; on the Digiface pair 16 = phones at single speed).
 - The device decides which channels exist at the current rate and their names
   (`Device.channels()`, `chan_label()`, `pair_label()`); the window only builds strips for those.
@@ -134,7 +140,8 @@ app.MainWindow
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
   fader floor (−80 dB), so a group can go all the way down and come back up together.
-- **Presets** store `extract_mix(state)`: stereo links, mutes, sends, output levels and groups.
+- **Presets** store `extract_mix(state)`: stereo links and what they keep for unlinking, mutes,
+  sends, output levels and groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
 - **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's

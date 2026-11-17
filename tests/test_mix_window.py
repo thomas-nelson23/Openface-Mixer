@@ -1,6 +1,8 @@
-"""The window's part in protecting the mix: damaged files, failed imports and exports, and the
-mix kept before a recall. Opens the real main window offscreen with a stand-in engine and a
-throwaway config folder; skipped where PySide6 is not installed."""
+"""The window's part in protecting the mix: damaged files, failed imports and exports, the mix
+kept before a recall, and what a stereo link keeps. Opens
+the real main window offscreen with a stand-in engine and a throwaway config folder; skipped
+where PySide6 is not installed."""
+import copy
 import json
 import os
 import tempfile
@@ -283,6 +285,88 @@ class MixWindowTest(unittest.TestCase):
         w.clear_slot(2)
         self.assertIsNone(w.presets.slots[2])
         self.assertIsNone(self.app_module.PresetBank(config.presets_file(self.dev)).slots[2])
+
+    # ---------------------------------------------------------------- stereo link
+    def two_mono_channels(self, w):
+        """Inputs 1 and 2 with levels, pans, a mute, a group, a name, a colour and an icon of
+        their own. Returns the state to get back to."""
+        st = w.st
+        st["sends"]["in"][0][16], st["sends"]["in"][1][16] = [-6.0, -0.5], [-12.0, 0.25]
+        st["sends"]["in"][0][0], st["sends"]["in"][1][0] = [None, 0.3], [0.0, 1.0]
+        st["mute"]["in"][1] = True
+        st["groups"].update({"in:0": 1, "in:1": 2})
+        st["names"].update({"in:0": "Kick", "in:1": "Snare"})
+        st["colors"]["in:1"] = "#ff0000"
+        st["icons"]["in:1"] = "drum"
+        w.rebuild_all()
+        return copy.deepcopy(st)
+
+    def link(self, w, on):
+        strip = w.strips["in:0"]
+        self.assertNotEqual(strip.stereo.isChecked(), on)
+        strip.stereo.click()
+        self.qt.processEvents()                 # the row is rebuilt after the click
+        self.assertEqual(w.strips["in:0"].channels, [0, 1] if on else [0])
+        self.assertEqual("in:1" in w.strips, not on)
+
+    def test_st_button_brings_both_channels_back_as_they_were(self):
+        w = self.window()
+        before = self.two_mono_channels(w)
+        self.link(w, True)
+        self.assertEqual(w.st["sends"]["in"][1][16], [-6.0, 0.0])
+        self.assertEqual(w.strips["in:0"].name, "Kick")
+        self.assertFalse(w.strips["in:0"].mute.isChecked())
+        self.link(w, False)
+        self.assertEqual(w.st, before)
+        right = w.strips["in:1"]
+        self.assertEqual((right.name, right.group, right.mute.isChecked()), ("Snare", 2, True))
+        self.assertAlmostEqual(right.fader.db(), -12.0)
+        self.assertEqual(right.pan.value, 0.25)
+
+    def test_a_level_set_while_linked_stays_on_both_channels(self):
+        w = self.window()
+        before = self.two_mono_channels(w)
+        self.link(w, True)
+        w.move_fader(w.strips["in:0"], -3.0)        # in the phones submix
+        self.link(w, False)
+        self.assertEqual((w.st["sends"]["in"][0][16], w.st["sends"]["in"][1][16]),
+                         ([-3.0, -1.0], [-3.0, 1.0]))
+        self.assertEqual((w.st["sends"]["in"][0][0], w.st["sends"]["in"][1][0]),
+                         (before["sends"]["in"][0][0], before["sends"]["in"][1][0]))
+        self.assertEqual(w.st["groups"], before["groups"])
+
+    def test_link_survives_the_remote_presets_files_and_a_restart(self):
+        w = self.window()
+        before = m.extract_mix(self.two_mono_channels(w))
+
+        def remote_link(w, on):                                 # the OSC remote
+            w.remote_message(f"/input/{int(on)}/stereo", [float(on)])
+            self.qt.processEvents()             # the row is rebuilt after the message
+            self.assertEqual("in:1" in w.strips, not on)
+
+        def unlinks_to_before(w):
+            self.assertTrue(w.st["stereo"]["in"][0])
+            remote_link(w, False)
+            self.assertEqual(m.extract_mix(w.st), before)
+            self.assertEqual(w.strips["in:1"].name, "Snare")
+            remote_link(w, True)
+
+        remote_link(w, True)
+        unlinks_to_before(w)
+        linked = m.extract_mix(w.st)
+        w.presets.store(0, "Linked", linked)
+        self.save_name.return_value = (str(self.dir / "linked.json"), "")
+        w.export_mix()
+        self.open_name.return_value = self.save_name.return_value
+        for step in (lambda: w.recall_slot(0), w.import_mix, w.restore_previous_mix):
+            w.reset_mix()                                       # nothing linked, nothing kept
+            self.assertEqual(w.st["unlinked"], {})
+            step()
+            unlinks_to_before(w)
+        w.save()
+        self.close(w)
+        unlinks_to_before(self.window())
+        self.warning.assert_not_called()
 
 
 if __name__ == "__main__":

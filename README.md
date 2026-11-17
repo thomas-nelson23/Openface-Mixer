@@ -35,6 +35,8 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
+- **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
+  centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 and UCX II also the AES/S/PDIF and optical options of TotalMix's settings
   dialog, on the Fireface 800 and 400 the line levels and the S/PDIF, optical and word clock

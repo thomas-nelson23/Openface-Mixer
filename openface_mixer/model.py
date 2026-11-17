@@ -39,7 +39,7 @@ FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
 STATE_VERSION = 6        # 6: mono channels pan with constant power (convert_pan_law)
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
-MIX_KEYS = ("stereo", "mute", "sends", "out", "groups")
+MIX_KEYS = ("stereo", "mute", "sends", "out", "groups", "unlinked")
 
 
 # ------------------------------------------------------------------ dB helpers
@@ -140,6 +140,7 @@ def default_state(selected=N_PAIRS - 1):
         },
         "out": [{"gain": 0.0, "mute": False} for _ in range(N_PAIRS)],
         "groups": {},                     # strip key ("in:0", "out:16") -> fader group 1..4
+        "unlinked": {},                   # what linked pairs go back to, see set_stereo
         "names": {},                      # strip key -> custom name
         "colors": {},                     # strip key -> "#rrggbb" (TotalMix's channel colours)
         "icons": {},                      # strip key -> icon name (theme.CHANNEL_ICONS)
@@ -235,6 +236,20 @@ def checked_mix(mix, strict=True):
         return {k: g for k, g in v.items()
                 if (valid_key(k) and is_index(g, N_GROUPS + 1) and g) or bad(False)}
 
+    def unlinked(v, _full):
+        if not isinstance(v, dict):
+            return bad({})
+        own = {}
+        for key, o in v.items():     # the left channel of a source pair -> what was kept
+            kind, c = parse_key(key) if valid_key(key) else ("out", 0)
+            if not (kind != "out" and c % 2 == 0 and isinstance(o, dict)
+                    and is_index(o.get("group"), N_GROUPS + 1)):
+                bad(None)
+                continue
+            own[key] = {"sends": sends(o.get("sends"), base["sends"]["in"][:2]),
+                        "mute": flags(o.get("mute"), [False, False]), "group": o["group"]}
+        return own
+
     def both_kinds(check):
         def checked(v, full):
             v = v if isinstance(v, dict) else bad({})
@@ -242,8 +257,11 @@ def checked_mix(mix, strict=True):
         return checked
 
     checks = {"stereo": both_kinds(flags), "mute": both_kinds(flags), "sends": both_kinds(sends),
-              "out": outputs, "groups": groups}
-    return {k: checks[k](mix[k], base[k]) for k in MIX_KEYS if k in mix}
+              "out": outputs, "groups": groups, "unlinked": unlinked}
+    checked = {k: checks[k](mix[k], base[k]) for k in MIX_KEYS if k in mix}
+    if "stereo" in checked:             # links from a file without them: nothing was kept
+        checked.setdefault("unlinked", {})
+    return checked
 
 
 def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
@@ -376,6 +394,48 @@ def strip_channels(st, kind, c):
     return [c]
 
 
+def set_stereo(st, kind, c, on):
+    """Link channels c (the left one) and c + 1 to a stereo pair, or unlink them.
+
+    Linked, the pair has one strip: the right channel takes the left one's level and mute, in
+    every submix, and pan is the balance of the two, at the centre. What the two channels had
+    on their own is kept in st["unlinked"] (their sends, their mutes and the right channel's
+    fader group; its name, colour and icon stay where they are, as its effect settings do, see
+    fx.effect_channels) and comes back when the pair is unlinked, so that link and unlink with
+    nothing changed in between gives the mix as it was.
+
+    A submix whose level or balance was changed while linked is unlinked as TotalMix does it:
+    both channels at the pair's level, panned hard left and right, which sounds the same. So
+    is a pair with nothing kept (linked from the start, or by an older version). If the mute
+    was changed, both channels keep the pair's."""
+    if st["stereo"][kind][c // 2] == on:
+        return
+    st["stereo"][kind][c // 2] = on
+    key, right_key = strip_key(kind, c), strip_key(kind, c + 1)
+    left, right = st["sends"][kind][c], st["sends"][kind][c + 1]
+    mute, solo = st["mute"][kind], st["solo"][kind]
+    own = st["unlinked"].pop(key, None)
+    if on:
+        st["unlinked"][key] = {"sends": copy.deepcopy([left, right]),
+                               "mute": [mute[c], mute[c + 1]],
+                               "group": st["groups"].pop(right_key, 0)}
+        for lt, rt in zip(left, right):
+            lt[1] = 0.0
+            rt[:] = lt
+    else:
+        for p, (lt, rt) in enumerate(zip(left, right)):
+            if own and lt == rt == [own["sends"][0][p][0], 0.0]:
+                lt[:], rt[:] = own["sends"][0][p], own["sends"][1][p]
+            else:
+                rt[0] = lt[0]
+                lt[1], rt[1] = -1.0, 1.0
+        if own and own["group"]:
+            st["groups"][right_key] = own["group"]
+    kept = own and not on and mute[c] == own["mute"][0]
+    mute[c + 1] = own["mute"][1] if kept else mute[c]
+    solo[c + 1] = solo[c]
+
+
 def get_strip_db(st, key):
     """The value the strip's fader shows: send into the selected pair, or the output master."""
     kind, idx = parse_key(key)
@@ -483,16 +543,25 @@ def apply_mix(st, mix):
 def clear_sends_outside(st, channels):
     """Switch off every send from a source or into an output pair the interface doesn't have,
     so a mix made on a bigger interface leaves no routing that no strip shows, and take such
-    strips out of their fader groups, so that no group can bring a send back. channels(kind)
-    gives the interface's channels of a kind at any sample rate (Device.all_channels): what a
-    higher rate hides for a while is kept."""
+    strips out of their fader groups, so that no group can bring a send back. The same for
+    what is kept for unlinking a pair (set_stereo). channels(kind) gives the interface's
+    channels of a kind at any sample rate (Device.all_channels): what a higher rate hides for
+    a while is kept."""
     outs = channels("out")
-    for kind in ("in", "play"):
-        have = channels(kind)
-        for c, row in enumerate(st["sends"][kind]):
+
+    def clear(rows, have):
+        for c, row in rows:
             for p, send in enumerate(row):
                 if c not in have or 2 * p not in outs:
                     send[:] = [None, 0.0]
+    for kind in ("in", "play"):
+        clear(enumerate(st["sends"][kind]), channels(kind))
+    for key, own in list(st["unlinked"].items()):
+        kind, c = parse_key(key)
+        if {c, c + 1} <= channels(kind):
+            clear(enumerate(own["sends"], c), channels(kind))
+        else:
+            del st["unlinked"][key]
 
     def missing(key):
         kind, idx = parse_key(key)

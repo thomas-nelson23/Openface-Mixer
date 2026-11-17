@@ -1,5 +1,7 @@
 import copy
+import json
 import math
+import random
 import unittest
 
 from openface_mixer import model as m
@@ -35,6 +37,14 @@ def damaged_mixes():
     for groups in ({"in:0": "x"}, {"bogus": 2}, {"in:99": 1}, {"in:0": 9}, {"in:0": 0},
                    {"out:1": 1.5}, {"in:0": True}, {7: 1}):
         yield f"groups are {groups!r}", mix(lambda mx: mx.update(groups=groups))
+    kept = {"sends": [[[None, 0.0]] * m.N_PAIRS] * 2, "mute": [False, True], "group": 0}
+    for unlinked in ({"in:1": kept}, {"out:0": kept}, {"in:36": kept}, {"bogus": kept}, {7: kept},
+                     {"in:0": 5}, {"in:0": {}}, {"in:0": dict(kept, group=9)},
+                     {"in:0": dict(kept, group="x")}, {"in:0": dict(kept, mute="x")},
+                     {"in:0": dict(kept, mute=[1, 0])}, {"in:0": dict(kept, sends="x")},
+                     {"in:0": dict(kept, sends=["x"])}, {"in:0": dict(kept, sends=[[["x", 0]]])},
+                     {"in:0": {k: v for k, v in kept.items() if k != "sends"}}):
+        yield f"unlinked is {unlinked!r:.60}", mix(lambda mx: mx.update(unlinked=unlinked))
 
 
 class TaperTest(unittest.TestCase):
@@ -193,6 +203,158 @@ class GroupTest(unittest.TestCase):
         m.set_strip_db(self.st, "play:0", -4.0)
         self.assertEqual(self.st["sends"]["play"][0][0][0], -4.0)
         self.assertEqual(self.st["sends"]["play"][1][0][0], -4.0)
+
+
+class StereoLinkTest(unittest.TestCase):
+    """Linking a pair keeps what its two channels had; unlinking brings it back."""
+
+    def setUp(self):
+        rng = random.Random(3)
+        self.st = st = m.default_state(16)
+        for c in (4, 5):
+            st["sends"]["in"][c] = [[rng.choice((None, -20.0, 0.0, 3.5)),
+                                     rng.choice((-1.0, -0.25, 0.0, 0.7))]
+                                    for _ in range(m.N_PAIRS)]
+        st["sends"]["in"][4][16] = [-6.0, -0.5]
+        st["sends"]["in"][5][16] = [-12.0, 0.25]
+        st["mute"]["in"][5] = True
+        st["groups"] = {"in:4": 1, "in:5": 2, "in:6": 2}
+        st["names"] = {"in:4": "Kick", "in:5": "Snare"}
+        st["colors"] = {"in:5": "#ff0000"}
+        st["icons"] = {"in:5": "drum"}
+        self.before = copy.deepcopy(st)
+
+    def test_link_then_unlink_gives_the_state_from_before(self):
+        m.set_stereo(self.st, "in", 4, True)
+        self.assertNotEqual(self.st, self.before)
+        m.set_stereo(self.st, "in", 4, False)
+        self.assertEqual(self.st, self.before)
+
+    def test_a_linked_pair_has_one_level_and_a_balance(self):
+        st = self.st
+        m.set_stereo(st, "in", 4, True)
+        self.assertEqual(st["sends"]["in"][5], st["sends"]["in"][4])
+        for (db, pan), (was, _pan) in zip(st["sends"]["in"][4], self.before["sends"]["in"][4]):
+            self.assertEqual((db, pan), (was, 0.0))
+        self.assertEqual(st["mute"]["in"][4:6], [False, False])
+        self.assertEqual(st["groups"], {"in:4": 1, "in:6": 2})      # the right one has no strip
+        self.assertEqual(st["names"], self.before["names"])
+        g = m.compute_matrix(st)
+        self.assertEqual((gain(g, 32, 4), gain(g, 33, 4)), (m.array("f", [m.db2lin(-6.0)])[0], 0))
+        self.assertEqual((gain(g, 32, 5), gain(g, 33, 5)), (0, m.array("f", [m.db2lin(-6.0)])[0]))
+        self.assertEqual(m.checked_mix(m.extract_mix(st)), m.extract_mix(st))
+
+    def test_a_submix_changed_while_linked_unlinks_as_totalmix_does(self):
+        st = self.st
+        m.set_stereo(st, "in", 4, True)
+        st["selected"] = 16
+        m.set_strip_db(st, "in:4", -3.0)                    # the level into the phones
+        st["sends"]["in"][4][2][1] = st["sends"]["in"][5][2][1] = 0.4      # a balance
+        linked = m.compute_matrix(st)
+        m.set_stereo(st, "in", 4, False)
+        self.assertEqual(st["mute"], self.before["mute"])   # the right channel is muted again
+        st["mute"]["in"][5] = False
+        for c, pan in ((4, -1.0), (5, 1.0)):
+            self.assertEqual(st["sends"]["in"][c][16], [-3.0, pan])
+            self.assertEqual(st["sends"]["in"][c][2], [self.before["sends"]["in"][4][2][0], pan])
+        # the phones hear what they heard while it was linked
+        for o in (32, 33):
+            for c in (4, 5):
+                self.assertAlmostEqual(gain(m.compute_matrix(st), o, c), gain(linked, o, c))
+        # every other submix is as it was before the link
+        for p in set(range(m.N_PAIRS)) - {2, 16}:
+            for c in (4, 5):
+                self.assertEqual(st["sends"]["in"][c][p], self.before["sends"]["in"][c][p])
+        self.assertEqual(st["groups"], self.before["groups"])
+        self.assertEqual(st["unlinked"], {})
+
+    def test_a_mute_changed_while_linked_stays_on_both(self):
+        st = self.st
+        m.set_stereo(st, "in", 4, True)
+        st["mute"]["in"][4] = st["mute"]["in"][5] = True
+        m.set_stereo(st, "in", 4, False)
+        self.assertEqual(st["mute"]["in"][4:6], [True, True])
+        st["mute"]["in"][5] = False
+        m.set_stereo(st, "in", 4, True)
+        for on in (False, True):                            # unmuted, and back: not a change
+            st["mute"]["in"][4] = st["mute"]["in"][5] = on
+        m.set_stereo(st, "in", 4, False)
+        self.assertEqual(st["mute"]["in"][4:6], [True, False])
+
+    def test_a_pair_with_nothing_kept_unlinks_hard_left_and_right(self):
+        st = self.st                                        # playback pairs start linked
+        st["sends"]["play"][0][3], st["sends"]["play"][1][3] = [-9.0, 0.5], [-9.0, 0.5]
+        m.set_stereo(st, "play", 0, False)
+        self.assertEqual(st["sends"]["play"][0][0], [0.0, -1.0])
+        self.assertEqual(st["sends"]["play"][1][0], [0.0, 1.0])
+        self.assertEqual((st["sends"]["play"][0][3], st["sends"]["play"][1][3]),
+                         ([-9.0, -1.0], [-9.0, 1.0]))
+        # and one from a version that kept nothing
+        old = copy.deepcopy(self.before)
+        old["stereo"]["in"][2] = True
+        old["sends"]["in"][4][16], old["sends"]["in"][5][16] = [-6.0, 0.0], [-6.0, 0.0]
+        del old["unlinked"]
+        st = m.upgrade_state(old)
+        self.assertEqual(st["unlinked"], {})
+        m.set_stereo(st, "in", 4, False)
+        self.assertEqual((st["sends"]["in"][4][16], st["sends"]["in"][5][16]),
+                         ([-6.0, -1.0], [-6.0, 1.0]))
+
+    def test_asking_for_what_it_is_already_changes_nothing(self):
+        m.set_stereo(self.st, "in", 4, False)
+        self.assertEqual(self.st, self.before)
+        m.set_stereo(self.st, "in", 4, True)
+        linked = copy.deepcopy(self.st)
+        m.set_stereo(self.st, "in", 4, True)
+        self.assertEqual(self.st, linked)
+
+    def test_solo_follows_the_left_channel(self):
+        self.st["solo"]["in"][4] = True
+        m.set_stereo(self.st, "in", 4, True)
+        self.assertEqual(self.st["solo"]["in"][4:6], [True, True])
+
+    def test_what_is_kept_is_part_of_the_mix(self):
+        """A preset or mix file made while linked unlinks to the same state anywhere."""
+        m.set_stereo(self.st, "in", 4, True)
+        mix = json.loads(json.dumps(m.extract_mix(self.st)))        # through a file
+        other = m.apply_mix(m.default_state(16), mix)
+        m.set_stereo(other, "in", 4, False)
+        self.assertEqual(m.extract_mix(other), m.extract_mix(self.before))
+
+    def test_a_mix_from_before_takes_the_place_of_what_was_kept(self):
+        m.set_stereo(self.st, "in", 4, True)
+        old = {k: v for k, v in m.extract_mix(self.st).items() if k != "unlinked"}
+        st = m.apply_mix(copy.deepcopy(self.st), old)
+        self.assertEqual(st["unlinked"], {})
+        # a part of a mix that says nothing about links leaves it alone
+        st = m.apply_mix(copy.deepcopy(self.st), {"out": old["out"]})
+        self.assertEqual(st["unlinked"], self.st["unlinked"])
+
+    def test_nothing_is_kept_for_channels_the_interface_lacks(self):
+        st = self.st
+        m.set_stereo(st, "in", 4, True)
+        st["sends"]["in"][8][3] = [-6.0, 0.0]
+        m.set_stereo(st, "in", 8, True)
+        have = {"in": set(range(8)), "play": set(range(8)), "out": {0, 1, 32, 33}}
+        m.clear_sends_outside(st, have.__getitem__)
+        self.assertEqual(list(st["unlinked"]), ["in:4"])
+        m.set_stereo(st, "in", 4, False)
+        for c in (4, 5):
+            for p, send in enumerate(st["sends"]["in"][c]):
+                self.assertEqual(send, self.before["sends"]["in"][c][p] if p in (0, 16)
+                                 else [None, 0.0])
+
+    def test_damaged_keeping_is_dropped_on_repair(self):
+        m.set_stereo(self.st, "in", 4, True)
+        mix = m.extract_mix(self.st)
+        mix["unlinked"]["in:6"] = {"group": 7}
+        mix["unlinked"]["in:4"]["sends"][1][3] = "x"
+        mix["unlinked"]["in:4"]["mute"] = [True]
+        fixed = m.checked_mix(mix, strict=False)["unlinked"]
+        self.assertEqual(list(fixed), ["in:4"])
+        self.assertEqual(fixed["in:4"]["sends"][1][3], [None, 0.0])
+        self.assertEqual(fixed["in:4"]["sends"][1][16], [-12.0, 0.25])
+        self.assertEqual(fixed["in:4"]["mute"], [True, False])
 
 
 class MixTest(unittest.TestCase):

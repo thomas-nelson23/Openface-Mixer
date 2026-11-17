@@ -38,7 +38,6 @@ def old_state(rng, dev, hot=False):
     hot: with levels up to the fader's top, which a centred send can't keep (see held())."""
     st = m.default_state(dev.phones_pair(1))
     st["version"] = 5
-    st.pop("unlinked", None)          # the files of then had none
     pairs = sorted({c // 2 for c in dev.all_channels("out")})
     for kind in ("in", "play"):
         st["stereo"][kind] = [rng.random() < 0.4 for _ in st["stereo"][kind]]
@@ -54,6 +53,11 @@ def old_state(rng, dev, hot=False):
             if st["stereo"][kind][c // 2] and c % 2:      # a linked pair shares level and pan
                 st["sends"][kind][c] = copy.deepcopy(st["sends"][kind][c - 1])
     return st
+
+
+def saved(st):
+    """st as version 5 wrote it: without what today's links keep."""
+    return json.dumps({k: v for k, v in st.items() if k != "unlinked"})
 
 
 def held(old, new):
@@ -145,7 +149,7 @@ class ConversionTest(unittest.TestCase):
                     old = old_state(rng, dev)
                     path = config.state_file(dev)
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(json.dumps(old))
+                    path.write_text(saved(old))
                     m.clear_sends_outside(old, dev.all_channels)    # as loading does
                     new, problem = config.load_state(dev)
                     self.assertIsNone(problem)
@@ -160,7 +164,7 @@ class ConversionTest(unittest.TestCase):
         for key, dev in DEVICES.items():
             with self.subTest(key):
                 olds = [old_state(rng, dev) for _ in range(2)]
-                mixes = [{k: st[k] for k in m.MIX_KEYS if k in st} for st in olds]
+                mixes = [{k: st[k] for k in m.MIX_KEYS if k != "unlinked"} for st in olds]
                 path = self.dir / "presets.json"
                 path.write_text(json.dumps({"version": 1, "slots": [
                     {"name": "A", "mix": mixes[0]}, None, {"name": "B", "mix": mixes[1]}]}))

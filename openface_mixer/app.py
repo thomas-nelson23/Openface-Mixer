@@ -27,10 +27,10 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
     compute_matrix, compute_out_gains, default_state, display_name, extract_mix, get_strip_db,
-    group_follow, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode,
-    strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
+    group_follow, set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon,
+    speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import RemoteLink, RemotePanel, remote_settings
@@ -646,20 +646,7 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def toggle_stereo(self, kind, c, on):
-        st = self.st
-        st["stereo"][kind][c // 2] = on
-        # keep the audible result similar: stereo uses balance, mono L/R get hard-panned
-        for p in range(N_PAIRS):
-            left, right = st["sends"][kind][c][p], st["sends"][kind][c + 1][p]
-            right[0] = left[0]
-            if on:
-                left[1] = right[1] = 0.0
-            else:
-                left[1], right[1] = -1.0, 1.0
-        st["mute"][kind][c + 1] = st["mute"][kind][c]
-        st["solo"][kind][c + 1] = st["solo"][kind][c]
-        st["groups"].pop(strip_key(kind, c + 1), None)   # the right channel no longer has a strip
-        st["names"].pop(strip_key(kind, c + 1), None)
+        set_stereo(self.st, kind, c, on)
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
 
