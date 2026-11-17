@@ -153,9 +153,12 @@ class Engine:
         """Start the engine at every login from now on, so it restores the device's mix. For
         once the interface has been seen: nobody gets an engine and a playback sink for a
         device they don't have."""
+        def systemctl(verb):
+            return subprocess.run(["systemctl", "--user", verb, self.dev.service],
+                                  capture_output=True, timeout=5).returncode
         try:
-            subprocess.run(["systemctl", "--user", "enable", self.dev.service],
-                           capture_output=True, timeout=5)
+            if systemctl("is-enabled"):     # enabling again would make systemd reload its units
+                systemctl("enable")
         except (OSError, subprocess.TimeoutExpired):
             pass
 

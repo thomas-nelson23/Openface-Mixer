@@ -8,12 +8,12 @@ from openface_mixer.devices import DEVICES
 class ServiceTest(unittest.TestCase):
     """Starting an engine does not enable it: that waits until the interface has been seen."""
 
-    def run_recorded(self, call):
+    def run_recorded(self, call, enabled=True):
         calls = []
 
         def run(cmd, **_kw):
             calls.append(cmd)
-            return mock.Mock(returncode=0)
+            return mock.Mock(returncode=int("is-enabled" in cmd and not enabled))
         with mock.patch.object(engine.subprocess, "run", run):
             call()
         return [c[2:] for c in calls if c[:2] == ["systemctl", "--user"]]
@@ -23,7 +23,9 @@ class ServiceTest(unittest.TestCase):
                           ("ff802", "openface-mixer-engine@ff802.service")):
             e = engine.Engine(DEVICES[key])
             self.assertEqual(self.run_recorded(e.start), [["cat", unit], ["start", unit]])
-            self.assertEqual(self.run_recorded(e.enable), [["enable", unit]])
+            self.assertEqual(self.run_recorded(e.enable, enabled=False),
+                             [["is-enabled", unit], ["enable", unit]])
+            self.assertEqual(self.run_recorded(e.enable), [["is-enabled", unit]])
 
     def test_enable_without_systemd(self):
         for error in (FileNotFoundError, engine.subprocess.TimeoutExpired("systemctl", 5)):
