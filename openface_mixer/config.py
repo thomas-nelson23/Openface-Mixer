@@ -6,6 +6,7 @@ Each device has its own state, matrix and presets: the Digiface's in the config 
 import json
 import math
 import os
+import shutil
 import struct
 from pathlib import Path
 
@@ -26,6 +27,14 @@ UI_FILE = CONFIG_DIR / "ui.json"            # UI scale, shared by all devices
 UI_SCALE_DEFAULT = 1.0
 UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
 UI_SCALES = (0.8, 1.0, 1.25, 1.5, 1.75, 2.0)
+
+
+def launcher():
+    """The openface-mixer command by its full path, for entries that start it at login, where
+    PATH may not hold it. scripts/install.sh puts this package in <prefix>/share/openface-mixer
+    and the command in <prefix>/bin; from a checkout it is whatever is on PATH."""
+    cmd = Path(__file__).resolve().parents[3] / "bin" / APP_ID
+    return str(cmd) if cmd.is_file() else shutil.which(APP_ID) or APP_ID
 
 
 def device_dir(dev=DEFAULT):

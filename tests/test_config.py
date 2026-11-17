@@ -37,6 +37,24 @@ class MatrixFileTest(unittest.TestCase):
         self.assertTrue(st["solo"]["in"][0])   # the live state keeps it
 
 
+class LauncherTest(unittest.TestCase):
+    def test_installed_copy_uses_its_own_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp).resolve()
+            cmd = prefix / "bin" / "openface-mixer"
+            module = prefix / "share" / "openface-mixer" / "openface_mixer" / "config.py"
+            with mock.patch.object(config, "__file__", str(module)), \
+                    mock.patch.object(config.shutil, "which", lambda name: None):
+                self.assertEqual(config.launcher(), "openface-mixer")    # nothing installed
+                cmd.parent.mkdir()
+                cmd.write_text("#!/bin/sh\n")
+                self.assertEqual(config.launcher(), str(cmd))
+
+    def test_checkout_uses_path(self):
+        with mock.patch.object(config.shutil, "which", lambda name: f"/opt/bin/{name}"):
+            self.assertEqual(config.launcher(), "/opt/bin/openface-mixer")
+
+
 class UiScaleTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
