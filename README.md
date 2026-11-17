@@ -114,9 +114,10 @@ This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enabl
 `openface-mixer-engine` user service. Remove it with `make uninstall`.
 
 To update later, use **Updates** in the settings panel: it checks GitHub for new commits on
-`main` and, on **Update and restart**, backs up `~/.config/openface-mixer`, pulls the checkout
-you installed from, reinstalls and restarts. Keep that checkout where it is; if it has local
-changes or isn't on `main`, update by hand with `git pull && make install`.
+`main` and, on **Update and restart**, backs up `~/.config/openface-mixer` (the newest three
+backups are kept), pulls the checkout you installed from, reinstalls and restarts. Keep that
+checkout where it is; if it has local changes or isn't on `main`, update by hand with
+`git pull && make install`.
 
 ## First run
 
@@ -145,6 +146,7 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
 | Recall a preset | Click a lit slot |
+| Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
@@ -320,9 +322,12 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | Path | Contents |
 | --- | --- |
 | `~/.config/openface-mixer/state.json` | Current mix and UI state (Digiface) |
+| `~/.config/openface-mixer/state.json.bak` | The save before the current one, loaded if `state.json` can't be read (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
+| `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
+| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import or reset, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
-| `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
+| `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |

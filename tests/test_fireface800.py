@@ -150,6 +150,16 @@ class LayoutTest(unittest.TestCase):
         self.assertFalse(ff.upgrade_settings({"clock": "word"})["edited"])
         self.assertFalse(ff.upgrade_settings(None)["edited"])
 
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        s = ff.upgrade_settings({"clock": [], "known": "yes", "in_level": 4, "emphasis": None,
+                                 "jacks": ["rear", 7, None], "p48": [True, "x", 1, False],
+                                 "limiter": True, "out_level": "low"})
+        self.assertEqual((s["clock"], s["known"], s["in_level"], s["emphasis"]),
+                         ("internal", False, "low", False))
+        self.assertEqual(s["jacks"], ["rear", "front", "front"])
+        self.assertEqual(s["p48"], [True, False, False, False])
+        self.assertEqual((s["limiter"], s["out_level"]), (True, "low"))     # good ones stay
+
 
 class DeviceTest(unittest.TestCase):
     def test_device(self):

@@ -224,3 +224,24 @@ class RemoteSettingsTest(unittest.TestCase):
         r = osc.remote_settings(st)
         self.assertEqual((r["enabled"], r["port"], r["host"], r["out_port"]),
                          (True, 8000, "10.0.0.5", 9001))
+
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        for value in ("x", [1], 7, None):
+            st = {"remote": value}
+            self.assertEqual(osc.remote_settings(st), osc.remote_settings({}))
+        st = {"remote": {"enabled": "yes", "port": "7001", "host": 5, "out_port": 9001.5,
+                         "levels": None}}
+        self.assertEqual(osc.remote_settings(st), osc.remote_settings({}))
+        st = {"remote": {"enabled": True, "port": 1.5, "host": "studio.local"}}
+        r = osc.remote_settings(st)
+        self.assertEqual((r["enabled"], r["port"], r["host"]), (True, 7001, "studio.local"))
+
+    def test_ports_outside_what_the_settings_offer_go_back_to_their_defaults(self):
+        for port, out_port in ((70000, 0), (-5, -1), (22, 70000), (2 ** 40, 2 ** 40)):
+            r = osc.remote_settings({"remote": {"enabled": True, "port": port,
+                                                "out_port": out_port}})
+            self.assertEqual((r["port"], r["out_port"]), (7001, 9001))
+        r = osc.remote_settings({"remote": {"port": 1024, "out_port": 1}})
+        self.assertEqual((r["port"], r["out_port"]), (1024, 1))
+        r = osc.remote_settings({"remote": {"port": 65535, "out_port": 65535}})
+        self.assertEqual((r["port"], r["out_port"]), (65535, 65535))

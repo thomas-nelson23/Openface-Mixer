@@ -4,7 +4,9 @@ These are what the ARC USB's keys and encoder drive. Pure Python, no Qt. They li
 st["control_room"] (not in MIX_KEYS, so presets don't recall them, as in TotalMix) and are applied
 on top of the gain matrix and output masters that model.py computes, by apply().
 """
-from .model import FADER_MAX_DB, FADER_MIN_DB, N_IN, N_PAIRS, N_SRC, NEG_INF, db2lin
+from .model import (
+    FADER_MAX_DB, FADER_MIN_DB, N_IN, N_PAIRS, N_SRC, NEG_INF, db2lin, is_index, is_num,
+)
 
 ENCODER_STEP_DB = 0.5     # per encoder click, like TotalMix's ARC volume steps
 ENCODER_TARGETS = ("main", "phones")
@@ -34,7 +36,7 @@ def default_control_room(phones=N_PAIRS - 1):
 
 def control_room(st, phones=None):
     """st["control_room"], created or completed with defaults. phones is the device's phones
-    pair, used only when the control room is created (config.load_state passes it)."""
+    pair, used only when the control room is created (load() passes it)."""
     cr = st.setdefault("control_room", {})
     if cr and cr.get("version", 1) < 2:
         # Up to version 1 the Speaker B pair (AD1 3/4 by default) kept its own mix while
@@ -45,6 +47,32 @@ def control_room(st, phones=None):
         cr["version"] = CR_VERSION
     for k, v in default_control_room(N_PAIRS - 1 if phones is None else phones).items():
         cr.setdefault(k, v)
+    return cr
+
+
+def load(st, phones):
+    """The control room of a state just read from disk: completed as in control_room(), with
+    anything of the wrong type or out of range (a damaged or hand-edited file) put back to its
+    default, and Talkback off, which never survives a restart."""
+    def pair(v):
+        return is_index(v, N_PAIRS)
+
+    def cut(v):
+        return is_num(v) and v <= 0
+
+    valid = {
+        "main": pair, "phones": pair, "main_b": lambda v: v == NO_PAIR or pair(v),
+        "talkback_src": lambda v: is_index(v, N_IN), "ext_src": lambda v: is_index(v, N_IN - 1),
+        "talkback_dests": lambda v: isinstance(v, list) and all(pair(p) for p in v),
+        "dim_db": cut, "talkback_dim_db": cut, "encoder": lambda v: v in ENCODER_TARGETS,
+    }
+    if not isinstance(st.get("control_room"), dict):
+        st["control_room"] = {}
+    cr = st["control_room"]
+    for k, default in default_control_room(phones).items():
+        if k in cr and not valid.get(k, lambda v: isinstance(v, type(default)))(cr[k]):
+            cr[k] = default
+    control_room(st, phones)["talkback"] = False
     return cr
 
 

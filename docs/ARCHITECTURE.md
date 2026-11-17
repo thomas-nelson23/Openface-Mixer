@@ -44,8 +44,10 @@ the engine is the same for all of them.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
-  to date; files from before the 36-channel layout are moved into place. When it exits, the
-  interface keeps mixing with the last mix.
+  to date; files from before the 36-channel layout are moved into place. A file it does not
+  recognise (another format, cut short, or with anything left over) is ignored as a whole
+  (`matrix_file.c`): the engine logs that and starts with the default routing, playback n to
+  output n, as on a fresh install. When it exits, the interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
   mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
   heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
@@ -128,6 +130,20 @@ app.MainWindow
 - **Presets** store `extract_mix(state)`: stereo links, mutes, sends, output levels and groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
+- **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's
+  shape and raises `ValueError` if any part of it is damaged; presets, imported mixes and
+  `apply_mix()` all go through it, so a damaged file is refused whole and the live mix is never
+  left half-changed. `config.load_state()` reads `state.json` the same strict way, falls back
+  to `state.json.bak` (the save before it, kept by `atomic_write`), and only then repairs what
+  it can; the window says once which of the two happened. Everything outside the mix (names,
+  control room, remote, device and effect settings) is put back to its default where its type
+  or range is wrong, so no file can stop the window from opening. A preset slot that is
+  damaged shows as empty; the next save keeps that `presets.json` as `presets.json.bak`.
+- **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
+  which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
+  for *Restore previous mix*, then clears the sends and fader groups of channels the device
+  doesn't have at any sample rate (`model.clear_sends_outside`, also run when the state is
+  loaded).
 
 ### Updating flow
 

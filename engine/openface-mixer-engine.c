@@ -37,6 +37,7 @@
 
 #include "backend.h"
 #include "digiface_usb.h"
+#include "matrix_file.h"
 #include "shm_layout.h"
 
 #define N_IN    OFM_N_IN
@@ -45,20 +46,6 @@
 #define N_OUT   OFM_N_OUT
 
 #define SINK_NAME       "openface_mixer_playback"  /* other devices than the Digiface: _<key> added */
-
-/* matrix.bin: "OFM4", gain[][], out_gain[]. Older files are still read, see load_matrix(). */
-#define MATRIX_FILE_MAGIC    0x344d464fu
-#define MATRIX_FILE_MAGIC_V3 0x334d464fu /* "OFM3": gains at the old 34 x 66 size */
-#define MATRIX_FILE_MAGIC_V2 0x324d464fu /* "OFM2": mixer mode, then as OFM3 */
-#define DEVICE_BLOCK_MAGIC   0x3244464fu /* "OFD2": dev_config, count, dev_cmd[count] */
-#define DEVICE_BLOCK_MAGIC_V1 0x3144464fu /* "OFD1": dev_config, dev_cmd[512] */
-#define DEVICE_BLOCK_V1_CMDS 512
-
-/* matrix sizes before version 4 (32 inputs, 34 playback, 34 outputs) */
-#define OLD_N_IN    32
-#define OLD_N_PLAY  34
-#define OLD_N_SRC   (OLD_N_IN + OLD_N_PLAY)
-#define OLD_N_OUT   34
 
 #define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
 #define HW_STATUS_TICKS  25  /* read device status every 500 ms */
@@ -138,71 +125,6 @@ static void matrix_path(const struct data *d, char *buf, size_t len)
 			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep);
 }
 
-/* Reads one block of gains and output gains at the old size into s. */
-static int load_old_gains(struct ofm_shm *s, FILE *f, bool with_out)
-{
-	static float g[OLD_N_OUT][OLD_N_SRC];
-	float out[OLD_N_OUT];
-	if (fread(g, sizeof(g), 1, f) != 1 || (with_out && fread(out, sizeof(out), 1, f) != 1))
-		return -1;
-	for (int o = 0; o < OLD_N_OUT; o++) {
-		for (int k = 0; k < OLD_N_IN; k++)
-			s->gain[o][k] = g[o][k];
-		for (int p = 0; p < OLD_N_PLAY; p++)
-			s->gain[o][N_IN + p] = g[o][OLD_N_IN + p];
-		s->out_gain[o] = with_out ? out[o] : 1.0f;
-	}
-	return 0;
-}
-
-/*
- * matrix.bin is "OFM4", gain[][] and out_gain[], then for devices with settings "OFD2",
- * dev_config, the number of command slots and dev_cmd[] ("OFD1" files: 512 slots, no count). "OFM3" files hold the same at the old 34 x 66 size, which is
- * moved into place; "OFM2" files carry a mixer mode word before that, which is skipped.
- * Version 1 files hold only an old-size gain matrix with the output masters folded in; they
- * load at unity masters.
- */
-static int load_matrix(struct ofm_shm *s, const char *path)
-{
-	FILE *f = fopen(path, "rb");
-	if (f == NULL)
-		return -1;
-	uint32_t magic, mode;
-	int ret = -1;
-	bool ok = fread(&magic, sizeof(magic), 1, f) == 1;
-	if (ok && magic == MATRIX_FILE_MAGIC)
-		ret = fread(s->gain, sizeof(s->gain), 1, f) == 1 &&
-		      fread(s->out_gain, sizeof(s->out_gain), 1, f) == 1 ? 0 : -1;
-	else if (ok && (magic == MATRIX_FILE_MAGIC_V3 ||
-			(magic == MATRIX_FILE_MAGIC_V2 && fread(&mode, sizeof(mode), 1, f) == 1)))
-		ret = load_old_gains(s, f, true);
-	else {
-		rewind(f);
-		if (load_old_gains(s, f, false) == 0) {
-			for (int o = OLD_N_OUT; o < N_OUT; o++)
-				s->out_gain[o] = 1.0f;
-			fclose(f);
-			return 0;
-		}
-	}
-	uint32_t dmagic, n = 0;
-	if (ret == 0 && fread(&dmagic, sizeof(dmagic), 1, f) == 1 &&
-	    (dmagic == DEVICE_BLOCK_MAGIC || dmagic == DEVICE_BLOCK_MAGIC_V1)) {
-		bool ok = fread(&s->dev_config, sizeof(s->dev_config), 1, f) == 1;
-		if (ok && dmagic == DEVICE_BLOCK_MAGIC)
-			ok = fread(&n, sizeof(n), 1, f) == 1 && n <= OFM_N_DEV_CMD;
-		else
-			n = DEVICE_BLOCK_V1_CMDS;
-		memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
-		if (!ok || fread(s->dev_cmd, sizeof(uint32_t), n, f) != n) {
-			s->dev_config = 0;
-			memset(s->dev_cmd, 0, sizeof(s->dev_cmd));
-		}
-	}
-	fclose(f);
-	return ret;
-}
-
 static int shm_setup(struct data *d)
 {
 	char name[64];
@@ -232,17 +154,17 @@ static int shm_setup(struct data *d)
 		memset(s, 0, sizeof(*s));
 		char path[512];
 		matrix_path(d, path, sizeof(path));
-		if (load_matrix(s, path) < 0) {
-			/* default: transparent, playback n -> output n */
-			memset(s->gain, 0, sizeof(s->gain));
-			for (int o = 0; o < N_OUT; o++) {
-				s->gain[o][N_IN + o] = 1.0f;
-				s->out_gain[o] = 1.0f;
-			}
-			fprintf(stderr, "openface-mixer: using default passthrough matrix\n");
-		} else {
+		int r = ofm_matrix_load(s, path);
+		if (r < 0)
+			ofm_matrix_default(s);
+		if (r == -ENOENT)
+			fprintf(stderr, "openface-mixer: no %s yet, using the default routing\n", path);
+		else if (r < 0)
+			fprintf(stderr, "openface-mixer: %s is damaged or not a format this engine "
+				"knows; ignoring it and using the default routing "
+				"(playback n to output n)\n", path);
+		else
 			fprintf(stderr, "openface-mixer: loaded matrix from %s\n", path);
-		}
 		s->n_src = N_SRC;
 		s->n_out = N_OUT;
 		s->version = OFM_SHM_VERSION;

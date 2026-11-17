@@ -20,6 +20,7 @@ Channel layout (the same numbering for meters and the mixer):
 AN 1 is the front instrument input (or rear line 1), AN 7/8 front mic or rear line, AN 9/10 the
 rear mic inputs.
 """
+from .model import same_kind
 
 N_ANALOG_IN, N_SPDIF, N_ADAT = 10, 2, 16
 N_LINE_OUT, N_PHONES_OUT = 8, 2
@@ -158,6 +159,8 @@ def default_settings():
 
 
 def upgrade_settings(s, base=None):
+    """s completed from base. A value of the wrong kind (a damaged or hand-edited state file)
+    goes back to its default, so no command or panel is handed something it can't use."""
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
@@ -166,9 +169,11 @@ def upgrade_settings(s, base=None):
     for k, v in base.items():
         cur = s.get(k)
         if isinstance(v, list):
-            s[k] = cur if isinstance(cur, list) and len(cur) == len(v) else v
-        else:
-            s.setdefault(k, v)
+            if not isinstance(cur, list) or len(cur) != len(v):
+                cur = v
+            s[k] = [c if same_kind(c, d) else d for c, d in zip(cur, v)]
+        elif not same_kind(cur, v):
+            s[k] = v
     return s
 
 

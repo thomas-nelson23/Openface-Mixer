@@ -31,6 +31,7 @@ from .model import NEG_INF, any_solo, display_name, strip_channels, strip_key
 
 DEFAULT_PORT = 7001        # TotalMix's default "Port incoming"
 DEFAULT_OUT_PORT = 9001    # TotalMix's default "Port outgoing"
+PORTS = {"port": range(1024, 65536), "out_port": range(1, 65536)}   # what the settings offer
 LEVEL_FLOOR_DB = -90.0
 
 KINDS = {"input": "in", "playback": "play", "output": "out"}
@@ -52,12 +53,14 @@ def remote_settings(st):
     """st["remote"], created with defaults: off until the user switches it on. host/out_port is
     where state is sent besides the controllers' own addresses (TotalMix's "IP or Host Name" and
     "Port outgoing"); an empty host sends only to the controllers."""
-    r = st.setdefault("remote", {})
-    r.setdefault("enabled", False)
-    r.setdefault("port", DEFAULT_PORT)
-    r.setdefault("host", "")
-    r.setdefault("out_port", DEFAULT_OUT_PORT)
-    r.setdefault("levels", True)
+    r = st.get("remote")
+    if not isinstance(r, dict):
+        r = st["remote"] = {}
+    for k, default in (("enabled", False), ("port", DEFAULT_PORT), ("host", ""),
+                       ("out_port", DEFAULT_OUT_PORT), ("levels", True)):
+        v = r.get(k)                    # missing, or damaged in the state file
+        if type(v) is not type(default) or (k in PORTS and v not in PORTS[k]):
+            r[k] = default
     return r
 
 

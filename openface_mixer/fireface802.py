@@ -23,6 +23,7 @@ Channel layout (the same numbering for meters and the mixer):
 """
 
 from . import fx as fxmod
+from .model import same_kind
 
 N_LINE_IN, N_MIC_IN, N_AES, N_ADAT = 8, 4, 2, 16
 N_LINE_OUT, N_PHONES_OUT = 8, 4
@@ -169,6 +170,8 @@ def default_settings():
 
 
 def upgrade_settings(s, base=None, fx_model=FX):
+    """s completed from base. A value of the wrong kind (a damaged or hand-edited state file)
+    goes back to its default, so no command or panel is handed something it can't use."""
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
@@ -183,10 +186,14 @@ def upgrade_settings(s, base=None, fx_model=FX):
             part = s.get(k) if isinstance(s.get(k), dict) else {}
             for kk, vv in v.items():
                 cur = part.get(kk)
-                part[kk] = cur if isinstance(cur, list) and len(cur) == len(vv) else vv
+                if not isinstance(cur, list) or len(cur) != len(vv):
+                    cur = vv
+                # a level is a place in a list of choices: a whole number, not below 0
+                part[kk] = [c if same_kind(c, d) and (kk != "level" or type(c) is int and c >= 0)
+                            else d for c, d in zip(cur, vv)]
             s[k] = part
-        else:
-            s.setdefault(k, v)
+        elif not same_kind(s.get(k), v):
+            s[k] = v
     if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
         s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
