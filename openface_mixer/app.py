@@ -52,7 +52,8 @@ class MainWindow(QMainWindow):
         self.hw = Hardware(dev.alsa_card)
         self.ui_scale = load_ui_scale()    # applied by main() through theme.apply_theme
         self.st = load_state(dev)
-        self.hw.exact = self.st.get("hw", {}).get("card")   # HDSPe: one of several cards
+        if dev.family == "hdspe":
+            self.hw.exact = self.st["hw"]["card"]      # one of several cards of the model
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
         self._quitting = False             # Ctrl+Q: close for real even when started in the background
