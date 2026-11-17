@@ -296,6 +296,8 @@ class PanelTest(WindowCase):
 
     def setUp(self):
         self.addCleanup(self.tidy)
+        self.w.activateWindow()             # offscreen, rebuilding the strips takes that away
+        self.settle()
 
     def tidy(self):
         for panel in list(self.w.fx_panels.values()):
@@ -319,8 +321,6 @@ class PanelTest(WindowCase):
         row = self.w.row_in
         first, strip, after = row.strips[:3]
         before = after.x()
-        self.w.activateWindow()
-        self.settle()
         dyn = self.open(strip, "dyn")
         eq = self.open(strip, "eq")
         self.assertEqual(self.order(row)[:5], [first, strip, eq, dyn, after])   # EQ comes first
@@ -503,6 +503,23 @@ class PanelTest(WindowCase):
         dyn.switches["al"].click()                                  # still edits its channel
         self.assertTrue(self.w.st["hw"]["fx"]["in"][keep.channels[0]]["al"])
         dyn.switches["al"].click()
+
+    def test_a_rebuild_leaves_the_row_scrolled_where_it_was(self):
+        row = self.w.row_in
+        strip = row.strips[20]
+        eq = self.open(strip, "eq")
+        bar = row.scroll.horizontalScrollBar()
+        at = bar.value()
+        self.assertGreater(at, 500)
+        self.w.st["names"][strip.key] = "Snare"                     # as Rename does
+        self.addCleanup(self.w.rebuild_all)
+        self.addCleanup(self.w.st["names"].pop, strip.key)
+        self.w.rebuild_all()
+        self.assertEqual(bar.value(), at)                           # at once: nothing jumps
+        self.settle()
+        self.assertEqual(bar.value(), at)
+        self.assertEqual(eq.tag.text(), "Snare")
+        self.assertEqual(eq.visibleRegion().boundingRect().width(), eq.width())
 
     def test_a_panel_fits_a_low_row_and_a_tall_one(self):
         from openface_mixer import theme

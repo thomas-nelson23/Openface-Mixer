@@ -994,7 +994,7 @@ class Row(QWidget):
 
     def set_strips(self, strips):
         for panel in self.docks:            # the panels outlive the strips' container
-            panel.setParent(None)
+            panel.setParent(self)
         inner = QWidget()
         hl = QHBoxLayout(inner)
         hl.setContentsMargins(0, 0, 0, 0)
@@ -1013,6 +1013,7 @@ class Row(QWidget):
             hl.addSpacing(px(14))
             hl.addWidget(empty)
         hl.addStretch()
+        at = self.scroll.horizontalScrollBar().value()
         old = self.scroll.takeWidget()
         if old:
             old.deleteLater()
@@ -1025,5 +1026,7 @@ class Row(QWidget):
                 panel.show()
             else:                           # its strip is gone
                 panel.close()
+        inner.adjustSize()                  # so the row can go back to where it was scrolled to
+        self.scroll.horizontalScrollBar().setValue(at)
         self._fit()
         self._show_head()
