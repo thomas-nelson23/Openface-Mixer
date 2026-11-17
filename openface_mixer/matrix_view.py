@@ -31,6 +31,8 @@ class MatrixView(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidget(self)
         self.scroll.setFrameShape(QFrame.NoFrame)
+        for bar in (self.scroll.horizontalScrollBar(), self.scroll.verticalScrollBar()):
+            bar.valueChanged.connect(lambda _: self.update())   # the names move to stay in view
 
     def rebuild(self):
         w = self.win
@@ -48,8 +50,7 @@ class MatrixView(QWidget):
         return self.LW + ci * self.CW + (self.GAP if ci >= self.n_in_cols else 0)
 
     def _origin(self):
-        """The top left corner of the part in view, where the names are drawn. (The view has no
-        background of its own, so Qt repaints all of it on every scroll.)"""
+        """The top left corner of the part in view, where the names are drawn."""
         return max(0, -self.x()), max(0, -self.y())
 
     def _cell(self, pos):

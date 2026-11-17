@@ -10,7 +10,7 @@ from unittest import mock
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 try:
     from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
-    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtGui import QPalette, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QComboBox, QMenu
 except ImportError:
@@ -391,6 +391,29 @@ class MatrixTest(WindowCase):
         QTest.mouseClick(m, Qt.LeftButton, Qt.NoModifier, first)
         self.assertEqual(m._gain(0, 0), -6.0)
         self.assertEqual(m._cell(first + QPoint(5 * m.CW, 0)), (5, 0))
+
+    def test_names_are_redrawn_on_screen_after_a_scroll(self):
+        # the window's own pixels, not a fresh grab(); with a solid background Qt moves the old
+        # pixels along and the view has to redraw the names itself
+        m, view = self.m, self.m.scroll.viewport()
+        plain = m.palette()
+        solid = QPalette(plain)
+        solid.setColor(QPalette.Window, Qt.black)
+        m.setPalette(solid)
+        m.setAutoFillBackground(True)
+        self.addCleanup(m.setAutoFillBackground, False)
+        self.addCleanup(m.setPalette, plain)
+        self.settle()
+        corner = view.mapTo(self.w, QPoint(0, 0))
+
+        def row_names():
+            image = self.w.screen().grabWindow(self.w.winId()).toImage()
+            return image.copy(corner.x(), corner.y() + m.HH, m.LW - 2, 6 * m.CH)
+
+        before = row_names()
+        self.hbar.setValue(37)
+        self.settle()
+        self.assertEqual(row_names(), before)
 
     def test_a_mono_source_shows_its_pan(self):
         m = self.m
