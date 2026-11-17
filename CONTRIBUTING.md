@@ -89,11 +89,16 @@ A release is a tag named `vMAJOR.MINOR.PATCH` on a commit of `main`:
 
 1. Set `__version__` in `openface_mixer/__init__.py`, and in `CHANGELOG.md` rename *Unreleased*
    to the version and its date and start a new empty *Unreleased* above it. Merge that.
-2. Tag the merged commit and push the tag: `git tag v0.4.0 && git push origin v0.4.0`.
+2. On an up-to-date `main`, tag that commit and push the tag:
+   `git tag v0.4.0 && git push origin v0.4.0`.
 
 The app compares the three numbers, so `v0.10.0` is newer than `v0.9.0`. It ignores tags of any
 other form (`v0.5.0-rc1`) and tags on commits that are not on `main`, and it never moves an
 install backwards: a copy that is already past the newest tag waits for the next one.
+
+Don't move or delete a release tag once it is pushed. Every check copies GitHub's `v*` tags
+over the ones in the checkout the app was installed from, and a deleted tag stays in the
+checkouts that have seen it. If a release is wrong, tag a fixed patch version.
 
 ## Testing without hardware
 
