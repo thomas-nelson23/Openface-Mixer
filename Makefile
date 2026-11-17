@@ -39,6 +39,9 @@ test: ## Run the unit tests (no audio hardware or display needed)
 	./tests/test_hdspe
 	$(CC) $(CFLAGS) -o tests/test_matrix_file tests/test_matrix_file.c engine/matrix_file.c -lm
 	./tests/test_matrix_file
+	$(CC) $(CFLAGS) -pthread -o tests/test_engine_loop tests/test_engine_loop.c \
+		$(filter-out engine/openface-mixer-engine.c,$(ENGINE_SRC)) $(PW_FLAGS) -lm
+	./tests/test_engine_loop
 
 lint: ## Byte-compile and run pyflakes (syntax errors, unused imports, undefined names)
 	python3 -m compileall -q openface_mixer tests
@@ -52,7 +55,7 @@ uninstall: ## Remove the user install (keeps saved mixes)
 
 clean: ## Remove build output
 	rm -f $(ENGINE) tests/test_digiface_usb tests/test_fireface_fw tests/test_fireface_usb tests/test_hdspe \
-		tests/test_matrix_file
+		tests/test_matrix_file tests/test_engine_loop
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
 help: ## Show this help

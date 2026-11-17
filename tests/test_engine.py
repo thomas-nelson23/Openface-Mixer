@@ -31,6 +31,10 @@ class SharedMemoryTest(unittest.TestCase):
         fields = re.findall(r"^\tuint32_t (\w+)", LAYOUT, re.M)
         self.assertEqual(fields.index("gui_heartbeat"), engine.HDR_GUI_HEARTBEAT)
         self.assertEqual(fields.index("dev_status2"), engine.HDR_DEV_STATUS2)
+        # the offsets tests/test_engine_loop.c takes from the struct itself
+        self.assertEqual((engine.OFF_GAIN, engine.OFF_OUT_GAIN, engine.OFF_PEAK_SRC,
+                          engine.OFF_PEAK_OUT, engine.OFF_DEV_CONFIG, engine.OFF_DEV_CMD,
+                          engine.SHM_SIZE), (64, 10432, 10576, 10864, 11008, 11012, 27396))
 
     def test_reading_the_meters_moves_the_heartbeat(self):
         e = self.segment()
