@@ -195,8 +195,9 @@ class Fireface802(FireWireDevice):
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
-        return (fireface802.config_word(st["hw"]),
-                fireface802.commands(st["hw"], st.get("stereo", {}).get("play")))
+        hw = st["hw"]
+        return (fireface802.config_word(hw) if fireface802.config_ready(hw) else 0,
+                fireface802.commands(hw, st.get("stereo", {}).get("play")))
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
@@ -256,7 +257,8 @@ class FirefaceUCX2(ClassCompliantUSB, FireWireDevice):
 
 
 class FormerFireface(FireWireDevice):
-    """Fireface 800 and 400: write-only configuration that starts from the device's status."""
+    """Fireface 800 and 400: write-only configuration that follows the device's status until
+    the user changes a setting."""
     family = "former"
 
     def device_words(self, st):

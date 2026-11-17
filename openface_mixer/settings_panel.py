@@ -441,13 +441,12 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------------ Fireface 802, UCX II
     def _build_latter(self, lay):
         """TotalMix's Settings dialog for the 802 and UCX II: clock, sync inputs and
-        AES/S/PDIF/optical options. The device can't report these settings, so they come from
-        st["hw"]."""
+        AES/S/PDIF/optical options, from st["hw"]. Over FireWire the clock is the unit's own
+        until a setting is changed here; the options can't be read from the unit."""
         hw, proto = self.st["hw"], self.dev.proto
         self.ff_clock = QComboBox()
         for key, label, _ in proto.CLOCK_SOURCES:
             self.ff_clock.addItem(label, key)
-        self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
         self.ff_clock.activated.connect(
             lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
         # over USB the DSP reports its clock setting and rate, not the inputs' lock state
@@ -470,6 +469,7 @@ class SettingsPanel(QWidget):
         single.toggled.connect(lambda on: self._set_hw("word_single", on))
         ol.addWidget(single, len(rows), 0, 1, 2)
         lay.addWidget(opts)
+        self.refresh_fw_settings()
 
     def _build_fw_clock(self, lay, clock_combo, status_inputs, clock_label="Clock source"):
         """The CLOCK and INPUT STATUS boxes of a FireWire Fireface (and the RayDAT). Returns the
@@ -519,7 +519,10 @@ class SettingsPanel(QWidget):
             rate.setText(f"{r / 1000:g}k" if r else "—")
 
     def _set_hw(self, key, value):
-        self.st["hw"][key] = value
+        hw = self.st["hw"]
+        hw[key] = value
+        if "edited" in hw:     # FireWire: from now on the configuration is the user's
+            hw["edited"] = True
         self.hw_changed.emit()
 
     def update_latter_status(self, word):
@@ -532,7 +535,8 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------------ Fireface 800, 400
     def _build_former(self, lay):
         """TotalMix's Settings dialog for the 800 and 400: clock, sync inputs, levels and S/PDIF
-        options. The clock and S/PDIF options start from what the device reports."""
+        options. The clock and S/PDIF options are the unit's own until a setting is changed
+        here."""
         proto = self.dev.proto
         self.ff800_combos = {}
         self._build_fw_clock(lay, self._ff800_combo("clock", [(label, key) for key, label, _ in
@@ -568,7 +572,7 @@ class SettingsPanel(QWidget):
             self.ff800_combos[key] = box
             r += 1
         lay.addWidget(opts)
-        self.refresh_ff800_settings()
+        self.refresh_fw_settings()
 
     def _ff800_combo(self, key, items):
         combo = QComboBox()
@@ -578,13 +582,20 @@ class SettingsPanel(QWidget):
         self.ff800_combos[key] = combo
         return combo
 
-    def refresh_ff800_settings(self):
-        """Show st["hw"] (after it was filled in from the device's status)."""
+    def refresh_fw_settings(self):
+        """Show st["hw"] (after it was filled in from the unit's status). The clock stays empty
+        while the unit runs from a source we don't know."""
         hw = self.st["hw"]
+        if self.dev.family == "latter":
+            self.ff_clock.setCurrentIndex(self.ff_clock.findData(hw["clock"]) if hw["clock"]
+                                          else -1)
+            return
         for key, w in self.ff800_combos.items():
             w.blockSignals(True)
             if isinstance(w, QCheckBox):
                 w.setChecked(hw[key])
+            elif key == "clock" and not hw[key]:
+                w.setCurrentIndex(-1)
             else:
                 w.setCurrentIndex(max(0, w.findData(hw[key])))
             w.blockSignals(False)

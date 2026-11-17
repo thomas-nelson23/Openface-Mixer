@@ -90,6 +90,41 @@ class ConfigTest(unittest.TestCase):
             s["clock"] = key
             self.assertEqual(ff.config_word(s) & 0x1C00, bits)
 
+    def test_configuration_is_the_units_until_a_setting_changes(self):
+        # connecting must not change the unit's clock: nothing is written until the clock has
+        # been read from its status and the user has changed a setting
+        dev = devices.DEVICES["ff802"]
+        st = {"hw": ff.default_settings()}
+        self.assertEqual(dev.device_words(st)[0], 0)
+        ff.settings_from_status(st["hw"], (0x2 << 28) | 0x200)     # running from word clock
+        self.assertEqual(st["hw"]["clock"], "word")
+        self.assertEqual(dev.device_words(st)[0], 0)
+        st["hw"].update(edited=True, aes_pro=True)                 # what the settings panel does
+        self.assertEqual(dev.device_words(st)[0], 0x2040 | 0x400 | 0x20)
+        st["hw"]["known"] = False                                  # changed before any connect
+        self.assertEqual(dev.device_words(st)[0], 0)
+        self.assertTrue(dev.device_words(st)[1])                   # channel settings still go out
+
+    def test_clock_from_status(self):
+        s = ff.default_settings()
+        for bits, key in ((0xE00, "internal"), (0x200, "word"), (0x400, "aes"),
+                          (0x600, "adat_a"), (0x800, "adat_b")):
+            ff.settings_from_status(s, bits)
+            self.assertEqual(s["clock"], key)
+        ff.settings_from_status(s, 0xA00)                # no source we know: never written
+        s["edited"] = True
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+
+    def test_upgrade_keeps_a_configuration_the_user_made(self):
+        # states from before "edited": sent on every connect, so a changed one stays the user's
+        old = ff.default_settings()
+        del old["known"], old["edited"]
+        self.assertFalse(ff.config_ready(ff.upgrade_settings(dict(old))))
+        s = ff.upgrade_settings(dict(old, clock="word"))
+        self.assertTrue(ff.config_ready(s))
+        self.assertEqual(ff.config_word(s) & 0x1C00, 0x400)
+
 
 class StatusTest(unittest.TestCase):
     def test_decode(self):
@@ -213,7 +248,7 @@ class FileTest(unittest.TestCase):
         dev = devices.DEVICES["ff802"]
         st = m.default_state(4)
         dev.upgrade_settings(st)
-        st["hw"]["clock"] = "aes"
+        st["hw"].update(clock="aes", known=True, edited=True)
         data = config.matrix_file_bytes(st, dev)
         base = 4 + (m.N_OUT * m.N_SRC + m.N_OUT) * 4
         self.assertEqual(len(data), base + 12 + config.N_DEV_CMD * 4)

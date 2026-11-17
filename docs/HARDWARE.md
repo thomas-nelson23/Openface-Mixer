@@ -147,7 +147,16 @@ All values are little-endian quadlets.
 | `0xffff'ff00'0000` | read block | meters (below) |
 
 The device can't report its DSP settings back, so the engine keeps its own copy and sends
-everything when it connects. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
+everything when it connects. The configuration register is the exception, because it holds the
+clock source: over FireWire Openface Mixer shows the clock source from the sync status and
+leaves the register alone until a clock or option setting is changed in Openface Mixer, so
+connecting never changes the unit's clock. From then on the register is the user's and is sent
+on every connect, as TotalMix does. Two limits: the status reports the source the unit is
+running from, which is Internal while the chosen input has no signal; and the options (AES
+input, optical out, AES out format, word clock single speed, effects on inputs) can't be read
+at all, so the first change writes what the Options section shows for all of them. The status
+codes for ADAT A and ADAT B above are the kernel driver's; snd-firewire-ctl-services'
+`ff802.rs` has the two the other way round. Rates use RME's codes: 0 = 32k, 1 = 44.1k, 2 = 48k, 4 = 64k,
 5 = 88.2k, 6 = 96k, 8 = 128k, 9 = 176.4k, 10 = 192k.
 
 ## DSP commands
@@ -180,8 +189,8 @@ number of ones).
   and `0xa000` = +6 dB, the same encoding as the Digiface's gains of −6 dB and up.
 
 Openface Mixer has controls for phase, gain, level, 48V and Inst, and for all of the effects
-(see [TotalMix FX effects](#totalmix-fx-effects)). The configuration word always has `0x40`
-(effects on inputs) set, as snd-firewire-ctl-services does. Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
+(see [TotalMix FX effects](#totalmix-fx-effects)). The configuration word, once it is written,
+always has `0x40` (effects on inputs) set, as snd-firewire-ctl-services does. Muted outputs get no mixer signal at all, because the volume only goes down to −65 dB.
 
 ## Meters
 
@@ -240,8 +249,9 @@ settings take effect, the level packets' channel order, the clock option registe
 `0x3d46` are oscmix's best guesses), and whether the 802 needs the `0x3f00` keep-alive. oscmix's
 notes list AN 1–8 input level 0 as +4 dBu, snd-firewire-ctl-services as Lo Gain; Openface Mixer
 follows snd-firewire-ctl-services. Worth checking first: the meter chunks (which values are peaks),
-the PipeWire node name of the 802's playback device (`alsa_output.firewire-<GUID>…`), mixer
-and channel numbers at 96/192 kHz, and the AN 1–8 input gain.
+the PipeWire node name of the 802's playback device (`alsa_output.firewire-<GUID>…`), which
+status code is ADAT A and which ADAT B, mixer and channel numbers at 96/192 kHz, and the
+AN 1–8 input gain.
 
 ## Fireface UCX II over USB
 
@@ -347,8 +357,16 @@ Quadlet 0: lock/sync per input (ADAT 1 `0x1000`/`0x400`, ADAT 2 `0x2000`/`0x800`
 external rate in bits 25–28, S/PDIF rate in bits 14–17. Quadlet 1 reflects the configuration:
 clock source and rate (bits 1–4, which the kernel driver uses as the sample rate), S/PDIF in
 optical `0x200`, optical out S/PDIF `0x100`, S/PDIF out emphasis `0x40` and professional
-`0x20`, word clock single speed `0x2000`. Openface Mixer takes those options from quadlet 1 the
-first time the 800 connects; the rest of the configuration starts at defaults.
+`0x20`, word clock single speed `0x2000`. The clock source there is `0x1` internal (whatever
+the other bits say), else bits 10–12: `0x0` ADAT 1, `0x400` ADAT 2, `0xc00` S/PDIF, `0x1000`
+word clock, `0x1800` TCO. Word clock and TCO have other codes here than in the configuration.
+
+The configuration is write only and is one block, so writing any of it writes the clock
+source and the levels, jacks and phantom power too, which can't be read back. Openface Mixer
+therefore shows the clock and the options from quadlet 1 and writes nothing until a setting is
+changed in Openface Mixer; that first change sends the whole configuration, with the clock the
+unit reported and what the panel shows for the rest. A source code that is not in the list is
+never written: the clock box stays empty until one is chosen.
 
 ## Fireface 800 not verified on hardware yet
 
@@ -377,8 +395,10 @@ Configuration differences from the 800: quadlet 0 holds phones level (`0x60000`:
 Gain, `0x20000` −10 dBV, 0 +4 dBu), 48V on AN 1/2 (`0x01`, `0x80`), instrument and pad on AN 3
 (`0x200`, `0x100`) and AN 4 (`0x04`, `0x02`), and the line in/out levels with the 800's bits;
 quadlet 2 needs `0x04000000` (MIDI to the low address the kernel driver registered) and has no
-ADAT 2 or TCO clock (`0x1400` is LTC). Status quadlet 0 has one ADAT lock/sync pair
-(`0x1000`/`0x400`). Not checked on a unit yet.
+ADAT 2 or TCO clock (`0x1000` is word clock, `0x1400` LTC). Status quadlet 0 has one ADAT
+lock/sync pair (`0x1000`/`0x400`). In status quadlet 1 the clock source reads `0x1000` word
+clock and `0x1400` LTC in snd-firewire-ctl-services; the kernel driver reads LTC as `0x1800`,
+and Openface Mixer takes either as LTC. Not checked on a unit yet.
 
 # RME HDSPe RayDAT
 

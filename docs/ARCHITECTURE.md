@@ -97,8 +97,10 @@ app.MainWindow
 - **Device settings** (Firefaces) live in `state["hw"]`. `fireface802.commands()` (and
   `ucx2.usb_commands()`) turns them into the DSP command list the engine sends, in a fixed slot
   order so only changed slots go out; `fireface800.config_words()` (and `fireface400`'s) into the
-  three configuration quadlets, which are written only after the first status read has filled in
-  the options the device reports. On the 802 and UCX II the command list ends with the TotalMix FX effects
+  three configuration quadlets. Over FireWire the configuration holds the clock source and is
+  write only, so the GUI shows what the unit's status reports and sends no configuration until
+  the user changes a setting (`config_ready()` in the protocol modules, `follow_unit()` in
+  `app.py`): connecting never changes the unit's clock. On the 802 and UCX II the command list ends with the TotalMix FX effects
   (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
   parameters stay 0 (unused slots) while their effect is off. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
   and written live. The settings panel picks its layout by `Device.family` ("latter", "former",

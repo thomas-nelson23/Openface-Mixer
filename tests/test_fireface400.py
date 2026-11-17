@@ -30,6 +30,8 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(ff.amp_commands(s), [0x80000028, 0x80010041, 0x8002000C, 0x80030000])
         self.assertEqual(ff.device_words(s), (0, []))
         s["known"] = True
+        self.assertEqual(ff.device_words(s), (0, []))    # not until a setting is changed
+        s["edited"] = True
         cfg, words = ff.device_words(s)
         self.assertEqual((cfg, len(words)), (1, 7))
 
@@ -40,6 +42,23 @@ class ConfigTest(unittest.TestCase):
         st = ff.decode_status(0x00001000 | 0x00000400 | 0x06000000, 0x00000000)
         self.assertEqual(st["source"], "ADAT")
         self.assertEqual(st["inputs"][0], ("ADAT", "Sync", 48000))
+
+    def test_clock_sources(self):
+        # the 400's own table: LTC, and no ADAT 2 or TCO
+        keys = [k for k, _label, _bits in ff.CLOCK_SOURCES]
+        self.assertEqual(keys, ["internal", "adat_1", "spdif", "word", "ltc"])
+        s = ff.default_settings()
+        for bits, key, config in ((0x0000, "adat_1", 0x0000), (0x0C00, "spdif", 0x0C00),
+                                  (0x1000, "word", 0x1000), (0x1400, "ltc", 0x1400),
+                                  (0x1800, "ltc", 0x1400), (0x1401, "internal", 0x0001)):
+            ff.settings_from_status(s, bits)
+            self.assertEqual(s["clock"], key)
+            self.assertEqual(ff.config_words(s)[2] & 0x1C01, config)
+        ff.settings_from_status(s, 0x0400)               # the 800's ADAT 2: not on a 400
+        self.assertIsNone(s["clock"])
+        s["edited"] = True
+        self.assertEqual(ff.device_words(s), (0, []))
+        self.assertEqual(ff.decode_status(0x01400000, 0x1400)["source"], "LTC")
 
 
 class LayoutTest(unittest.TestCase):

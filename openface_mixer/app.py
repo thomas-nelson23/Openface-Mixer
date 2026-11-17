@@ -640,6 +640,8 @@ class MainWindow(QMainWindow):
         popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
                                 strip.name, self)
         popup.setAttribute(Qt.WA_DeleteOnClose)
+        if self.dev.family == "former":   # these are all part of the configuration
+            popup.changed.connect(lambda: self.st["hw"].update(edited=True))
         popup.changed.connect(self.push_matrix)
         popup.changed.connect(self.refresh_settings_buttons)
         popup.room_eq_requested.connect(lambda: self.open_fx_panel(strip, "room"))
@@ -1173,16 +1175,27 @@ class MainWindow(QMainWindow):
         active = s is not None and s["hw"] == "active"
         self._hw_active = active
         if self.dev.family == "latter":
+            if active and self.dev.bus == "FireWire":
+                self.follow_unit(s["dev_status"])
             self.settings.update_latter_status(s["dev_status"] if active else None)
         elif self.dev.family == "former":
-            hw = self.st["hw"]
-            if active and not hw["known"]:
-                # the configuration is write only: start from what the device reports
-                self.dev.proto.settings_from_status(hw, s["dev_status2"])
-                self.settings.refresh_ff800_settings()
-                self.push_matrix()
+            if active:
+                self.follow_unit(s["dev_status2"])
             self.settings.update_former_status((s["dev_status"], s["dev_status2"])
                                                if active else None)
+
+    def follow_unit(self, status):
+        """A FireWire Fireface's configuration is write only and holds the clock source. Until
+        the user changes a setting here, show what the unit reports and write nothing (the
+        protocol module's config_ready), so connecting never changes the unit's clock."""
+        hw = self.st["hw"]
+        if hw["known"] and hw["edited"]:
+            return
+        before = dict(hw)
+        self.dev.proto.settings_from_status(hw, status)
+        if hw != before:
+            self.settings.refresh_fw_settings()
+            self.push_matrix()
 
     def poll_hw(self):
         if self.dev.key == "digiface":

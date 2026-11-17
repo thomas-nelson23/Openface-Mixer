@@ -32,7 +32,12 @@ CLOCK_SOURCES = (               # (key, label, configuration bits in quadlet 2)
     ("adat_1", "ADAT", 0x00000000),
     ("spdif", "S/PDIF", 0x00000C00),
     ("word", "Word Clock", 0x00001000),
+    ("ltc", "LTC", 0x00001400),
 )
+# status quadlet 1: the configured source. No ADAT 2 or TCO; LTC is 0x1400 in
+# snd-firewire-ctl-services and 0x1800 in the kernel driver, and neither can mean anything else
+S1_CLOCK = {0x00000000: "adat_1", 0x00000C00: "spdif", 0x00001000: "word", 0x00001400: "ltc",
+            0x00001800: "ltc"}
 IN_LEVELS = (                   # line inputs AN 5-8: (key, label, quadlet 0 bits, quadlet 1 bits)
     ("low", "Lo Gain", 0x00000010, 0x00000000),
     ("pro", "+4 dBu", 0x00000008, 0x00000002),
@@ -94,6 +99,7 @@ def pair_label(kind, c):
 def default_settings():
     return {
         "known": False,
+        "edited": False,
         "clock": "internal",
         "spdif_in": "coax",
         "opt_out": "adat",
@@ -116,7 +122,12 @@ def upgrade_settings(s):
     return ff800.upgrade_settings(s, default_settings())
 
 
-settings_from_status = ff800.settings_from_status
+def settings_from_status(s, status1):
+    """As the 800's, with the 400's own clock sources."""
+    ff800.settings_from_status(s, status1, S1_CLOCK)
+
+
+config_ready = ff800.config_ready
 
 
 def config_words(s):
@@ -150,8 +161,8 @@ def amp_commands(s):
 
 
 def device_words(s):
-    """(dev_config, dev_cmd) for the engine once the settings are known, else (0, [])."""
-    return (1, config_words(s) + amp_commands(s)) if s["known"] else (0, [])
+    """(dev_config, dev_cmd) for the engine once they may be sent, else (0, [])."""
+    return (1, config_words(s) + amp_commands(s)) if config_ready(s) else (0, [])
 
 
 def decode_status(q0, q1):
