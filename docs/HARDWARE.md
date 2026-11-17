@@ -426,6 +426,9 @@ anyway** in the settings panel stores the choice with the mix (`dev_config` = 1 
 and `matrix.bin`), and from then on the engine and the settings controls treat the card as any
 other.
 
+When no ALSA card is found, the settings panel looks for the PCI device itself
+(`/sys/bus/pci/devices`: vendor `10ee` or `1d18`, device `3fc6`, revision 211 for the RayDAT,
+212 for the AIO and AIO Pro, 230–234 or 240 for the AES) and says that no driver is running it.
 
 ## Mixer
 
@@ -468,6 +471,10 @@ other HDSPe cards with the same `Mixer` control and ioctls; they differ in the c
   `Non Audio`, `Clear Track Marker`, `Double/Quad Speed Wire Mode`. snd-hdspe: `Double Speed
   Mode`, `Quad Speed Mode`, `Professional`, `Emphasis`, `Non Audio`, `Single Speed WordClk Out`,
   `Clear TMS`. (`Line Out` isn't offered.)
+
+snd-hdspm has no name of its own for the AIO Pro: it calls every revision-212 card `RME AIO`.
+So with the kernel driver an AIO Pro is found as **RME HDSPe AIO**, not as AIO Pro (the settings
+panel says so when AIO Pro is chosen and an `RME AIO` card is there).
 
 The MADI cards (HDSPe MADI, MADIface, MADI FX) use 64 channels and don't fit the 36-channel mix
 model. None of these cards has been checked with Openface Mixer.

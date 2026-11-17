@@ -21,12 +21,15 @@ import re
 
 HDSPM, HDSPE = "HDSPM", "HDSPe"       # ALSA driver names of snd-hdspm and snd-hdspe
 VENDOR_RME = 0x1d18                   # PCI vendor of the 2022-and-later cards (older: Xilinx)
+PCI_VENDORS = (0x10ee, VENDOR_RME)    # Xilinx, RME
+PCI_DEVICE = 0x3fc6                   # every card of the family; the PCI revision tells them apart
 GAIN_MAX = 65535 / 32768              # the mixer's highest gain, +6 dB (engine/hdspe.h)
 
 
 class Model:
     key = ""
     card = ""                 # ALSA card short name, before the serial ("_1a2b3c") if any
+    pci_revisions = ()        # as snd-hdspm's probe tells the cards apart
     sink_channels = ""        # what playback channels 1/2 are called
     phones_pairs = ()
     # (label, snd-hdspm sync check, frequency control) for the INPUT STATUS box; snd-hdspe
@@ -60,6 +63,7 @@ def _status(*labels, check="SyncCheck"):
 class RayDAT(Model):
     key = "raydat"
     card = "RME RayDAT"
+    pci_revisions = (211,)
     sink_channels = "A1 1/2"          # the driver's PCM channels start with ADAT 1
     first_adat = 4
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT 1", "ADAT 2", "ADAT 3",
@@ -85,6 +89,7 @@ class RayDAT(Model):
 class AIO(Model):
     key = "aio"
     card = "RME AIO"
+    pci_revisions = (212,)            # the AIO Pro too
     sink_channels = "AN 1/2"
     phones_pairs = (3,)               # PH L/R, channels 6/7
     first_adat = 12
@@ -115,6 +120,7 @@ class AIOPro(AIO):
 class AES(Model):
     key = "aes"
     card = "RME AES32"
+    pci_revisions = (240, 230, 231, 232, 233, 234)
     sink_channels = "AES 1/2"
     status_inputs = _status("Word Clock", *(f"AES {n}" for n in range(1, 9)), "TCO", "Sync In",
                             check="Sync Check")

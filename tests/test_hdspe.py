@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import os
 import subprocess
+import tempfile
 import unittest
 from array import array
 from pathlib import Path
@@ -391,6 +392,31 @@ class DeviceTest(unittest.TestCase):
         self.assertEqual(config.device_block(st, dev)[0], 1)   # the engine's dev_config
         self.assertIn(b"OFD2", config.matrix_file_bytes(st, dev))
 
+    def test_missing_hint(self):
+        aio, aiopro, raydat = (devices.DEVICES[k] for k in ("aio", "aiopro", "raydat"))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, vendor, device, rev in (("0000:00:1f.3", 0x8086, 0xa348, 0x10),
+                                              ("0000:03:00.0", 0x1d18, 0x3fc6, 212),
+                                              ("0000:04:00.0", 0x10ee, 0x0007, 211)):
+                (root / name).mkdir()
+                for key, v in (("vendor", vendor), ("device", device), ("revision", rev)):
+                    (root / name / key).write_text(f"0x{v:04x}\n")
+            self.assertTrue(devices.find_pci_card(aio.model.pci_revisions, root))
+            self.assertTrue(devices.find_pci_card(aiopro.model.pci_revisions, root))
+            self.assertFalse(devices.find_pci_card(raydat.model.pci_revisions, root))
+            self.assertFalse(devices.find_pci_card((212,), root / "none"))
+        with mock.patch.object(hardware.Hardware, "find_card", return_value=None):
+            with mock.patch.object(devices, "find_pci_card", return_value=True):
+                self.assertIn("no driver", aio.missing_hint())
+            with mock.patch.object(devices, "find_pci_card", return_value=False):
+                self.assertEqual(aio.missing_hint(), "")
+        # an AIO Pro under snd-hdspm is an "RME AIO" card
+        cards = CARDS.replace("HDSPe - RME AIO Pro_00012345", "HDSPM - RME AIO_1a2b3d")
+        with mock.patch.object(Path, "read_text", return_value=cards):
+            self.assertIn("gives it that name", aiopro.missing_hint())
+        with mock.patch.object(Path, "read_text", return_value=CARDS):      # and the reverse
+            self.assertIn("is an AIO Pro", aio.missing_hint())
 
 
 class OldMixTest(unittest.TestCase):

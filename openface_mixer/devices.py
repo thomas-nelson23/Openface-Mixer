@@ -13,6 +13,7 @@ from .model import chan_label as digiface_chan_label, pair_label as digiface_pai
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
 USB_DEVICES = Path("/sys/bus/usb/devices")
+PCI_DEVICES = Path("/sys/bus/pci/devices")
 RME_OUI = 0x000A35
 RME_USB_VENDOR = 0x2a39
 # The Digiface USB product IDs with the vendor interface the kernel quirk and the engine's
@@ -315,6 +316,19 @@ class HDSPeCard(Device):
         """The configuration word tells the engine to drive a card its driver rule doubts."""
         return int(st["hw"]["use_anyway"]), []
 
+    def missing_hint(self):
+        if self.key == "aio" and Hardware.find_card(hdspe.MODELS["aiopro"].card) is not None:
+            return "The card in the computer is an AIO Pro: choose RME HDSPe AIO Pro as the device."
+        if self.key == "aiopro" and Hardware.find_card(hdspe.MODELS["aio"].card) is not None:
+            return ("There is an “RME AIO” card. If it is an AIO Pro, the kernel's snd-hdspm "
+                    "driver gives it that name: install the snd-hdspe driver (see the README), "
+                    "or choose RME HDSPe AIO as the device.")
+        if find_pci_card(self.model.pci_revisions):
+            return ("The card is in the computer, but no driver is running it. An snd-hdspe "
+                    "built for an older kernel has to be built again after a kernel update; "
+                    "<tt>sudo dmesg | grep -i hdsp</tt> shows what went wrong.")
+        return ""
+
 
 DEVICES = {d.key: d for d in (
     Digiface(), Fireface802(), Fireface802USB(), FirefaceUCX2(), Fireface800(), Fireface400(),
@@ -353,6 +367,18 @@ def find_firewire_unit(specifier_id, version, root=FIREWIRE_DEVICES):
         if _read_hex(u / "specifier_id") == specifier_id and _read_hex(u / "version") == version:
             return u.name.split(".")[0]
     return None
+
+
+def find_pci_card(revisions, root=PCI_DEVICES):
+    """True if an RME HDSPe card with one of these PCI revisions is in the computer, with or
+    without a driver."""
+    try:
+        devs = list(root.iterdir())
+    except OSError:
+        return False
+    return any(_read_hex(d / "vendor") in hdspe.PCI_VENDORS
+               and _read_hex(d / "device") == hdspe.PCI_DEVICE
+               and _read_hex(d / "revision") in revisions for d in devs)
 
 
 def usb_devices(vendor, root=USB_DEVICES):
