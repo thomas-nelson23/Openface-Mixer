@@ -1,11 +1,17 @@
 import unittest
 
-from openface_mixer import fireface802 as ff, fx, model as m, ucx2
+from openface_mixer import config, devices, fireface802 as ff, fx, model as m, osc_remote, ucx2
 
 
 def regs(words):
     """Register -> value of the words, as the USB engines send them (register = word >> 16)."""
     return {w >> 16 & 0x7FFF: w & 0xFFFF for w in words if w}
+
+
+def state(dev="ff802"):
+    st = m.default_state(4)
+    devices.DEVICES[dev].upgrade_settings(st)
+    return st
 
 
 class AddressTest(unittest.TestCase):
@@ -116,12 +122,14 @@ class CommandTest(unittest.TestCase):
         self.assertEqual((r[0x0013], r[0x0015]), (99, 20))
 
     def test_sends_and_returns(self):
-        s = ff.default_settings()
+        st = state()
+        s = st["hw"]
+        st["stereo"]["play"] = [True] + [False] * 17
         s["fx"]["send"]["in"][2] = -12.0
         s["fx"]["ret"][4] = 0.0
         s["fx"]["send"]["play"][0] = 0.0
         s["fx"]["send"]["play"][1] = -6.0
-        r = regs(ff.usb_commands(s, play_stereo=[True] + [False] * 14))
+        r = regs(ff.usb_commands(s, st))
         self.assertEqual(r[0x0201], -120 & 0xFFFF)
         self.assertEqual(r[0x2203], 0)
         # a linked pair: left channel to the left FX input only, right to the right
@@ -138,6 +146,72 @@ class CommandTest(unittest.TestCase):
         r = regs(ucx2.usb_commands(s))
         self.assertEqual(r[0x47A5], r[0x47E5])
         self.assertGreater(r[0x47A5], 0)
+
+
+class MuteSoloTest(unittest.TestCase):
+    """A muted channel, and one left out by another channel's solo, sends nothing to the FX
+    unit; the stored send comes back with the mute off."""
+
+    def setUp(self):
+        self.st = state()
+        self.st["stereo"]["play"] = [False] * 18
+        f = self.st["hw"]["fx"]
+        f["send"]["in"][0] = f["send"]["in"][2] = -12.0
+        f["send"]["play"][5] = 0.0
+
+    def words(self):
+        return ff.commands(self.st["hw"], self.st)
+
+    def test_mute(self):
+        self.assertIn(0x0201FF88, self.words())             # AN 3 FX send -12.0 dB
+        self.st["mute"]["in"][2] = True
+        cmds = self.words()
+        self.assertIn(0x0201FD76, cmds)                     # ... off (-65.0 dB) while muted
+        self.assertNotIn(0x0201FF88, cmds)
+        self.assertIn(0x0001FF88, cmds)                     # AN 1 is not muted
+        self.assertEqual(self.st["hw"]["fx"]["send"]["in"][2], -12.0)
+        self.st["mute"]["in"][2] = False
+        self.assertIn(0x0201FF88, self.words())
+
+    def test_playback_mute(self):
+        on = 0x9000                                         # 0 dB, FireWire encoding
+        self.assertIn(0x47A50000 | on, self.words())        # playback 6 -> FX left
+        self.assertIn(0x47E50000 | on, self.words())        # ... and right
+        self.st["mute"]["play"][5] = True
+        cmds = self.words()
+        self.assertIn(0x47A50000, cmds)
+        self.assertIn(0x47E50000, cmds)
+
+    def test_solo(self):
+        self.st["solo"]["in"][0] = True
+        cmds = self.words()
+        self.assertIn(0x0001FF88, cmds)                     # the soloed channel keeps its send
+        self.assertIn(0x0201FD76, cmds)                     # the others send nothing
+        self.assertIn(0x47A50000, cmds)
+
+    def test_ucx2(self):
+        st = state("ucx2")
+        st["hw"]["fx"]["send"]["in"][0] = st["hw"]["fx"]["send"]["in"][2] = -3.0
+        st["mute"]["in"][2] = True
+        cmds = ucx2.usb_commands(st["hw"], st)
+        self.assertIn(0x0001FFE2, cmds)                     # AN 1 FX send -3.0 dB
+        self.assertIn(0x0081FD76, cmds)                     # AN 3 muted: off
+
+    def test_device_block_and_saved_file(self):
+        dev = devices.DEVICES["ff802"]
+        self.st["solo"]["in"][0] = True
+        self.assertIn(0x0201FD76, config.device_block(self.st, dev)[1])
+        data = config.matrix_file_bytes(self.st, dev)[-4 * config.N_DEV_CMD:]
+        saved = [int.from_bytes(data[i:i + 4], "little") for i in range(0, len(data), 4)]
+        self.assertIn(0x0201FF88, saved)
+        self.assertNotIn(0x0201FD76, saved)
+
+    def test_mute_from_the_network_remote(self):
+        dev = devices.DEVICES["ff802"]
+        osc_remote.apply(self.st, dev, 1, "/input/2/mute", [1.0])
+        self.assertIn(0x0201FD76, dev.device_words(self.st)[1])
+        osc_remote.apply(self.st, dev, 1, "/input/2/mute", [0.0])
+        self.assertIn(0x0201FF88, dev.device_words(self.st)[1])
 
 
 class SettingsTest(unittest.TestCase):

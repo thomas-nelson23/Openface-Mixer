@@ -197,7 +197,9 @@ class DeviceTest(unittest.TestCase):
         usb = devices.DEVICES["ff802usb"]
         self.assertEqual(usb.service, "openface-mixer-engine@ff802usb.service")
         self.assertEqual(usb.family, "latter")
-        self.assertEqual(usb.device_words({"hw": ff.default_settings()})[0], 0)
+        st = m.default_state(4)
+        usb.upgrade_settings(st)
+        self.assertEqual(usb.device_words(st)[0], 0)
         self.assertEqual(config.state_file(usb), config.CONFIG_DIR / "ff802usb" / "state.json")
 
     def test_digiface_layout_unchanged(self):

@@ -122,7 +122,7 @@ def gain_max(c):
     return MIC_GAIN_MAX_DB if c in MIC_INPUTS else LINE_GAIN_MAX_DB
 
 
-def usb_commands(s, play_stereo=None):
+def usb_commands(s, st=None):
     """All register writes for settings s: the channel settings, the effects (fx.commands), and
     TotalMix's own mute and balance cleared and CC mix set to TotalMix so the DSP mixer is what
     is heard."""
@@ -158,7 +158,7 @@ def usb_commands(s, play_stereo=None):
         ff802.reg_cmd(REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
         ff802.reg_cmd(REG_SPDIF_PRO, s["spdif_pro"]),
     ]
-    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb=True)
+    return cmds + fxmod.commands(s["fx"], FX, st, usb=True)
 
 
 def decode_usb_status(word):

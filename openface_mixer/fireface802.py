@@ -196,10 +196,10 @@ def with_parity(word):
     return word if bin(word).count("1") % 2 else word | 0x80000000
 
 
-def commands(s, play_stereo=None, usb=False):
+def commands(s, st=None, usb=False):
     """All DSP setting commands for settings s, in the order they are sent: the channel
     settings, then the effects (fx.commands: channel strip effects, FX sends and returns, reverb
-    and echo). play_stereo: the playback pairs' stereo flags, for the playback FX sends."""
+    and echo). st: the mixer state, for the stereo links, mutes and solos the effects follow."""
     cmds = []
     i, o = s["in"], s["out"]
     for c in range(N_PHYS_IN):
@@ -217,18 +217,18 @@ def commands(s, play_stereo=None, usb=False):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_PHASE, o["phase"][c]))
     for c in range(N_LINE_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_LINE_LEVEL, o["level"][c]))
-    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb)
+    return cmds + fxmod.commands(s["fx"], FX, st, usb)
 
 
 def reg_cmd(reg, value):
     return (reg << 16) | (int(value) & 0xFFFF)
 
 
-def usb_commands(s, play_stereo=None):
+def usb_commands(s, st=None):
     """commands(s), plus the clock and option registers that FireWire sets with config_word()."""
     keys = [k for k, _, _ in CLOCK_SOURCES]
     clock = keys.index(s["clock"]) if s["clock"] in keys else 0
-    return commands(s, play_stereo, usb=True) + [
+    return commands(s, st, usb=True) + [
         reg_cmd(USB_REG_CLOCK, clock),
         reg_cmd(USB_REG_WORD_SINGLE, s["word_single"]),
         reg_cmd(USB_REG_OPT_IN_SPDIF, s["aes_in"] == "optical"),

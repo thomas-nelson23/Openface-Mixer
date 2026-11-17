@@ -26,6 +26,8 @@ another controller left in the unit.
 """
 import math
 
+from .model import any_solo
+
 # ------------------------------------------------------------------ parameters
 # (key, scale (raw = value * scale), low, high, default), low/high/default in display units.
 LOWCUT = ("lc", (
@@ -395,22 +397,30 @@ def play_send_word(mixer, p, gain):
     return 0x40000000 | ((0x40 * mixer + PLAY_SOURCE + p) << 16) | (gain & 0xFFFF)
 
 
-def commands(fx, m, play_stereo=None, usb=False):
-    """All effect commands for fx (st["hw"]["fx"]), in a fixed slot order: 0 is an unused slot.
+def commands(fx, m, st=None, usb=False):
+    """All effect commands for fx (st["hw"]["fx"]), in a fixed slot order.
 
-    play_stereo: the stereo flags of the playback pairs (st["stereo"]["play"]). A linked pair
-    sends its left channel to the FX unit's left input and its right channel to the right, as
-    TotalMix does; a mono playback channel goes to both."""
+    st: the mixer state, for what depends on the mix (None: nothing linked, muted or soloed).
+    A linked playback pair sends its left channel to the FX unit's left input and its right
+    channel to the right, as TotalMix does; a mono playback channel goes to both.
+    A muted channel, and one left out because another is soloed, sends nothing to the FX unit."""
+    soloing = bool(st) and any_solo(st)
+
+    def send(kind, c):
+        if st and (st["mute"][kind][c] or (soloing and not st["solo"][kind][c])):
+            return None
+        return fx["send"][kind][c]
+
     words = []
     for c in range(m.n_in):
         words += _strip_words(m, c, fx["in"][c])
     for c in range(m.n_out):
         words += _strip_words(m, m.out_offset + c, fx["out"][c])
     for c in range(m.n_in):
-        words.append(m.in_send_word(c, level_raw(fx["send"]["in"][c])))
+        words.append(m.in_send_word(c, level_raw(send("in", c))))
     for p in range(m.n_play):
-        linked = bool(play_stereo and p // 2 < len(play_stereo) and play_stereo[p // 2])
-        g = mixer_gain(fx["send"]["play"][p], usb)
+        linked = bool(st) and st["stereo"]["play"][p // 2]
+        g = mixer_gain(send("play", p), usb)
         for side, mixer in enumerate(FX_MIXERS):
             words.append(play_send_word(mixer, p, g if not linked or p % 2 == side else 0))
     for c in range(m.n_out):
