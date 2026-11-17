@@ -160,6 +160,7 @@ class MatrixView(QWidget):
         elif e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             self._set(*self.sel, None)
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._select(self.sel)    # it may have been scrolled out of view
             self._type_level()
         else:
             super().keyPressEvent(e)

@@ -351,6 +351,18 @@ class MatrixTest(WindowCase):
         self.type_into(m, "off")
         self.assertIsNone(m._gain(2, 3))
 
+    def test_typing_brings_the_selection_back_into_view(self):
+        from openface_mixer.widgets import LevelEdit
+        m = self.m
+        self.click(1, 0)
+        self.hbar.setValue(self.hbar.maximum())
+        QTest.keyClick(m, Qt.Key_Return)
+        editor = m.findChild(LevelEdit)
+        self.assertTrue(m.visibleRegion().boundingRect().contains(editor.geometry()))
+        self.assertGreaterEqual(editor.x() - m._origin()[0], m.LW)
+        self.type_into(m, "-9")
+        self.assertEqual(m._gain(1, 0), -9.0)
+
     def test_the_selection_stays_clear_of_the_names(self):
         m = self.m
         self.click(0, 0)
