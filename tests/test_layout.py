@@ -447,11 +447,11 @@ class PanelTest(WindowCase):
         self.settle()
         unit = self.w.fx_panels[("unit", "")]
         self.assertLess(strip.height(), 200)                        # three rows in 720 pixels
-        self.assertTrue(eq.low and unit.low)
+        self.assertTrue(eq.low and dyn.low and unit.low)
         for panel in (eq, dyn, unit):                               # no higher than the strips
             self.assertLessEqual(panel.minimumSizeHint().height(), strip.minimumSizeHint().height())
             self.assertEqual(panel.height(), strip.height())
-        wide = eq.width()
+        wide, dyn_wide = eq.width(), dyn.width()
         self.w.row_play.set_folded(True)                            # the open rows get its height
         self.settle()
         self.assertGreater(strip.height(), 250)
@@ -461,10 +461,19 @@ class PanelTest(WindowCase):
         self.assertLess(eq.width(), wide)                           # the curve is over the knobs
         self.assertEqual(eq.height(), strip.height())
         self.assertGreater(dyn.curve.width(), 150)
+        self.addCleanup(lambda: (self.w.resize(1280, 720), self.settle()))
+        self.w.resize(1280, 1080)                                   # three rows of 1080 pixels
         self.w.row_play.set_folded(False)
         self.settle()
-        self.assertTrue(eq.low and unit.low)
-        self.assertEqual(eq.width(), wide)
+        self.assertGreater(strip.height(), 290)
+        self.assertFalse(eq.low or dyn.low or unit.low)
+        self.assertLessEqual(dyn.minimumSizeHint().height(), theme.px(dyn.TALL))
+        self.assertLess(dyn.width(), dyn_wide - 40)                 # three rows of knobs: narrower
+        self.assertEqual(dyn.height(), strip.height())
+        self.w.resize(1280, 720)
+        self.settle()
+        self.assertTrue(eq.low and dyn.low and unit.low)
+        self.assertEqual((eq.width(), dyn.width()), (wide, dyn_wide))
 
 
 class RoomEqTest(WindowCase):

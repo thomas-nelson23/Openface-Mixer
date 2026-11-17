@@ -378,6 +378,7 @@ class FxPanel(QWidget):
         self.lay.setSpacing(px(4))
         head = QHBoxLayout()
         head.setSpacing(px(8))
+        head.setContentsMargins(0 if name else px(4), 0, 0, 0)
         self.tag = QLabel(name)
         self.tag.setFixedHeight(px(20))
         self.tag.setFont(font(SANS, 10, QFont.DemiBold))
@@ -616,7 +617,9 @@ class EqPanel(StripPanel):
 
 
 class DynamicsPanel(StripPanel):
-    """Dynamics (compressor and expander) and Auto Level, as TotalMix's D panel."""
+    """Dynamics (compressor and expander) and Auto Level, as TotalMix's D panel. A tall row has
+    three rows of knobs, to stay narrow; a low row has two."""
+    TALL = 264
 
     def __init__(self, name, fxs, model, kind, channels, parent=None):
         super().__init__(name, "Dynamics", fxs, model, kind, channels, parent)
@@ -627,7 +630,7 @@ class DynamicsPanel(StripPanel):
         dyn_btn = on_button("Dynamics", self.ch["dyn"], "Compressor and expander")
         dyn_btn.toggled.connect(lambda on: (self.set("dyn", on), self._enable()))
         self.switches["dyn"] = dyn_btn
-        # the switch is over the curve, so the two rows of knobs beside them fit in a low row
+        # the switch is over the curve, so the knobs beside them fit in a low row
         dyn = QFrame()
         dyn.setObjectName("fxbox")
         body = QHBoxLayout(dyn)
@@ -647,11 +650,12 @@ class DynamicsPanel(StripPanel):
             (0, 2, "gain", "Gain", dict(fmt=db_fmt, unit="dB", name="Dynamics gain")),
             (1, 0, "ethr", "Exp Thr", dict(fmt=db_fmt, unit="dB", name="Expander threshold")),
             (1, 1, "eratio", "Ratio", dict(fmt=lambda v: f"1:{v:.1f}", name="Expander ratio")),
-            (1, 2, "attack", "Attack", dict(fmt=ms, unit="ms", name="Dynamics attack")),
-            (1, 3, "release", "Release", dict(fmt=ms, unit="ms", name="Dynamics release")),
+            (2, 0, "attack", "Attack", dict(fmt=ms, unit="ms", name="Dynamics attack")),
+            (2, 1, "release", "Release", dict(fmt=ms, unit="ms", name="Dynamics release")),
         )
         for r, c, key, label, kw in items:
             grid.addWidget(self.param_knob(fx.DYNAMICS, key, label, **kw), r, c)
+        self.grid = grid
         body.addLayout(grid)
         body.setAlignment(grid, Qt.AlignVCenter)
         self.dyn_box = dyn
@@ -662,7 +666,7 @@ class DynamicsPanel(StripPanel):
         al_btn.toggled.connect(lambda on: (self.set("al", on), self._enable()))
         self.switches["al"] = al_btn
         al, all_, head = box(al_btn)
-        knobs = QHBoxLayout()
+        knobs = self.al_knobs = QBoxLayout(QBoxLayout.TopToBottom)
         knobs.setSpacing(0)
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "maxgain", "Max Gain", fmt=db_fmt,
                                         unit="dB", name="Auto Level max gain"))
@@ -678,6 +682,13 @@ class DynamicsPanel(StripPanel):
         row.addWidget(al)
         self.lay.addLayout(row, 1)
         self._enable()
+
+    def set_low(self, low):
+        self.al_knobs.setDirection(QBoxLayout.LeftToRight if low else QBoxLayout.TopToBottom)
+        for key, cell in (("dyn_attack", (1, 2) if low else (2, 0)),
+                          ("dyn_release", (1, 3) if low else (2, 1))):
+            self.grid.removeWidget(self.knobs[key])
+            self.grid.addWidget(self.knobs[key], *cell)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
