@@ -5,13 +5,14 @@ ArcLink finds the ARC USB, reads its keys and encoder, and lights its LEDs; Main
 what each key does. ControlRoomPanel is the settings-panel box with the same switches on screen.
 """
 from PySide6.QtCore import QObject, QSocketNotifier, Qt, QTimer, Signal
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QGridLayout, QLabel, QMenu, QPushButton,
 )
 
 from . import arc
 from .control_room import MAX_PHONES, NO_PAIR, control_room, has_speaker_b
-from .model import FADER_MAX_DB, FADER_MIN_DB
+from .model import FADER_MAX_DB, FADER_MIN_DB, NEG_INF, parse_db
 from .theme import Section, key_label, px
 
 SWITCHES = (("dim", "Dim"), ("mono", "Mono"), ("speaker_b", "Speaker B"),
@@ -112,6 +113,19 @@ class Amount(QDoubleSpinBox):
             super().wheelEvent(e)
         else:
             e.ignore()
+
+    # A comma and a point both mean the decimal mark, as in a fader's level box, whatever the
+    # system's language: Qt alone reads "-7,5" as -75 in English and "2.5" as 25 in German.
+    def validate(self, text, pos):
+        typed = text.removesuffix(self.suffix()).strip()
+        if parse_db(typed) not in (None, NEG_INF):
+            return QValidator.Acceptable, text, pos
+        partly = all(c in "+-−.,0123456789" for c in typed)
+        return (QValidator.Intermediate if partly else QValidator.Invalid), text, pos
+
+    def valueFromText(self, text):
+        db = parse_db(text.removesuffix(self.suffix()))
+        return self.value() if db in (None, NEG_INF) else db
 
 
 class Several(QComboBox):

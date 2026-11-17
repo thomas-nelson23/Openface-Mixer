@@ -106,6 +106,28 @@ class ControlRoomTest(WindowCase):
         QTest.keyClick(spin, Qt.Key_Return)
         self.assertEqual(self.cr["dim_db"], -25.0)
 
+    def test_a_comma_and_a_point_both_mean_the_decimal_mark(self):
+        """Whatever the system's language: "2.5" must never become 25 dB (so +6) for Recall."""
+        from PySide6.QtCore import QLocale
+        from openface_mixer.control_panel import Amount
+        was = QLocale()
+        try:
+            for name in ("en_US", "de_DE"):
+                QLocale.setDefault(QLocale(name))
+                spin = Amount(-65.0, 6.0, 0.5)
+                for typed, db in (("-7,5", -7.5), ("-7.5", -7.5), ("2,5", 2.5), ("2.5", 2.5),
+                                  ("-12", -12.0), ("3 dB", 3.0), ("-90", -65.0), ("40", 6.0)):
+                    spin.setValue(-30.0)
+                    spin.lineEdit().setText(typed)
+                    spin.interpretText()
+                    self.assertEqual(spin.value(), db, (name, typed))
+                spin.lineEdit().setText("loud")             # not a level: nothing changes
+                spin.interpretText()
+                self.assertEqual(spin.value(), 6.0, name)
+                spin.deleteLater()
+        finally:
+            QLocale.setDefault(was)
+
     def test_the_wheel_scrolls_the_settings_over_an_amount(self):
         spin = self.panel.amounts["dim_db"]
         scroll = self.w.sidebar.findChild(QScrollArea)
