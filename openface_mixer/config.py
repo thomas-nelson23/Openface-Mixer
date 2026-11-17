@@ -188,7 +188,7 @@ def save_ui_scale(scale):
 def load_device_choice():
     try:
         key = DEVICE_FILE.read_text().strip()
-    except OSError:
+    except (OSError, ValueError):       # ValueError: damaged, not text
         return None
     return key if key in DEVICES else None
 

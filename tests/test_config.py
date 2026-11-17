@@ -290,6 +290,18 @@ class DeviceStateTest(unittest.TestCase):
         self.assertEqual(DEVICES["ff802"].all_channels("in"), set(range(30)))
 
 
+class DeviceChoiceTest(unittest.TestCase):
+    def test_a_damaged_file_is_no_choice(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(config, "DEVICE_FILE", Path(tmp) / "device"):
+            self.assertIsNone(config.load_device_choice())
+            config.save_device_choice(DEVICES["ff802"])
+            self.assertEqual(config.load_device_choice(), "ff802")
+            for content in (b"\xff\xfe\x00", b"toaster\n", b""):
+                config.DEVICE_FILE.write_bytes(content)
+                self.assertIsNone(config.load_device_choice())
+
+
 class UiScaleTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
