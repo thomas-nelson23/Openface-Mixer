@@ -19,7 +19,8 @@ except ImportError:
 ENGINE_STUBS = dict(status=lambda self: None, outdated=lambda self: False,
                     attach=lambda self: False, read_peaks=lambda self: (None, None),
                     write_matrix=lambda self, gains, out: None,
-                    write_device=lambda self, block: None)
+                    write_device=lambda self, block: None,
+                    enable=lambda self: None)       # a test must never enable a real unit
 WINDOW_STUBS = dict(poll_hw=lambda self: None, poll_profile=lambda self: None,
                     ensure_engine=lambda self: None)
 

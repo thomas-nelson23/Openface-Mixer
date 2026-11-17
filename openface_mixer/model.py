@@ -12,9 +12,10 @@ Concepts
 * Solo works like TotalMix: solo-in-place, post fader, and only in the current submix. While
   any source is soloed, the other sources are silent in the selected output pair; every other
   submix is untouched. Solo is momentary monitoring, so it is neither saved nor part of a mix.
-* Strips can carry a custom name (TotalMix's names; the NAMES button switches between them and the
-  standard ones), a colour and an icon, and whole channel groups (an ADAT port, AES, ...) or
-  single strips can be hidden from view. All of these are display only: hidden channels keep routing as before.
+* Strips can carry a custom name (TotalMix's names; "Custom channel names" in the settings
+  switches between them and the standard ones), a colour and an icon, and whole channel groups
+  (an ADAT port, AES, ...) or single strips can be hidden from view. All of these are display
+  only: hidden channels keep routing as before.
 * compute_matrix() flattens the sends into the linear gain matrix that the engine loads into the
   Digiface's DSP mixer, and compute_out_gains() gives the output master levels. They are kept
   apart because the DSP has its own output faders.
@@ -140,7 +141,7 @@ def default_state(selected=N_PAIRS - 1):
         "names": {},                      # strip key -> custom name
         "colors": {},                     # strip key -> "#rrggbb" (TotalMix's channel colours)
         "icons": {},                      # strip key -> icon name (theme.CHANNEL_ICONS)
-        "custom_names": True,             # NAMES button: show custom names (else standard ones)
+        "custom_names": True,             # show custom names (else the standard ones)
         "hidden": [],                     # channel groups not shown ("AD3", "AES", see devices)
         "hidden_strips": [],              # single strips hidden with right-click > Hide channel
     }
@@ -364,7 +365,8 @@ def set_strip_db(st, key, db):
 
 
 def display_name(st, key, standard):
-    """The name a strip shows: its custom name while NAMES is on, else the standard one."""
+    """The name a strip shows: its custom name while custom names are on, else the standard
+    one."""
     return (st["custom_names"] and st["names"].get(key)) or standard
 
 

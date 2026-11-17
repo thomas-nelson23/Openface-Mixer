@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QLineEdit, QSpinBo
 
 from . import APP_ID, APP_NAME
 from . import osc_remote
+from .config import launcher
 from .osc_remote import remote_settings  # noqa: F401  (MainWindow imports it from here)
 from .settings_panel import CYAN, OFF, RED, light
 from .theme import Section, key_label
@@ -48,7 +49,7 @@ def set_autostart(on, device_key, device_name):
             "[Desktop Entry]\nType=Application\n"
             f"Name={APP_NAME} ({device_name}, background)\n"
             "Comment=Keeps the mixer and its network remote running without a window\n"
-            f"Exec=openface-mixer --background --device {device_key}\n"
+            f'Exec="{launcher()}" --background --device {device_key}\n'
             "Icon=audio-card\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
     else:
         f.unlink(missing_ok=True)
@@ -268,6 +269,8 @@ class RemotePanel(Section):
                                   "a window. Opening Openface Mixer shows the window; Ctrl+Q "
                                   "quits it.")
         self.autostart.setChecked(autostart_enabled(dev.key))
+        if self.autostart.isChecked():      # keep the entry's command path current
+            set_autostart(True, dev.key, dev.name)
         self.autostart.toggled.connect(lambda on: set_autostart(on, self.dev.key, self.dev.name))
         g.addWidget(self.autostart, 6, 0, 1, 2)
         g.setColumnStretch(1, 1)
