@@ -73,14 +73,20 @@ class Engine:
             return None
         return struct.unpack_from("<16I", self.m, 0)
 
-    def pid_alive(self):
+    def pid(self):
+        """The process id of the engine that runs on the segment, whatever its layout version,
+        or 0 if none does."""
         h = self.header()
-        if not h or h[HDR_MAGIC] != SHM_MAGIC or h[HDR_VERSION] != SHM_VERSION or not h[HDR_PID]:
-            return False
+        if not h or h[HDR_MAGIC] != SHM_MAGIC or not h[HDR_PID]:
+            return 0
         try:  # /proc/<pid>/comm is truncated to 15 characters
-            return Path(f"/proc/{h[HDR_PID]}/comm").read_text().strip() == ENGINE_BINARY[:15]
+            comm = Path(f"/proc/{h[HDR_PID]}/comm").read_text().strip()
         except OSError:
-            return False
+            return 0
+        return h[HDR_PID] if comm == ENGINE_BINARY[:15] else 0
+
+    def pid_alive(self):
+        return bool(self.pid()) and self.header()[HDR_VERSION] == SHM_VERSION
 
     def status(self):
         """dict with the hardware mixer state and sample rate, or None if the engine isn't
@@ -170,9 +176,9 @@ class Engine:
         if self.has_service():
             subprocess.run(["systemctl", "--user", "stop", self.dev.service])
             return
-        h = self.header()
-        if h and self.pid_alive():
+        pid = self.pid()    # also an older engine's: the new one can't start beside it
+        if pid:
             try:
-                os.kill(h[HDR_PID], 15)
+                os.kill(pid, 15)
             except OSError:
                 pass

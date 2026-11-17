@@ -67,6 +67,29 @@ class SharedMemoryTest(unittest.TestCase):
             self.assertEqual(Path(e.path).stat().st_size, engine.SHM_SIZE)
         self.assertFalse(self.segment().outdated())
 
+    def test_stop_ends_an_engine_of_another_version_too(self):
+        """Without systemd the window stops the engine by the process id in the segment. An
+        older engine has to go as well: the new one does not start beside it."""
+        for version in (engine.SHM_VERSION - 1, engine.SHM_VERSION):
+            e = self.segment(version)
+            self.assertTrue(e.attach())
+            struct.pack_into("<I", e.m, 4 * engine.HDR_PID, 4321)
+            with mock.patch.object(e, "has_service", return_value=False), \
+                    mock.patch.object(engine.os, "kill") as kill:
+                with mock.patch.object(engine.Path, "read_text", return_value="openface-mixer-\n"):
+                    self.assertEqual(e.pid_alive(), version == engine.SHM_VERSION)
+                    e.stop()
+                kill.assert_called_once_with(4321, 15)
+                # the number belongs to another program by now, or to nobody: left alone
+                with mock.patch.object(engine.Path, "read_text", return_value="bash\n"):
+                    e.stop()
+                with mock.patch.object(engine.Path, "read_text", side_effect=FileNotFoundError):
+                    e.stop()
+                    self.assertFalse(e.pid_alive())
+                struct.pack_into("<I", e.m, 4 * engine.HDR_PID, 0)      # a clean shutdown
+                e.stop()
+                kill.assert_called_once_with(4321, 15)
+
 
 class ServiceTest(unittest.TestCase):
     """Starting an engine does not enable it: that waits until the interface has been seen."""
