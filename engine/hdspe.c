@@ -68,14 +68,19 @@ bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor)
 	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == HDSPE_VENDOR_RME);
 }
 
-uint32_t hdspe_std_rate(uint32_t hz)
+uint32_t hdspe_hdspm_rate(uint32_t measured, uint32_t set)
 {
 	static const uint32_t std[] = { 32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400,
 					192000 };
+	uint32_t rate = measured;
 	for (size_t i = 0; i < sizeof(std) / sizeof(std[0]); i++)
-		if (hz > std[i] - std[i] / 50 && hz < std[i] + std[i] / 50)
-			return std[i];
-	return hz;
+		if (measured > std[i] - std[i] / 50 && measured < std[i] + std[i] / 50)
+			rate = std[i];
+	/* as the driver's hdspm_rate_multiplier(): the card can't tell double and quad speed
+	 * from its clock, the speed is the one that was set */
+	if (rate < 56000)
+		rate *= set > 96000 ? 4 : set > 48000 ? 2 : 1;
+	return rate;
 }
 
 /* PCI vendor ID of ALSA card n, or 0 if unknown. */
@@ -227,9 +232,9 @@ static int open_dev(void *h)
 	}
 	r->mixer_numid = info.id.numid;
 
-	/* snd-hdspm's hwdep reports the rate it last set, not the one the card runs at (slaved to
-	 * 96 kHz before any stream ran, it says 48 kHz); this control of its has the measured
-	 * rate. snd-hdspe has no such control, and its hwdep is right. */
+	/* snd-hdspm's hwdep reports the rate it last set, which is not the card's while it follows
+	 * an input at another rate (set to 48 kHz, slaved to 44.1 kHz); this control of its has
+	 * the measured clock. snd-hdspe has no such control, and its hwdep is right. */
 	memset(&info, 0, sizeof(info));
 	info.id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	snprintf((char *)info.id.name, sizeof(info.id.name), "System Sample Rate");
@@ -283,7 +288,8 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 		v.id.numid = r->rate_numid;
 		if (ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) == 0 &&
 		    v.value.integer.value[0] > 0)
-			s->rate = hdspe_std_rate((uint32_t)v.value.integer.value[0]);
+			s->rate = hdspe_hdspm_rate((uint32_t)v.value.integer.value[0],
+						   cfg.system_sample_rate);
 	}
 	s->dev_status = cfg.system_clock_mode | (uint32_t)cfg.autosync_ref << 8;
 

@@ -60,8 +60,10 @@ float hdspe_peak(uint32_t word);
 bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const char *name);
 /* False for a card the driver may not run: a 2022-and-later card (PCI vendor) under snd-hdspm. */
 bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor);
-/* snd-hdspm reports the rate as measured (47998): the standard rate within 2 % of hz, else hz. */
-uint32_t hdspe_std_rate(uint32_t hz);
+/* The rate a card runs at under snd-hdspm, from its measured clock (the "System Sample Rate"
+ * control: 47998, also at 96 and 192 kHz, where the clock runs at single speed) and the rate
+ * the driver set last, which holds the speed. A standard rate within 2 % is taken as that. */
+uint32_t hdspe_hdspm_rate(uint32_t measured, uint32_t set);
 
 extern const struct hdspe_model hdspe_raydat, hdspe_aio, hdspe_aio_pro, hdspe_aes;
 
