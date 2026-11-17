@@ -1,21 +1,26 @@
 """Updating an install from the git checkout it was installed from.
 
 scripts/install.sh records that checkout and its commit in <share>/install-source. Checking
-fetches origin/main there; updating backs up the config directory, fast-forwards the checkout
-and runs the installer again, which also restarts the engines so they match the new GUI.
+fetches origin/main and the release tags there; updating backs up the config directory,
+fast-forwards the checkout and runs the installer again, which also restarts the engines so
+they match the new GUI. An update moves to the newest release, a tag vMAJOR.MINOR.PATCH on
+main, or to main itself for people who chose the latest changes and while there is no release.
 A copy installed by a distribution package has "package" there and is left to its package
 manager.
 """
 import os
+import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
+from . import __version__
 from .config import CONFIG_DIR
 
 SOURCE_FILE = Path(__file__).resolve().parent.parent / "install-source"
 BRANCH = "main"
+RELEASE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 KEEP_BACKUPS = 3             # config backups kept, one is made before every update
 
 
@@ -46,10 +51,10 @@ def manual_hint():
             "update: cd into your Openface-Mixer folder, then git pull && make install")
 
 
-def _git(src, *args, timeout=60):
+def _git(src, *args, timeout=60, env=None):
     try:
         r = subprocess.run(["git", "-C", str(src), *args], capture_output=True, text=True,
-                           timeout=timeout, stdin=subprocess.DEVNULL)
+                           timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise UpdateError(f"git {args[0]}: {e}") from e
     if r.returncode:
@@ -57,11 +62,60 @@ def _git(src, *args, timeout=60):
     return r.stdout.strip()
 
 
-def check(src, installed):
-    """Fetch and return the subjects of the commits on origin/main that aren't installed."""
-    _git(src, "fetch", "--quiet", "origin", BRANCH)
-    log = _git(src, "log", "--format=%s", f"{installed}..origin/{BRANCH}")
-    return log.splitlines() if log else []
+def _release_number(tag):
+    m = RELEASE.fullmatch(tag)
+    return m and tuple(int(n) for n in m.groups())
+
+
+def _releases(src, tip, timeout=60):
+    """The release tags at or below the commit tip, the newest version last."""
+    tags = _git(src, "tag", "--list", "v*", "--merged", tip, timeout=timeout).split()
+    return sorted(filter(_release_number, tags), key=_release_number)
+
+
+def _target(src, releases):
+    """(release number or None, commit) an update moves to: the newest release on origin/main,
+    or origin/main itself when releases is off (the latest changes) or there is none yet."""
+    tags = _releases(src, f"origin/{BRANCH}") if releases else []
+    if not tags:
+        return None, f"origin/{BRANCH}"
+    return tags[-1][1:], f"refs/tags/{tags[-1]}^{{commit}}"
+
+
+def version_text(source):
+    """The installed copy in words: "Version 0.4.0" on a release, "Version 0.4.0 + 12 changes
+    (abc1234)" past one, and this package's own number where git can't tell (source: what
+    install_source() gave)."""
+    if source is None:
+        return f"Version {__version__}"
+    src, installed = source
+    try:
+        tags = _releases(src, installed, timeout=5)
+        ahead = int(_git(src, "rev-list", "--count", f"{tags[-1]}..{installed}", timeout=5)
+                    if tags else 0)
+    except (UpdateError, ValueError):
+        tags = []
+    if not tags:
+        return f"Version {__version__} ({installed[:7]})"
+    if not ahead:
+        return f"Version {tags[-1][1:]}"
+    return (f"Version {tags[-1][1:]} + {ahead} change{'s' if ahead > 1 else ''} "
+            f"({installed[:7]})")
+
+
+def check(src, installed, releases=True, quiet=False):
+    """Fetch, and return (the release an update installs or None, the subjects of the commits
+    it brings that aren't installed). quiet: never ask for a password or a passphrase."""
+    env = None
+    if quiet:
+        ssh = os.environ.get("GIT_SSH_COMMAND", "ssh") + " -oBatchMode=yes"
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "",
+               "GIT_SSH_COMMAND": ssh}
+    # origin's release tags replace local ones of the same name, so a moved tag is followed
+    _git(src, "fetch", "--quiet", "origin", BRANCH, "+refs/tags/v*:refs/tags/v*", env=env)
+    release, commit = _target(src, releases)
+    log = _git(src, "log", "--format=%s", f"{installed}..{commit}")
+    return release, log.splitlines() if log else []
 
 
 def backup_config():
@@ -77,14 +131,19 @@ def backup_config():
     return dest
 
 
-def update(src):
-    """Back up the mixes, fast-forward the checkout to origin/main and reinstall."""
-    if _git(src, "symbolic-ref", "--short", "HEAD") != BRANCH:
+def update(src, releases=True):
+    """Back up the mixes, fast-forward the checkout to what the last check found (_target)
+    and reinstall. The checkout stays on its main branch and never moves backwards."""
+    if _git(src, "rev-parse", "--abbrev-ref", "HEAD") != BRANCH:
         raise UpdateError(f"{src} is not on the {BRANCH} branch; update it by hand.")
     if _git(src, "status", "--porcelain", "--untracked-files=no"):
         raise UpdateError(f"{src} has local changes; update it by hand.")
+    commit = _target(src, releases)[1]
+    ahead, behind = _git(src, "rev-list", "--left-right", "--count", f"HEAD...{commit}").split()
+    if int(ahead) and int(behind):
+        raise UpdateError(f"{src} has commits of its own; update it by hand.")
     backup_config()
-    _git(src, "merge", "--ff-only", f"origin/{BRANCH}")
+    _git(src, "merge", "--ff-only", commit)
     # A new session has no terminal, so sudo fails instead of waiting for a password nobody
     # can type; the installer only needs it for missing packages and changed udev rules.
     # PREFIX: reinstall where this copy is (<prefix>/share/openface-mixer/install-source).
