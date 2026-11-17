@@ -16,20 +16,20 @@ import os
 import re
 from pathlib import Path
 
-from .control_room import control_room
+from .control_room import ENCODER_TARGETS, control_room, encoder_target
 
 CARDS = Path("/proc/asound/cards")
 CARD_NAME = re.compile(r"\bARC\b", re.I)
 
 # Actions, as TotalMix offers them for ARC keys. "snapshot:N" (1..8) recalls preset slot N.
-ACTIONS = ("dim", "mono", "speaker_b", "talkback", "ext_in", "phones", "main") + tuple(
+ACTIONS = ("dim", "mono", "speaker_b", "talkback", "ext_in", "phones", "phones2", "main") + tuple(
     f"snapshot:{n}" for n in range(1, 9))
 
 # TotalMix's default ARC USB layout (printed on the unit): rows 1-2 snapshots 1-8; row 3 Mono,
 # Volume Phones 1, Volume Phones 2, External Input; bottom Talkback, Speaker B, Dim.
-# The Digiface has one phones output, so both phones keys select it.
+# With one Phones pair in the control room, both phones keys select it.
 DEFAULT_KEYS = [f"snapshot:{n}" for n in range(1, 9)] + [
-    "mono", "phones", "phones", "ext_in", "talkback", "speaker_b", "dim"]
+    "mono", "phones", "phones2", "ext_in", "talkback", "speaker_b", "dim"]
 FIRST_NOTE = 0x36
 N_KEYS = 15
 ENCODER_CC = 16
@@ -69,10 +69,8 @@ def key_lit(st, action, active_slot):
     cr = control_room(st)
     if action.startswith("snapshot:"):
         return active_slot == int(action.split(":")[1]) - 1
-    if action == "phones":
-        return cr["encoder"] == "phones"
-    if action == "main":
-        return cr["encoder"] == "main"
+    if action in ENCODER_TARGETS:
+        return encoder_target(st, cr["encoder"]) == encoder_target(st, action)
     return bool(cr.get(action))
 
 
