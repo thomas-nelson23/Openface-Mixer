@@ -63,6 +63,8 @@
 #define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
 #define HW_STATUS_TICKS  25  /* read device status every 500 ms */
 #define HW_RETRY_TICKS   50  /* look for the device every second */
+#define HW_LOG_EVERY     60  /* a device that keeps failing is logged once in this many rounds */
+#define HW_STABLE_TICKS  500 /* and counts as working again once it has stayed open for 10 s */
 
 #define MAX_OBJ 2048
 
@@ -99,6 +101,8 @@ struct data {
 	struct spa_source *hw_timer;
 	unsigned int hw_ticks;
 	bool hw_need_full;    /* rewrite every node, e.g. after the device was reset */
+	unsigned int hw_fails;  /* times the device was lost since it last kept working */
+	unsigned int hw_opened; /* hw_ticks when it was opened */
 
 	/* hardware meters are read on their own thread; usb_lock keeps device I/O on the main loop
 	 * and the meter reads apart */
@@ -451,9 +455,19 @@ static const struct pw_registry_events registry_events = {
 
 /* ---------- hardware mixer ---------- */
 
+/* The device is retried every second, so one that is lost again right after each open is logged
+ * for the first two rounds and then once in HW_LOG_EVERY. */
+static bool hw_log(const struct data *d)
+{
+	return d->hw_fails < 2 || d->hw_fails % HW_LOG_EVERY == 0;
+}
+
 static void hw_lost(struct data *d, int err)
 {
-	fprintf(stderr, "openface-mixer: lost the %s mixer: %d\n", d->be->name, err);
+	if (hw_log(d))
+		fprintf(stderr, "openface-mixer: lost the %s mixer: %d%s\n", d->be->name, err,
+			d->hw_fails ? " (still failing)" : "");
+	d->hw_fails++;
 	d->be->close(d->hw);
 	d->shm->hw_state = DFU_STATE_ERROR;
 	d->shm->hw_nodes = 0;
@@ -494,7 +508,9 @@ static void hw_tick_locked(struct data *d)
 		if (!be->is_open(d->hw))
 			return;
 		d->hw_need_full = true;
-		fprintf(stderr, "openface-mixer: opened the %s mixer\n", be->name);
+		d->hw_opened = d->hw_ticks;
+		if (hw_log(d))
+			fprintf(stderr, "openface-mixer: opened the %s mixer\n", be->name);
 	}
 
 	if (d->hw_need_full || d->hw_ticks % HW_STATUS_TICKS == 0) {
@@ -502,6 +518,12 @@ static void hw_tick_locked(struct data *d)
 		if (r < 0) {
 			hw_lost(d, r);
 			return;
+		}
+		if (d->hw_fails && d->hw_ticks - d->hw_opened >= HW_STABLE_TICKS) {
+			if (!hw_log(d))   /* the lines that would say so were left out */
+				fprintf(stderr, "openface-mixer: the %s mixer works again\n",
+					be->name);
+			d->hw_fails = 0;
 		}
 		if (reset) {
 			fprintf(stderr, "openface-mixer: hardware mixer was reset, restoring\n");
@@ -516,7 +538,9 @@ static void hw_tick_locked(struct data *d)
 	}
 	if (d->hw_need_full) {
 		d->hw_need_full = false;
-		fprintf(stderr, "openface-mixer: hardware mixer on, %d routes\n", be->routes(d->hw));
+		if (hw_log(d))
+			fprintf(stderr, "openface-mixer: hardware mixer on, %d routes\n",
+				be->routes(d->hw));
 	}
 	s->hw_state = r == -ENOSPC ? DFU_STATE_NO_NODES : DFU_STATE_ACTIVE;
 	s->hw_nodes = (uint32_t)be->routes(d->hw);

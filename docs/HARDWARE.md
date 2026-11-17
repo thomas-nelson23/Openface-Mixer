@@ -119,6 +119,18 @@ with `specifier_id 0x000a35`, `version 0x000005`) and sends asynchronous transac
 firewire-core character device ioctls. That needs read/write access to `/dev/fwN`:
 `packaging/70-rme-fireface.rules` gives it to the `audio` group and the logged-in user.
 
+A request that fails because the bus was reset (plugging in another FireWire device does that)
+is tried again in the new bus generation, up to three times 20 ms apart, as the kernel's
+`snd_fw_transaction` does. The engine waits for firewire-core's own 2 s transaction timeout
+instead of giving up earlier. Any other failure is logged with the request kind, the register
+and the response code, for example `FireWire write at 0xffff0000001c failed: address error
+(rcode 0x7)`; a failure that repeats is logged once a minute. A read that returns fewer bytes
+than asked for counts as a failure.
+
+A sync sends for at most 10 ms of each 20 ms engine tick and carries the rest over, so the
+full send after a connect (about 2,300 writes on the 802) takes a few seconds while the
+meters and the engine's heartbeat keep running.
+
 ## Registers
 
 All values are little-endian quadlets.

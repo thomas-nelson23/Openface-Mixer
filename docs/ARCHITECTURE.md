@@ -46,8 +46,9 @@ the engine is the same for all of them.
   to date; files from before the 36-channel layout are moved into place. When it exits, the
   interface keeps mixing with the last mix.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
-  mix and all settings, about 2,300 transactions (over USB, the same as register writes, spread
-  over the ticks the MIDI output buffer needs). The 800 takes its mixer as one block write
+  mix and all settings, about 2,300 transactions, 10 ms of them per tick so the meters and the
+  heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
+  output buffer needs). The 800 takes its mixer as one block write
   per output, so a full send is about 60 transactions.
 
 ## Shared memory (`engine/shm_layout.h`)
