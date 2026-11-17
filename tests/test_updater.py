@@ -191,6 +191,15 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(updater.check(self.src, self.installed), ("0.4.0", ["third", "second"]))
         self.assertEqual(self.update(), fixed)
 
+    def test_a_check_keeps_the_tags_that_are_only_in_the_checkout(self):
+        for setting in ("fetch.prune", "fetch.pruneTags", "remote.origin.prune"):
+            git(self.src, "config", setting, "true")    # git would delete them for these
+        git(self.src, "tag", "v0.5.0")                  # made here and not pushed yet
+        git(self.src, "tag", "mine")
+        self.commit(self.up, "second", tag="v0.4.0")
+        updater.check(self.src, self.installed)
+        self.assertEqual(git(self.src, "tag").split(), ["mine", "v0.4.0", "v0.5.0"])
+
     def test_a_quiet_check_never_asks_and_fails_as_an_update_error(self):
         # an ssh remote and a stand-in ssh that notes how it was called and can't connect
         ssh, seen = self.tmp / "ssh", self.tmp / "seen"

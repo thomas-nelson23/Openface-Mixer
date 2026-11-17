@@ -111,8 +111,10 @@ def check(src, installed, releases=True, quiet=False):
         ssh = os.environ.get("GIT_SSH_COMMAND", "ssh") + " -oBatchMode=yes"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "",
                "GIT_SSH_COMMAND": ssh}
-    # origin's release tags replace local ones of the same name, so a moved tag is followed
-    _git(src, "fetch", "--quiet", "origin", BRANCH, "+refs/tags/v*:refs/tags/v*", env=env)
+    # origin's release tags replace local ones of the same name, so a moved tag is followed;
+    # --no-prune: with fetch.prune set, git would delete the v* tags that are only here
+    _git(src, "fetch", "--quiet", "--no-prune", "origin", BRANCH,
+         "+refs/tags/v*:refs/tags/v*", env=env)
     release, commit = _target(src, releases)
     log = _git(src, "log", "--format=%s", f"{installed}..{commit}")
     return release, log.splitlines() if log else []
