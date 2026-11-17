@@ -549,6 +549,7 @@ class Strip(QFrame):
         readouts.setSpacing(px(2))
         self.value = lcd_label("0.0")
         self.value.setToolTip("Fader level (dB)")
+        self._limited = ""
         self.peak = lcd_label("-∞")
         self.peak.setToolTip("Peak level (dBFS) — click the meter to reset")
         readouts.addWidget(self.value)
@@ -600,6 +601,14 @@ class Strip(QFrame):
     def set_fader(self, db):
         self.fader.set_db(db)
         self.value.setText(fmt_db(db))
+
+    def set_limited(self, why):
+        """Mark the level readout, as a clipped peak, while the hardware can't play the level
+        the fader shows (why: the tooltip saying so, "" when it can)."""
+        if why != self._limited:
+            self._limited = why
+            self.value.setStyleSheet(lcd_style("#ff2a4f", "white") if why else lcd_style())
+            self.value.setToolTip(why or "Fader level (dB)")
 
     def contextMenuEvent(self, e):
         self.context_requested.emit(e.globalPos())

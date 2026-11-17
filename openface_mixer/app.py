@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fx, osc_remote
+from . import arc, control_room, fx, hdspe, osc_remote
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
@@ -27,7 +27,7 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
+    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, compute_matrix,
     compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
     set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels,
     strip_color, strip_hidden, strip_icon, strip_key,
@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
+        self._limited = set()              # HDSPe: crosspoints held at +6 dB (show_limited)
         self.fx_panels = {}                # (kind of panel, strip key) -> open effect panel
         self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
@@ -558,6 +559,7 @@ class MainWindow(QMainWindow):
             gdb, pan = self.st["sends"][kind][s.channels[0]][p]
             s.set_fader(NEG_INF if gdb is None else gdb)
             s.pan.set_value(pan)
+        self.show_limited()
 
     # ------------------------------------------------------------------ model updates
     def select_out(self, idx, by_pair=False):
@@ -1007,13 +1009,36 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
-        self.engine.write_matrix(*control_room.apply(self.st, compute_matrix(self.st),
-                                                     compute_out_gains(self.st)))
+        gains, out_gains = control_room.apply(self.st, compute_matrix(self.st),
+                                              compute_out_gains(self.st))
+        self.engine.write_matrix(gains, out_gains)
         self.engine.write_device(device_block(self.st, self.dev))
+        if self.dev.family == "hdspe":
+            self._limited = hdspe.limited(gains, out_gains, N_SRC)
+            self.show_limited()
         self.matrix.update()
         self.control.refresh()
         self.update_arc_leds()
         self.schedule_save()
+
+    def show_limited(self):
+        """An HDSPe card has no output fader: its output level is part of every send, and a
+        send stops at +6 dB. Mark the faders that ask for more than that."""
+        if self.dev.family != "hdspe":
+            return
+        outs = {o for o, _src in self._limited}
+        sel = self.st["selected"]
+        for s in self.strips.values():
+            if s.kind == "out":
+                on = not outs.isdisjoint(s.channels)
+                s.set_limited("Some sends to this output are held at +6 dB, the most the card "
+                              "can do. Lower this level to get them back." if on else "")
+            else:
+                base = 0 if s.kind == "in" else N_IN
+                on = any((o, base + c) in self._limited
+                         for o in (2 * sel, 2 * sel + 1) for c in s.channels)
+                s.set_limited("Held at +6 dB: this send and the output level add up to more "
+                              "than the card can do." if on else "")
 
     # ------------------------------------------------------------------ ARC USB
     def arc_key(self, key, pressed):

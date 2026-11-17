@@ -441,7 +441,9 @@ The hardware matrix is write only; the driver keeps a copy, which reads of the c
 The driver zeroes the whole mixer when it loads, so the card is silent until a mixer program
 sets it up. It answers writes with `EBUSY` while playback and capture are open in two different
 processes. There are no output faders: like TotalMix and hdspmixer, Openface Mixer multiplies
-each send by its output's master level. The engine writes only changed crosspoints, reads one
+each send by its output's master level. The product stops at the mixer's +6 dB, so with an
+output above 0 dB its loudest sends are held there; the GUI marks those faders' level readouts
+(`hdspe.limited()`) and leaves the saved levels alone. The engine writes only changed crosspoints, reads one
 output's sends back from the driver every 500 ms, and sends everything again if they differ (the
 driver was reloaded, or another program changed the mixer). snd-hdspe also mutes the mixer
 channels that don't exist when the speed mode changes; the same read-back catches that and

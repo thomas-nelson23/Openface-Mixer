@@ -3,6 +3,7 @@ import importlib.util
 import os
 import subprocess
 import unittest
+from array import array
 from pathlib import Path
 from unittest import mock
 
@@ -170,6 +171,10 @@ CARDS = """\
 RAYDAT, AIO, AES = rd.MODELS["raydat"], rd.MODELS["aio"], rd.MODELS["aes"]
 
 
+def m_default_mix():
+    st = m.default_state(0)
+    return m.compute_matrix(st), m.compute_out_gains(st)
+
 
 class ChannelTest(unittest.TestCase):
     def test_counts(self):
@@ -289,6 +294,17 @@ class StatusTest(unittest.TestCase):
         cur["value"] = cur["values"][0] = cur["items"].index("Intern")
         st = rd.decode_status(c)
         self.assertEqual((st["mode"], st["source"]), (None, "AutoSync, on Internal"))
+
+    def test_limited(self):
+        gains = array("f", bytes(4 * 4 * 3))
+        out_gains = array("f", [1.0, m.db2lin(6.0), 0.0, 1.5])
+        gains[0 * 3 + 0] = 1.99          # +6 dB send, output at 0 dB: fine
+        gains[1 * 3 + 0] = 1.0           # 0 dB into an output at +6 dB: just fits
+        gains[1 * 3 + 1] = 1.2           # more than the card can do
+        gains[2 * 3 + 2] = 1.99          # muted output
+        gains[3 * 3 + 2] = 1.5
+        self.assertEqual(rd.limited(gains, out_gains, 3), {(1, 1), (3, 2)})
+        self.assertEqual(rd.limited(*m_default_mix(), m.N_SRC), set())
 
     def test_run(self):
         done = subprocess.CompletedProcess([], 0, "out", "")
@@ -513,6 +529,15 @@ class PanelTest(unittest.TestCase):
             self.assertEqual(p.rd_combos["clock"].isEnabled(), anyway)
             self.assertEqual("Settings are off" in p.rd_info.text(), not anyway)
 
+    def test_limited_readout(self):
+        from openface_mixer import widgets
+        s = widgets.Strip("in:0", "AN 1", [0], "in")
+        plain = s.value.styleSheet()
+        s.set_limited("Held at +6 dB")
+        self.assertNotEqual(s.value.styleSheet(), plain)
+        self.assertEqual(s.value.toolTip(), "Held at +6 dB")
+        s.set_limited("")
+        self.assertEqual((s.value.styleSheet(), s.value.toolTip()), (plain, "Fader level (dB)"))
 
 
 if __name__ == "__main__":

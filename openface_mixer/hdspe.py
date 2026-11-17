@@ -21,6 +21,7 @@ import re
 
 HDSPM, HDSPE = "HDSPM", "HDSPe"       # ALSA driver names of snd-hdspm and snd-hdspe
 VENDOR_RME = 0x1d18                   # PCI vendor of the 2022-and-later cards (older: Xilinx)
+GAIN_MAX = 65535 / 32768              # the mixer's highest gain, +6 dB (engine/hdspe.h)
 
 
 class Model:
@@ -199,6 +200,14 @@ def driver_usable(driver, pci_vendor):
     """False for a card the driver can't run: a 2022-and-later card under snd-hdspm (the engine
     applies the same rule, hdspe_driver_usable)."""
     return not (driver == HDSPM and pci_vendor == VENDOR_RME)
+
+
+def limited(gains, out_gains, n_src):
+    """The (output, source) crosspoints the card can't play as set. It has no output fader: the
+    engine folds the output level into every send (gains[out * n_src + src] * out_gains[out]),
+    and the mixer stops at +6 dB."""
+    return {(o, k) for o, master in enumerate(out_gains) if master > 0
+            for k in range(n_src) if gains[o * n_src + k] * master > GAIN_MAX}
 
 
 def profile(ctrls):
