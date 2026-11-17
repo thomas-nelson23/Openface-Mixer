@@ -485,7 +485,10 @@ node names only carry the slot.
 
 The hwdep ioctl `SNDRV_HDSPM_IOCTL_GET_PEAK_RMS` returns peak and RMS values for 64 inputs,
 playback channels and outputs. Peaks: bits 8–30 are the level, full scale `0x7fffff`; bits 0–3
-count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate.
+count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate. Under snd-hdspm that is the
+rate the driver last set, not the one the card runs at (slaved to a 96 kHz clock before any
+stream has run, it says 48 kHz), so there the engine reads the `System Sample Rate` control,
+which is measured (47998), and takes the standard rate within 2 % of it.
 
 The settings are ordinary ALSA controls, which the GUI reads and writes with amixer, addressed
 by `numid` (snd-hdspe puts them on the CARD interface, which `amixer cset name=…` alone doesn't

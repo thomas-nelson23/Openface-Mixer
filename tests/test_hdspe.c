@@ -56,6 +56,13 @@ int main(void)
 	check("old card, snd-hdspe", hdspe_driver_usable("HDSPe", 0x10ee), 1);
 	check("unknown vendor, snd-hdspm", hdspe_driver_usable("HDSPM", 0), 1);
 
+	check("measured 48k", hdspe_std_rate(47998), 48000);
+	check("measured 96k", hdspe_std_rate(96003), 96000);
+	check("44.1k isn't 48k", hdspe_std_rate(44100), 44100);
+	check("192k", hdspe_std_rate(191990), 192000);
+	check("varispeed stays", hdspe_std_rate(46000), 46000);
+	check("no clock", hdspe_std_rate(0), 0);
+
 	if (!failed)
 		printf("test_hdspe: ok\n");
 	return failed;

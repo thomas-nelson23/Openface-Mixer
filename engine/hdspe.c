@@ -32,6 +32,7 @@ struct hdspe {
 	int ctl;      /* /dev/snd/controlC<n>, -1 while closed */
 	int hwdep;    /* /dev/snd/hwC<n>D0 */
 	unsigned int mixer_numid;
+	unsigned int rate_numid;     /* snd-hdspm's "System Sample Rate" control, 0 under snd-hdspe */
 	uint16_t sent[HDSPE_MAX_CH][N_SRC_MAX];
 	int routes;
 	int check_out;   /* output whose sends the next status call reads back */
@@ -64,6 +65,16 @@ bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const cha
 bool hdspe_driver_usable(const char *driver, unsigned int pci_vendor)
 {
 	return !(strcmp(driver, "HDSPM") == 0 && pci_vendor == HDSPE_VENDOR_RME);
+}
+
+uint32_t hdspe_std_rate(uint32_t hz)
+{
+	static const uint32_t std[] = { 32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400,
+					192000 };
+	for (size_t i = 0; i < sizeof(std) / sizeof(std[0]); i++)
+		if (hz > std[i] - std[i] / 50 && hz < std[i] + std[i] / 50)
+			return std[i];
+	return hz;
 }
 
 /* PCI vendor ID of ALSA card n, or 0 if unknown. */
@@ -203,6 +214,14 @@ static int open_dev(void *h)
 	}
 	r->mixer_numid = info.id.numid;
 
+	/* snd-hdspm's hwdep reports the rate it last set, not the one the card runs at (slaved to
+	 * 96 kHz before any stream ran, it says 48 kHz); this control of its has the measured
+	 * rate. snd-hdspe has no such control, and its hwdep is right. */
+	memset(&info, 0, sizeof(info));
+	info.id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	snprintf((char *)info.id.name, sizeof(info.id.name), "System Sample Rate");
+	r->rate_numid = ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &info) == 0 ? info.id.numid : 0;
+
 	char path[32];
 	snprintf(path, sizeof(path), "/dev/snd/hwC%dD0", card);
 	r->hwdep = open(path, O_RDONLY | O_CLOEXEC);
@@ -239,6 +258,14 @@ static int status(void *h, struct ofm_shm *s, bool *reset)
 	if (ioctl(r->hwdep, SNDRV_HDSPM_IOCTL_GET_CONFIG, &cfg) < 0)
 		return -errno;
 	s->rate = cfg.system_sample_rate;
+	if (r->rate_numid) {
+		struct snd_ctl_elem_value v;
+		memset(&v, 0, sizeof(v));
+		v.id.numid = r->rate_numid;
+		if (ioctl(r->ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) == 0 &&
+		    v.value.integer.value[0] > 0)
+			s->rate = hdspe_std_rate((uint32_t)v.value.integer.value[0]);
+	}
 	s->dev_status = cfg.system_clock_mode | (uint32_t)cfg.autosync_ref << 8;
 
 	/* The mixer can't be read from the card, but the driver's copy tells whether it was
