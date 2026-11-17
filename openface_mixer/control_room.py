@@ -1,4 +1,5 @@
-"""TotalMix-style control room functions: Main Out, Dim, Mono, Speaker B, Talkback, External In.
+"""TotalMix-style control room functions: Main Out, Dim, Recall, Mono, Speaker B, Phones,
+Talkback, External In.
 
 These are what the ARC USB's keys and encoder drive. Pure Python, no Qt. They live in
 st["control_room"] (not in MIX_KEYS, so presets don't recall them, as in TotalMix) and are applied
@@ -9,23 +10,27 @@ from .model import (
 )
 
 ENCODER_STEP_DB = 0.5     # per encoder click, like TotalMix's ARC volume steps
-ENCODER_TARGETS = ("main", "phones")
+ENCODER_TARGETS = ("main", "phones", "phones2")    # Main Out, the first and the second Phones
 NO_PAIR = -1              # main_b when no Speaker B pair is assigned
-CR_VERSION = 2            # 2: the Speaker B pair is silent while Speaker B is off
+MAX_PHONES = 4            # as TotalMix
+# 2: the Speaker B pair is silent while Speaker B is off
+# 3: several Phones pairs; Talkback goes to them, and talkback_dests are further outputs
+CR_VERSION = 3
 
 
 def default_control_room(phones=N_PAIRS - 1):
     return {
         "main": 0,                # output pair that is Main Out (AD1 1/2, AN 1/2)
         "main_b": NO_PAIR,        # Speaker B pair, or NO_PAIR; silent while Speaker B is off
-        "phones": phones,         # the device's (first) headphone pair
+        "phones": [phones],       # up to MAX_PHONES pairs, the device's first headphones to start
         "dim": False,
         "dim_db": -20.0,
+        "recall_db": -10.0,       # the Main Out level that Recall goes back to
         "mono": False,
         "speaker_b": False,
         "talkback": False,
         "talkback_src": 0,        # hardware input channel used as the talkback mic
-        "talkback_dests": [phones],
+        "talkback_dests": [],     # output pairs that get Talkback besides the Phones
         "talkback_dim_db": -20.0,  # other signals on the talkback outputs while talking
         "ext_in": False,
         "ext_src": 0,             # left channel of the hardware input pair for External Input
@@ -57,22 +62,34 @@ def load(st, phones):
     def pair(v):
         return is_index(v, N_PAIRS)
 
+    def pairs(v):
+        return isinstance(v, list) and all(pair(p) for p in v)
+
     def cut(v):
         return is_num(v) and v <= 0
 
     valid = {
-        "main": pair, "phones": pair, "main_b": lambda v: v == NO_PAIR or pair(v),
+        "main": pair, "main_b": lambda v: v == NO_PAIR or pair(v),
+        "phones": lambda v: pairs(v) and len(v) <= MAX_PHONES,
         "talkback_src": lambda v: is_index(v, N_IN), "ext_src": lambda v: is_index(v, N_IN - 1),
-        "talkback_dests": lambda v: isinstance(v, list) and all(pair(p) for p in v),
-        "dim_db": cut, "talkback_dim_db": cut, "encoder": lambda v: v in ENCODER_TARGETS,
+        "talkback_dests": pairs, "dim_db": cut, "talkback_dim_db": cut,
+        "recall_db": lambda v: is_num(v) and FADER_MIN_DB <= v <= FADER_MAX_DB,
+        "encoder": lambda v: v in ENCODER_TARGETS,
     }
     if not isinstance(st.get("control_room"), dict):
         st["control_room"] = {}
     cr = st["control_room"]
+    one = cr.get("phones")
+    if pair(one):
+        # Up to version 2 there was one Phones pair, and Talkback went to talkback_dests
+        # alone: that pair, unless the file was edited by hand.
+        cr["phones"] = [one]
+        if pairs(cr.get("talkback_dests")):
+            cr["talkback_dests"] = [p for p in cr["talkback_dests"] if p != one]
     for k, default in default_control_room(phones).items():
         if k in cr and not valid.get(k, lambda v: isinstance(v, type(default)))(cr[k]):
             cr[k] = default
-    control_room(st, phones)["talkback"] = False
+    control_room(st, phones).update(talkback=False, version=CR_VERSION)
     return cr
 
 
@@ -91,8 +108,11 @@ def toggle(st, key):
 
 
 def encoder_pair(st):
+    """The output pair the ARC encoder turns: Main Out, or the Phones pair chosen with the
+    ARC's Phones keys (the last one there is if it asks for more, Main Out if there is none)."""
     cr = control_room(st)
-    return cr["phones"] if cr["encoder"] == "phones" else cr["main"]
+    phones = cr["phones"][:ENCODER_TARGETS.index(cr["encoder"])][-1:]
+    return phones[0] if phones else cr["main"]
 
 
 def step_volume(st, clicks):
@@ -155,7 +175,7 @@ def apply(st, gains, out_gains, talkback=True):
     if talkback and cr["talkback"]:
         f = db2lin(cr["talkback_dim_db"])
         src = min(cr["talkback_src"], N_IN - 1)
-        for p in cr["talkback_dests"]:
+        for p in {*cr["phones"], *cr["talkback_dests"]}:
             for o in (2 * p, 2 * p + 1):
                 for i in row(o):
                     gains[i] *= f

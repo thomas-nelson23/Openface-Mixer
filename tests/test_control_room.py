@@ -115,12 +115,62 @@ class ControlRoomTest(unittest.TestCase):
         self.assertAlmostEqual(gain(g, ph, m.N_IN + ph), 0.1, places=6)   # playback dimmed
         self.assertAlmostEqual(gain(g, 0, 0), 1.0)                         # main untouched
 
+    def talkback_pairs(self, st):
+        g, _ = run(st)
+        return [p for p in range(m.N_PAIRS) if gain(g, 2 * p, 7) or gain(g, 2 * p + 1, 7)]
+
+    def test_talkback_follows_the_phones(self):
+        st = mixed()
+        c = cr.control_room(st)
+        c.update(talkback=True, talkback_src=7)
+        self.assertEqual(self.talkback_pairs(st), [m.N_PAIRS - 1])
+        c["phones"] = [5]                           # another pair chosen as Phones
+        self.assertEqual(self.talkback_pairs(st), [5])
+        g, _ = run(st)
+        self.assertAlmostEqual(gain(g, 10, m.N_IN + 10), 0.1, places=6)
+        self.assertEqual(gain(g, 2 * (m.N_PAIRS - 1), m.N_IN + 2 * (m.N_PAIRS - 1)), 1.0)
+        c["phones"] = [5, 6, 8, 9]                  # all four of them
+        self.assertEqual(self.talkback_pairs(st), [5, 6, 8, 9])
+        c["phones"] = []
+        self.assertEqual(self.talkback_pairs(st), [])
+
+    def test_talkback_to_further_outputs(self):
+        st = mixed()
+        c = cr.control_room(st)
+        c.update(talkback=True, talkback_src=7, phones=[5], talkback_dests=[2, 5],
+                 talkback_dim_db=-6.0)
+        self.assertEqual(self.talkback_pairs(st), [2, 5])
+        g, _ = run(st)
+        for p in (2, 5):                            # dimmed once, also where both name it
+            self.assertAlmostEqual(gain(g, 2 * p, m.N_IN + 2 * p), m.db2lin(-6.0), places=6)
+
+    def test_dim_amount(self):
+        st = mixed()
+        cr.control_room(st).update(dim=True, dim_db=-6.0)
+        _, og = run(st)
+        self.assertAlmostEqual(og[0], m.db2lin(-6.0), places=6)
+        self.assertEqual(og[2 * (m.N_PAIRS - 1)], 1.0)          # Dim is for Main Out only
+
     def test_encoder_steps_main_then_phones(self):
         st = m.default_state()
         self.assertEqual(cr.step_volume(st, -4), (0, -2.0))
         cr.control_room(st)["encoder"] = "phones"
         self.assertEqual(cr.step_volume(st, 3), (m.N_PAIRS - 1, 1.5))
         self.assertEqual(st["out"][0]["gain"], -2.0)
+
+    def test_encoder_on_the_second_phones(self):
+        st = m.default_state()
+        c = cr.control_room(st)
+        c["encoder"] = "phones2"
+        self.assertEqual(cr.encoder_pair(st), m.N_PAIRS - 1)    # only one: that one
+        c["phones"] = [4, 6, 9]
+        self.assertEqual(cr.encoder_pair(st), 6)
+        c["encoder"] = "phones"
+        self.assertEqual(cr.encoder_pair(st), 4)
+        c["phones"] = []
+        self.assertEqual(cr.encoder_pair(st), 0)                # none: Main Out
+        c["encoder"] = "main"
+        self.assertEqual(cr.encoder_pair(st), 0)
 
     def test_encoder_clamps(self):
         st = m.default_state()
@@ -153,7 +203,9 @@ class LoadTest(unittest.TestCase):
 
     def test_wrong_values_go_back_to_their_defaults(self):
         base = cr.default_control_room(8)
-        bad = {"main": (99, -1, "x", 1.5, True, None), "phones": (18, "x"),
+        bad = {"main": (99, -1, "x", 1.5, True, None),
+               "phones": (18, "x", [18], [1, "x"], [0, 1, 2, 3, 4], 1.5, None, True),
+               "recall_db": (6.5, -81, "x", None, float("nan"), True),
                "main_b": (99, -2, "x"), "talkback_src": (36, -4, "a"), "ext_src": (35, -1, "a"),
                "talkback_dests": (5, "x", [99], [0, "x"], None),
                "dim_db": (20.0, "x", None, float("nan")), "talkback_dim_db": (6, "x"),
@@ -169,9 +221,10 @@ class LoadTest(unittest.TestCase):
 
     def test_good_values_are_kept(self):
         st = m.default_state()
-        good = dict(cr.default_control_room(8), main=3, main_b=4, phones=5, dim=True,
-                    dim_db=-30, mono=True, speaker_b=True, talkback_src=35, ext_src=34,
-                    talkback_dests=[5, 6], talkback_dim_db=0.0, ext_in=True, encoder="phones")
+        good = dict(cr.default_control_room(8), main=3, main_b=4, phones=[5, 2, 9, 0], dim=True,
+                    dim_db=-30, recall_db=-22.5, mono=True, speaker_b=True, talkback_src=35,
+                    ext_src=34, talkback_dests=[5, 6], talkback_dim_db=0.0, ext_in=True,
+                    encoder="phones2")
         st["control_room"] = dict(good, talkback=True)
         self.assertEqual(cr.load(st, 8), good)       # all but Talkback, which is switched off
         self.usable(st)
@@ -180,8 +233,24 @@ class LoadTest(unittest.TestCase):
         st = m.default_state()
         st["control_room"] = {"main_b": 1, "speaker_b": False}
         c = cr.load(st, 8)
-        self.assertEqual((c["main_b"], c["phones"], c["version"]), (cr.NO_PAIR, 8,
+        self.assertEqual((c["main_b"], c["phones"], c["version"]), (cr.NO_PAIR, [8],
                                                                     cr.CR_VERSION))
+
+    def test_one_phones_pair_from_before_becomes_a_list(self):
+        """Until version 2 Phones was one pair and Talkback went to talkback_dests, which held
+        that pair: now it goes to the Phones anyway, and the list is for further outputs."""
+        for dests, further in (([5], []), ([5, 3], [3]), ([3], [3]), ([], [])):
+            with self.subTest(dests=dests):
+                st = m.default_state()
+                st["control_room"] = {"phones": 5, "talkback_dests": dests, "version": 2,
+                                      "dim_db": -12.0}
+                c = cr.load(st, 8)
+                self.assertEqual((c["phones"], c["talkback_dests"], c["version"], c["dim_db"]),
+                                 ([5], further, cr.CR_VERSION, -12.0))
+                self.assertEqual(c["recall_db"], cr.default_control_room()["recall_db"])
+                again = dict(c)
+                self.assertEqual(cr.load(st, 8), again)         # and only once
+                self.usable(st)
 
 
 if __name__ == "__main__":

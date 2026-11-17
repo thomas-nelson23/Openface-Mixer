@@ -78,6 +78,10 @@ class DecodeTest(unittest.TestCase):
         self.assertTrue(arc.key_lit(st, "snapshot:3", 2))
         self.assertFalse(arc.key_lit(st, "snapshot:3", None))
         self.assertFalse(arc.key_lit(st, "phones", None))
+        self.assertTrue(arc.key_lit(st, "main", None))
+        cr.control_room(st)["encoder"] = "phones2"      # the second phones key was pressed
+        self.assertEqual([arc.key_lit(st, a, None) for a in ("main", "phones", "phones2")],
+                         [False, False, True])
 
 
 if __name__ == "__main__":

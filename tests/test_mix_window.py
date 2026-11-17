@@ -83,8 +83,8 @@ class MixWindowTest(unittest.TestCase):
 
     def mix_file(self, mix, name="Live"):
         path = self.dir / "mix.json"
-        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": presets.VERSION, "name": name,
-                                    "mix": mix}))
+        path.write_text(json.dumps({"format": "openface-mixer-mix", "version": presets.VERSION,
+                                    "name": name, "mix": mix}))
         self.open_name.return_value = (str(path), "")
         return path
 
@@ -93,8 +93,13 @@ class MixWindowTest(unittest.TestCase):
 
     # ---------------------------------------------------------------- damaged files at start
     def test_opens_on_damaged_files(self):
+        kept = dict(m.default_state(), unlinked={"in:0": 5, "play:0": {"group": 0}}, control_room={
+            "phones": "x", "recall_db": "loud", "talkback_dests": 7, "dim_db": [1],
+            "talkback_dim_db": None, "encoder": "phones9"})
         for name, content in (("state.json", "[1, 2]"), ("state.json", ""),
                               ("state.json", '{"sends": "x", "selected": 99}'),
+                              ("state.json", json.dumps(kept)),
+                              ("state.json", json.dumps(dict(kept, unlinked="x", version="x"))),
                               ("presets.json", "[1]"), ("presets.json", '{"slots": 5}')):
             with self.subTest(name=name, content=content):
                 path = config.device_dir(self.dev) / name
@@ -104,6 +109,11 @@ class MixWindowTest(unittest.TestCase):
                 w.show()
                 self.qt.processEvents()
                 w.tabs.setCurrentIndex(1)
+                for pair in ("play", 0), ("in", 0):         # unlink and link
+                    w.toggle_stereo(*pair, not w.st["stereo"][pair[0]][0])
+                self.qt.processEvents()
+                w.control.recall.emit()
+                w.arc_encoder(1)
                 w.push_matrix()
                 w.save()
                 self.close(w)

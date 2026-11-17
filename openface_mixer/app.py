@@ -131,6 +131,7 @@ class MainWindow(QMainWindow):
         self.settings.restart_requested.connect(self.restart_app)
         self.control = ControlRoomPanel(self.st)
         self.control.changed.connect(self.push_matrix)
+        self.control.recall.connect(self.recall_main)
         self.settings.add_control_room(self.control)
         self.remote_panel = RemotePanel(self.st, dev)
         self.settings.add_before_updates(self.remote_panel)
@@ -1127,8 +1128,8 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action == "phones":
-            cr["encoder"] = "main" if cr["encoder"] == "phones" else "phones"
+        if action in ("phones", "phones2"):         # the lit key again: back to Main Out
+            cr["encoder"] = "main" if cr["encoder"] == action else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1146,6 +1147,17 @@ class MainWindow(QMainWindow):
             if k in self.strips:
                 self.strips[k].set_fader(val)
         self.push_matrix()
+
+    def recall_main(self):
+        """TotalMix's Recall: Main Out goes to the stored listening level, and its fader group
+        follows as when the fader is moved."""
+        cr = control_room.control_room(self.st)
+        key = strip_key("out", cr["main"])
+        if key in self.strips:
+            self.move_fader(self.strips[key], cr["recall_db"])
+        else:                           # Main Out is hidden
+            set_strip_db(self.st, key, cr["recall_db"])
+            self.push_matrix()
 
     def arc_status(self, status):
         self.control.set_arc_status(status)
