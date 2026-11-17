@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../engine/fireface_fw.h"
 #include "../engine/fireface_usb.h"
 
 static int failed;
@@ -47,6 +48,16 @@ int main(void)
 					  0x00, 0x12, 0x00, 0x78, 0x0b, 0xf7 };
 	ff802usb_reg_msg(0x3f000900, msg);
 	check_bytes("serial msg", msg, serial, sizeof(serial));
+	/* the UCX II's input 1 mute off is register 0 = 0. The GUI sends it as 0x80000000 (with its
+	 * parity bit) because a 0 word is an empty slot; on the wire it is the same message */
+	static const uint8_t in1_mute[] = { 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x00,
+					    0x00, 0x00, 0x00, 0x00, 0x08, 0xf7 };
+	ff802usb_reg_msg(0x80000000, msg);
+	check_bytes("input 1 mute msg", msg, in1_mute, sizeof(in1_mute));
+	ff802usb_reg_msg(0, msg);
+	check_bytes("register 0 = 0 msg", msg, in1_mute, sizeof(in1_mute));
+	check("parity of 0", ff802_parity(0), 0x80000000);
+	check("parity is idempotent", ff802_parity(0x80c00000), 0x80c00000);
 
 	check("gain off", ff802usb_encode_gain(0.0f), 0);
 	check("gain unity", ff802usb_encode_gain(1.0f), 0x9000);

@@ -146,8 +146,9 @@ def usb_commands(s, st=None):
         cmds.append(reg(OUT_CH + c, OUT_LEVEL, o["level"][c]))
 
     for c in range(N_IN):
-        # (input 1's mute is register 0 = 0, which the engine skips like any empty command)
-        cmds.append(reg(c, IN_MUTE, 0))
+        # input 1's mute is register 0 = 0, and a 0 word is an empty slot to the engine: every
+        # word here carries the parity bit the engine puts on the wire anyway, so none is 0
+        cmds.append(ff802.with_parity(reg(c, IN_MUTE, 0)))
     for c in range(N_OUT):
         cmds += [reg(OUT_CH + c, OUT_MUTE, 0), reg(OUT_CH + c, OUT_BALANCE, 0)]
     clock = dict((k, v) for k, _, v in CLOCK_SOURCES).get(s["clock"], 0)
