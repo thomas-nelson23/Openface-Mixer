@@ -153,6 +153,29 @@ class EngineStartTest(WindowCase):
             self.assertIn("ENGINE STOPPED", w.status.text())
             self.assertEqual(intervals(w)[1], 500)
 
+    def test_a_window_that_starts_its_engine_looks_for_it_often(self):
+        """Also through the rest of the window's start and its first show, which set the pace of
+        every poll."""
+        from openface_mixer import app
+        status = {"processing": True, "rate": 48000, "sink_linked": True, "hw": "starting",
+                  "hw_nodes": 0, "hw_levels": False, "dev_status": 0, "dev_status2": 0}
+        for background, pace in ((True, 2000), (False, 500)):
+            with mock.patch.object(app.MainWindow, "ensure_engine", type(self).ensure_engine):
+                w = app.MainWindow(self.w.dev, background)
+            self.addCleanup(self.settle)
+            self.addCleanup(w.deleteLater)
+            self.assertEqual(intervals(w)[1], 50)
+            if not background:
+                w.show()
+                self.settle()
+                self.assertEqual(intervals(w)[1], 50)
+            with mock.patch.object(w.engine, "status", return_value=status):
+                w.poll_engine()
+            self.assertIn("HW DSP", w.status.text())
+            self.assertEqual(intervals(w)[1], pace)
+            w.quit_app()
+            self.settle()
+
     def test_a_start_that_fails_is_shown_in_the_status(self):
         w = self.w
         self.start.return_value = (False, "openface-mixer-engine not found")

@@ -357,10 +357,12 @@ class MainWindow(QMainWindow):
         it is also how the window follows the interface for the ARC and the network remote
         (connected or not, sample rate, a FireWire unit's clock). The meters are only read
         while the remote sends levels to a controller, at the rate it sends them; while
-        nobody reads them the engine leaves the device's meters alone too."""
+        nobody reads them the engine reads the device's meters at its idle rate. An engine
+        that was just started is looked for every 50 ms, shown or not."""
         levels = LEVEL_MS if self.remote.wants_levels() else 0
+        engine = 50 if self._engine_due else 500 if self._shown else 2000
         for timer, ms in ((self._meter_timer, 33 if self._shown else levels),
-                          (self._engine_timer, 500 if self._shown else 2000),
+                          (self._engine_timer, engine),
                           (self._hw_timer, 1000 if self._shown else 0),
                           (self._profile_timer, 3000 if self._shown else 0)):
             if not ms:
@@ -1214,7 +1216,7 @@ class MainWindow(QMainWindow):
         self.engine_error = None if ok else msg
         if ok:
             self._engine_due = time.monotonic() + 1.5
-            self._engine_timer.start(50)
+            self.pace_timers()
 
     def restart_engine(self):
         self.engine_error = None
