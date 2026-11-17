@@ -954,7 +954,8 @@ class Row(QWidget):
         """Put a panel in the row: right of the strip with that key, after the panels that are
         there (first: before them), or at the end of the row without a key. The row scrolls
         to show the panel and its strip."""
-        self.docks[panel] = key
+        # kept in the order they stand in, for set_strips() to put them back
+        self.docks = {panel: key, **self.docks} if first else {**self.docks, panel: key}
         panel.closed.connect(lambda: self.docks.pop(panel, None))
         self._place(panel, first)
         panel.show()

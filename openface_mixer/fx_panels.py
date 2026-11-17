@@ -378,7 +378,7 @@ class FxPanel(QWidget):
         self.lay.setSpacing(px(4))
         head = QHBoxLayout()
         head.setSpacing(px(8))
-        self.tag = QLabel()
+        self.tag = QLabel(name)
         self.tag.setFixedHeight(px(20))
         self.tag.setFont(font(SANS, 10, QFont.DemiBold))
         head.addWidget(self.tag)
@@ -398,15 +398,15 @@ class FxPanel(QWidget):
         head.addWidget(close)
         self.lay.addLayout(head)
         self.tag.setVisible(bool(name))         # (now that it has a parent)
-        self.set_tag(name)
 
-    def set_tag(self, name, color=None):
+    def set_tag(self, name, color):
         """Show the strip's name on the tag, over a bar in the strip's colour."""
         self.tag.setText(name)
-        self.tag.setStyleSheet(label_style(color or QColor(HAIR), False) + f"padding:0 {px(6)}px;")
+        self.tag.setStyleSheet(label_style(color, False) + f"padding:0 {px(6)}px;")
 
     def sizeHint(self):
-        return QSize(super().sizeHint().width(), self.minimumHeight())
+        hint = super().sizeHint()
+        return hint if self.isWindow() else QSize(hint.width(), self.minimumHeight())
 
     def set_low(self, low):
         """Lay the controls out for a low row (low) or a tall one."""

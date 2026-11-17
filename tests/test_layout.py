@@ -410,6 +410,7 @@ class PanelTest(WindowCase):
         row = self.w.row_in
         keep, gone, pair = row.strips[0], row.strips[2], row.strips[4]
         dyn = self.open(keep, "dyn")
+        eq = self.open(keep, "eq")
         self.open(gone, "eq")
         self.open(pair, "eq")
         self.w.hide_strip(gone)
@@ -418,10 +419,12 @@ class PanelTest(WindowCase):
         self.settle()
         self.addCleanup(self.w.toggle_stereo, "in", pair.channels[0], len(pair.channels) == 2)
         self.addCleanup(self.w.unhide_all)
-        self.assertEqual(set(self.w.fx_panels), {("dyn", keep.key)})    # the others' strips went
+        self.assertEqual(set(self.w.fx_panels), {("dyn", keep.key), ("eq", keep.key)})
         strip = self.w.strips[keep.key]
         self.assertIsNot(strip, keep)
-        self.assertEqual(self.order(row)[:2], [strip, dyn])
+        self.assertEqual(self.order(row)[:3], [strip, eq, dyn])     # in the order they were in
+        eq.close()
+        self.settle()
         self.assertTrue(dyn.isVisible())
         self.assertIn("#f5f8fa", strip.dyn_btn.styleSheet())
         self.w.st["names"][keep.key] = "Kick"
@@ -476,6 +479,8 @@ class RoomEqTest(WindowCase):
         room, eq = self.w.fx_panels[("room", out.key)], self.w.fx_panels[("eq", out.key)]
         self.addCleanup(lambda: [p.close() for p in list(self.w.fx_panels.values())])
         self.assertTrue(room.isWindow() and room.isVisible())
+        self.assertGreaterEqual(room.height(), room.layout().sizeHint().height())
+        self.assertGreater(room.height(), 350)                      # three rows of knobs
         self.assertIn(out.name, room.windowTitle())
         self.assertFalse(eq.isWindow())
         self.assertEqual(list(self.w.row_out.docks), [eq])
