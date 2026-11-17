@@ -362,7 +362,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
   The driver only accepts mixer changes while playback and recording are opened by the same
   program (PipeWire or JACK normally do that). No TCO or pitch settings. A card counts as
-  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
+  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`; that rule is not
+  confirmed, so it only warns. With the kernel driver an AIO Pro shows up as an AIO, and on an
+  AIO at 88.2 kHz and above the ADAT channels may not line up with their strips
+  ([docs/HARDWARE.md](docs/HARDWARE.md#aio-aio-pro-and-aes)).
 - The Digiface's hardware mixer allows 2048 active routes; the settings panel warns if a mix
   needs more.
 

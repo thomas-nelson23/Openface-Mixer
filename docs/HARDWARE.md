@@ -476,6 +476,15 @@ snd-hdspm has no name of its own for the AIO Pro: it calls every revision-212 ca
 So with the kernel driver an AIO Pro is found as **RME HDSPe AIO**, not as AIO Pro (the settings
 panel says so when AIO Pro is chosen and an `RME AIO` card is there).
 
+**Open question, AIO at 88.2 kHz and above.** The two drivers disagree on where the ADAT
+channels are. snd-hdspm's channel maps put them on hardware channels 12, 14, 16, 18 at double
+speed and 12, 16 at quad speed (`channel_map_aio_in_ds`/`_qs` in `sound/pci/rme9652/hdspm.c`);
+snd-hdspe's put them on 12–15 and 12–13 (`hdspe_raio.c`). Openface Mixer follows snd-hdspe at
+every speed. If snd-hdspm is right for its own streams, then under the kernel driver at double
+speed an application's ADAT channel 2 arrives on the strip labelled `A 3`, and ADAT channels 3
+and 4 have no strip. Which channels the hardware mixer really uses there can only be settled on
+a card: play to each ADAT channel at 96 kHz under snd-hdspm and see which playback meter moves.
+
 The MADI cards (HDSPe MADI, MADIface, MADI FX) use 64 channels and don't fit the 36-channel mix
 model. None of these cards has been checked with Openface Mixer.
 
@@ -539,7 +548,8 @@ Under snd-hdspe (`hdspe_control.c`; hdspeconf's RayDAT page shows the same):
 Nobody has run Openface Mixer on a RayDAT yet. Worth checking first: that the mixer accepts
 writes with PipeWire running (the `EBUSY` rule above compares the processes that opened
 playback and capture), the PipeWire card name property the engine matches, the meter scale,
-the channel layout at 2x/4x speed, and the driver check on a 2022-or-later card.
+the channel layout at 2x/4x speed (on an AIO see the open question above), the driver check on
+a 2022-or-later card, and the sample rate shown while slaved under snd-hdspm.
 
 # RME ARC USB
 
