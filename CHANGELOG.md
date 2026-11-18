@@ -3,7 +3,9 @@
 What changed in each version of Openface Mixer, for the people who use it. Releases are
 installed from **Updates** in the settings (see the [README](README.md#updates)).
 
-## Unreleased (0.4.0)
+## Unreleased
+
+## 0.4.0 (2026-11-18)
 
 ### New
 
