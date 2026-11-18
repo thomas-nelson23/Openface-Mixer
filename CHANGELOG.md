@@ -45,6 +45,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Updating keeps only the three newest config backups.
 - With the window hidden or closed to the background, the app stops polling and the engine reads the interface's meters once a second instead of about a hundred times. Meters are live again the moment the window is shown, and peak readouts start fresh.
 - If PipeWire crashes or is restarted, the engine stops with a clear log line and systemd starts it again, so the playback sink comes back by itself.
+- A mixer started at login without a window that switches to an interface whose window is already open shows that window and keeps running hidden, instead of quitting.
 
 ### Fixed
 
@@ -73,6 +74,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - ARC USB: the snapshot key goes out when its preset is cleared, and unplugging the ARC at the wrong moment no longer raises an error.
 - Network remote: a *Send to* host given by name no longer freezes the window at startup when the name server is slow.
 - A mixer started at login without a window stays in background mode after an update restart, a new UI scale or a device switch, so closing the window still only hides it.
+- Two mixers started at login for two interfaces no longer stop each other from starting when they save at the same moment.
 
 ### Not yet tried on hardware
 
