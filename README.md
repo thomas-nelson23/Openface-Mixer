@@ -88,7 +88,7 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   bands, in a window of its own) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
   to reuse settings.
 
-  ![EQ, Dynamics, Reverb and Echo panels beside a UCX II input strip](docs/screenshots/effects.png)
+  ![EQ and Dynamics open in the inputs row beside a UCX II input strip, Reverb and Echo at the end of the outputs row](docs/screenshots/effects.png)
 - **Input options (Fireface 800):** the ⚙ on inputs AN 1 and AN 7–10: front or rear jack on
   AN 1, 7 and 8, 48V on AN 7–10, and Drive, Limiter and Speaker Emulation on the AN 1
   instrument input.
