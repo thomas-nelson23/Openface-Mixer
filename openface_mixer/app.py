@@ -1236,8 +1236,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Load workspace", f"Could not load {path}:\n{reason(e)}")
             return
         if not ask(self, "Load workspace", "Replace the mix, names, presets, layouts and "
-                   "settings with the workspace? The mix now can be brought back with Restore "
-                   "previous mix.", "Load workspace"):
+                   "settings with the workspace? The current mix can be brought back with "
+                   "Restore previous mix.", "Load workspace"):
             return
         if self.dev.family == "hdspe":
             st["hw"] = self.st["hw"]        # which card and its driver answer: this computer's

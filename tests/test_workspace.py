@@ -209,6 +209,24 @@ class WorkspaceWindowTest(test_mix_window.MixWindowTest):
         self.assertEqual(again.st["names"]["in:0"], "Vox")
         self.assertEqual(again.arc_keys[0], "dim")
 
+    def test_this_computers_hdspe_card_is_kept(self):
+        self.dev = DEVICES["raydat"]
+        other, _problem = config.load_state(self.dev)
+        other["hw"] = {"use_anyway": True, "card": "Theirs"}
+        other["names"]["in:0"] = "Vox"
+        path = self.dir / "w.json"
+        export_workspace(path, self.dev, other, [None] * m.N_SLOTS, UI)
+        w = self.window()
+        w.st["hw"].update(card="Mine")
+        self.open_name.return_value = (str(path), "")
+        with mock.patch.object(self.app_module.QApplication, "quit"):
+            w.settings.load_ws_btn.click()
+        self.warning.assert_not_called()
+        self.close(w)
+        st, _problem = config.load_state(self.dev)
+        self.assertEqual((st["names"]["in:0"], st["hw"]), ("Vox", {"use_anyway": False,
+                                                                     "card": "Mine"}))
+
     def test_a_refused_workspace_changes_nothing(self):
         w = self.window()
         other = DEVICES["ff800"]
