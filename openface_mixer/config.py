@@ -115,10 +115,16 @@ def load_state(dev=DEFAULT):
         else:
             problem = "reset" if path.exists() else None
             st = _read_state(path, phones, False) or upgrade_state(None, phones)
-    control_room.load(st, phones)
+    return ready_state(st, dev), problem
+
+
+def ready_state(st, dev=DEFAULT):
+    """A state read with upgrade_state, finished for dev: the control room and the device
+    settings checked, and no sends on channels the device doesn't have."""
+    control_room.load(st, dev.phones_pair(1))
     dev.upgrade_settings(st)
     clear_sends_outside(st, dev.all_channels)
-    return st, problem
+    return st
 
 
 def device_block(st, dev=DEFAULT):

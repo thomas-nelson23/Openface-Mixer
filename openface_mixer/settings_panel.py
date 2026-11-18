@@ -482,16 +482,23 @@ class SettingsPanel(QWidget):
             box.blockSignals(False)
 
     def _build_mix(self, lay):
-        """Export / import a mix as a file, or start over (the buttons are wired by the main
-        window)."""
+        """Export / import a mix as a file, save / load the workspace, or start over (the
+        buttons are wired by the main window)."""
         box = Section("MIX")
         ml = QVBoxLayout(box)
         self.export_btn = QPushButton("Export mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
+        # TotalMix's workspace: everything for this interface in one file, to back up or move
+        self.save_ws_btn = QPushButton("Save workspace…")
+        self.save_ws_btn.setToolTip("Save the mix, names, colours, presets, layouts and settings "
+                                    "for this interface to one file")
+        self.load_ws_btn = QPushButton("Load workspace…")
+        self.load_ws_btn.setToolTip("Replace all of them with a saved workspace")
         self.reset_btn = QPushButton("Reset mix to default…")
         self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
-        for b in (self.export_btn, self.import_btn, self.reset_btn):
+        for b in (self.export_btn, self.import_btn, self.save_ws_btn, self.load_ws_btn,
+                  self.reset_btn):
             ml.addWidget(b)
         lay.addWidget(box)
 

@@ -36,7 +36,7 @@ from .model import (
     group_follow, set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon,
     speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
-from .presets import PresetBank, export_mix, import_mix
+from .presets import PresetBank, export_mix, export_workspace, import_mix, import_workspace
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
@@ -144,6 +144,8 @@ class MainWindow(QMainWindow):
         self.settings.layout_recalled.connect(self.recall_layout)
         self.settings.export_btn.clicked.connect(self.export_mix)
         self.settings.import_btn.clicked.connect(self.import_mix)
+        self.settings.save_ws_btn.clicked.connect(self.save_workspace)
+        self.settings.load_ws_btn.clicked.connect(self.load_workspace)
         self.settings.reset_btn.clicked.connect(self.reset_mix)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
@@ -1205,6 +1207,59 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{reason(e)}")
             return
         self.replace_mix(mix, f"Imported “{name}”")
+
+    def save_workspace(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace",
+                                              f"{self.dev.key}.workspace.json",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            export_workspace(path, self.dev, self.st, self.presets.slots,
+                             {**self.settings.meter_prefs, "arc_keys": self.arc_keys})
+        except OSError as e:
+            QMessageBox.warning(self, "Save workspace", f"Could not save to {path}:\n{reason(e)}")
+            return
+        self.notify("Saved the workspace")
+
+    def load_workspace(self):
+        """Every part of the file is checked before anything is replaced. The mix it replaces
+        is kept for Restore previous mix, and the window then reopens with what was loaded,
+        as after a change of UI scale."""
+        path, _ = QFileDialog.getOpenFileName(self, "Load workspace", "",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            st, slots, ui = import_workspace(path, self.dev)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not load {path}:\n{reason(e)}")
+            return
+        if not ask(self, "Load workspace", "Replace the mix, names, presets, layouts and "
+                   "settings with the workspace? The mix now can be brought back with Restore "
+                   "previous mix.", "Load workspace"):
+            return
+        if self.dev.family == "hdspe":
+            st["hw"] = self.st["hw"]        # which card and its driver answer: this computer's
+        if "remote" in self.st:
+            st["remote"] = self.st["remote"]    # so is the OSC remote (never in a workspace)
+        try:
+            export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
+        except OSError:
+            pass                    # a full disk must not stop it, as for a recall
+        self.st.clear()
+        self.st.update(st)
+        self.presets.slots = slots
+        try:
+            self.save()
+            self.presets.save()
+            save_ui(**ui)
+        except OSError as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not save it all:\n{reason(e)}")
+        self.reopen_geometry = self.geometry()
+        self.switch_to = self.dev.key
+        self.close()
+        QApplication.quit()             # main() opens the window again with the workspace
 
     def reset_mix(self):
         if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
