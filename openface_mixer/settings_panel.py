@@ -306,7 +306,6 @@ class SettingsPanel(QWidget):
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
-    _pw_clock_read = Signal(object)  # PipeWire's settings (hardware.pw_clock()), from a thread
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
     UPDATE_PROMPT = "Check GitHub for a newer Openface Mixer."
     STARTUP_CHECK_MS = 5000          # the quiet check, once the window has settled
@@ -670,17 +669,11 @@ class SettingsPanel(QWidget):
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         grid.addWidget(hint, r + 2, 0, 1, -1)
-        self._pw_clock_read.connect(self._show_pw_clock)
 
     def read_pw_clock(self):
-        """Read PipeWire's rate and buffer on a thread; _show_pw_clock shows them."""
-        def run():
-            values = pw_clock()
-            try:
-                self._pw_clock_read.emit(values)
-            except RuntimeError:    # the panel went away meanwhile
-                pass
-        threading.Thread(target=run, daemon=True).start()
+        """Show PipeWire's rate and buffer. pw-metadata answers at once, or within run()'s
+        2 s limit, like the pactl the window polls."""
+        self._show_pw_clock(pw_clock())
 
     def _show_pw_clock(self, values):
         """values: hardware.pw_clock(), or None if PipeWire's settings can't be read."""

@@ -3,7 +3,6 @@ the real window offscreen (tests/test_controls.py WindowCase: the engine and the
 stubbed, the config is in a temporary folder). pw-metadata is stubbed: the command lines are
 checked, nothing is run."""
 import subprocess
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -194,15 +193,11 @@ class PipeWireClockTest(WindowCase):
         self.choose(p.pw_rate, 48000, done(255, "can't connect: Host is down"))
         self.assertEqual(self.notices, ["Not changed: PipeWire is not running"])
 
-    def test_read_on_a_thread(self):
+    def test_read(self):
         self.reading.stop()
         with mock.patch.object(self.sp, "pw_clock",
                                return_value={**self.SETTINGS, "clock.force-quantum": 512}):
             self.p.read_pw_clock()
-            deadline = time.monotonic() + 5
-            while self.p.pw_quantum.currentText() != "512" and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(0.01)
         self.assertEqual(self.p.pw_quantum.currentText(), "512")
 
 
