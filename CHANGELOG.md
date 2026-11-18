@@ -24,6 +24,12 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Display: eight *Layouts* store which channel groups and strips are hidden, which rows are folded and whether custom names are shown. Click *Store* and a slot to save the view, click a slot to bring it back. A layout never changes the mix, and a strip it hides has its solo switched off. Layouts are kept per interface.
 - Mix: *Save workspace* puts everything for this interface in one file: mix, names, colours, icons, layouts, presets, control room, device and effect settings, and the meter and ARC key options. *Load workspace* brings it all back after checking the whole file, and the mix it replaces stays available as *Restore previous mix*. A workspace for another interface is refused.
 - ARC USB: *Keys* beside the ARC status lists the 15 keys. Give any key any function (a preset, Dim, Mono, Talkback, Speaker B, External In, or the volume of Main Out or a Phones output), or *Reset to default*. The lights follow the keys, and the choice is kept for this computer.
+- Right-click an output: *Copy mix*, *Paste mix* and *Mirror mix*, as in TotalMix. A mirrored output plays the same mix as the other and follows every change to it; *Remove mirror* gives it its own copy again.
+- Right-click an input or playback channel: *Copy sends*, *Paste sends* and *Clear sends* (all of the channel's sends, to every output). A pair counts as one channel.
+- Paste and clear keep the mix they replace for *Restore previous mix*.
+- **Cue** on each output strip: hear that output's mix on Main Out, as in TotalMix. One at a time; press it again to end it. It is not saved, and it ends when the app quits.
+- **Trim** at the end of the Hardware inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off.
+- Mute groups and solo groups, four of each, next to Trim. A mute group mutes its channels in the submix they were added in; a solo group solos its channels. Both are part of presets and mix files.
 
 ### Changed
 
@@ -127,6 +133,8 @@ people who have one can try them. Please try the points for your interface and
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
 - After the update the engine restarts once by itself and the meters move. The RMS bar sits inside the peak bar and falls with it.
+- Cue the Phones output while listening on Main Out: you hear the Phones mix at the Main Out level, Dim and Talkback still work, and a second press brings Main Out's own mix back.
+- Mirror one output's mix onto another, switch a mute group on, and move a fader with Trim on: what you hear follows what the faders show.
 
 **Every Fireface and HDSPe card**
 
@@ -136,3 +144,4 @@ people who have one can try them. Please try the points for your interface and
 - With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
 - ARC USB: give a key another function under *Keys*: it does that function, its light follows it, and *Reset to default* brings back the printed layout. The Phones keys still behave as above.
+- Cue, Mirror, mute groups and Trim, as for the Digiface. HDSPe: a cued mix plays at the Main Out level, which the card adds into every send.

@@ -3,7 +3,9 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QFrame, QScrollArea, QWidget
 
-from .model import FADER_MAX_DB, NEG_INF, db2pos, fader_db, fmt_db, parse_db, pos2db
+from .model import (
+    FADER_MAX_DB, NEG_INF, db2pos, fader_db, fmt_db, parse_db, pos2db, submix_of,
+)
 from .theme import ACCENT, DIM, KIND_COLOR, SANS, TEXT, font, px
 from .wheel import Wheel
 from .widgets import LevelEdit
@@ -70,7 +72,7 @@ class MatrixView(QWidget):
     def _send(self, ci, ri):
         """[level in dB or None, pan] of the cell."""
         kind, chans, _, _ = self.cols[ci]
-        return self.win.st["sends"][kind][chans[0]][self.rows[ri][0]]
+        return self.win.st["sends"][kind][chans[0]][submix_of(self.win.st, self.rows[ri][0])]
 
     def _gain(self, ci, ri):
         return self._send(ci, ri)[0]

@@ -243,6 +243,10 @@ class Fader(QWidget):
     def mouseReleaseEvent(self, e):
         self._drag = None
 
+    def dragged_from_off(self):
+        """True during a drag that started at -∞."""
+        return self._drag is not None and self._drag[1] == db2pos(NEG_INF)
+
     def mouseDoubleClickEvent(self, e):
         self._set_pos(db2pos(0.0))
 
@@ -460,7 +464,8 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
         "QToolButton:pressed{background:#1a3b4c}"
         "QToolButton:focus{border-color:rgba(42,212,255,0.8)}"
         f"QToolButton:checked{{background:{color};color:{fg};border-color:{color}}}"
-        "QToolButton:checked:pressed{background:#d9eef2}")
+        "QToolButton:checked:pressed{background:#d9eef2}"
+        "QToolButton:disabled{color:#2a4552}")
     return b
 
 
@@ -545,7 +550,7 @@ class Strip(QFrame):
 
     def __init__(self, key, title, channels, kind, show_pan=True, show_stereo=False,
                  show_solo=False, show_settings=False, standard=None, color=None, icon=None,
-                 show_fx=False, parent=None):
+                 show_fx=False, show_cue=False, parent=None):
         super().__init__(parent)
         self.key = key
         self.name = title                    # shown name (custom or standard), unshortened
@@ -618,7 +623,14 @@ class Strip(QFrame):
         self.solo.setVisible(show_solo)
         btns.addWidget(self.solo)
         self.mute = small_button("M", "#2ad4ff", tip="Mute", width=w)
+        self._mute_style = self.mute.styleSheet()
+        self._group_muted = 0
         btns.addWidget(self.mute)
+        # an output's Cue: its submix plays on Main Out (TotalMix's Cue)
+        self.cue = small_button("Cue", SOLO.name(), "#0b0f1c", width=w,
+                                tip="Hear this output's submix on Main Out")
+        self.cue.setVisible(show_cue)
+        btns.addWidget(self.cue)
         self.stereo = small_button("ST", "#ffffff", "#0b0f1c", tip="Stereo-link this channel pair",
                                    width=w)
         self.stereo.setVisible(show_stereo)
@@ -669,8 +681,8 @@ class Strip(QFrame):
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.fader.type_requested.connect(self.type_level)
         self.meter.peak_changed.connect(self._show_peak)
-        self.solo.toggled.connect(lambda _on: self.show_flags())
-        self.mute.toggled.connect(lambda _on: self.show_flags())
+        for b in (self.solo, self.mute, self.cue):
+            b.toggled.connect(lambda _on: self.show_flags())
         self._set_title()
         self.set_selected(False)
 
@@ -693,6 +705,7 @@ class Strip(QFrame):
         self.pan.setAccessibleName(f"{self.name} pan")
         self.solo.setAccessibleName(f"Solo {self.name}")
         self.mute.setAccessibleName(f"Mute {self.name}")
+        self.cue.setAccessibleName(f"Cue {self.name}")
         self.stereo.setAccessibleName(f"Stereo-link {self.name}")
         self.settings_btn.setAccessibleName(f"{self.name} settings")
         self.eq_btn.setAccessibleName(f"{self.name} EQ")
@@ -716,8 +729,9 @@ class Strip(QFrame):
             for edit in self.findChildren(LevelEdit):   # a level being typed: left as it was
                 edit._end()
             self._put_away = [w for w in (
-                self.settings_btn, self.pan, self.pan_text, self.solo, self.mute, self.stereo,
-                self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak) if not w.isHidden()]
+                self.settings_btn, self.pan, self.pan_text, self.solo, self.mute, self.cue,
+                self.stereo, self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak)
+                if not w.isHidden()]
         for w in self._put_away:
             w.setVisible(not on)
         self.meter.set_horizontal(on)
@@ -734,12 +748,24 @@ class Strip(QFrame):
 
     def show_flags(self):
         """A folded strip shows what its buttons and readouts would: an amber edge while it is
-        soloed, a red one once it clipped, a dimmed name while it is muted."""
-        flags = (self.solo.isChecked(), self.mute.isChecked(), self.clipped)
+        soloed or cued, a red one once it clipped, a dimmed name while it is muted."""
+        flags = (self.solo.isChecked() or self.cue.isChecked(), self.mute.isChecked(),
+                 self.clipped)
         if self.folded and flags != self._flags:
             self._flags = flags
             self.set_selected(self._selected)
             self.flags_changed.emit()
+
+    def set_group_muted(self, group):
+        """Outline the mute button while mute group group (0: none) silences this channel in
+        the submix being edited."""
+        if group == self._group_muted:
+            return
+        self._group_muted = group
+        self.mute.setStyleSheet(self._mute_style + (
+            "QToolButton:!checked{border-color:#2ad4ff;color:#2ad4ff}" if group else ""))
+        self.mute.setToolTip(f"Mute · muted in this submix by mute group {group}" if group
+                             else "Mute")
 
     def set_settings_active(self, on):
         """Light the settings button while a channel setting (phase, 48V, ...) is on."""
@@ -824,7 +850,7 @@ class Strip(QFrame):
                       if self.group else "")
         tag = label_style(col, sel)
         if self.folded:
-            if self.clipped or self.solo.isChecked():
+            if self.clipped or self.solo.isChecked() or self.cue.isChecked():
                 border = (RED if self.clipped else SOLO).name()
             if self.mute.isChecked() and not sel:
                 tag += f"color:{MUTED};"
@@ -914,6 +940,7 @@ class Row(QWidget):
         self.head.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.set_subtitle(subtitle)
         head.addWidget(self.head, 1)
+        self.head_row = head                  # the window may add controls at its end
         lay.addLayout(head)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -937,6 +964,7 @@ class Row(QWidget):
                 text = "folded · click a name to unfold" if self.strips else "folded"
             for word, color, strips in (
                     ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
+                    ("Cue", SOLO, [s for s in self.strips if s.cue.isChecked()]),
                     ("Clip", RED, [s for s in self.strips if s.clipped])):
                 if strips:
                     names = ", ".join(html.escape(s.title.text()) for s in strips[:3])

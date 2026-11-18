@@ -153,6 +153,7 @@ def exercise(app, w, check):
     w.control.arc_btn.click()
     pump(app)
     check(w.arc_keys == arc.DEFAULT_KEYS, "the ARC keys did not go back to the default")
+    submix_tools(app, w, check)
     fold_rows(app, w, check)
     for rate in (96000, 192000):                    # the double and quad speed channel layouts
         w.engine.rate = rate
@@ -160,6 +161,36 @@ def exercise(app, w, check):
         pump(app)
         check(w.rate == rate and w.row_in.strips and w.row_out.strips, f"no strips at {rate} Hz")
         fold_rows(app, w, check)
+
+
+def submix_tools(app, w, check):
+    """Cue each output, Trim, a mute and a solo group, copy, paste and mirror a submix, and the
+    strips' menus. Cue and the mirror stay on for the rate changes that follow."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+    outs, ins = w.row_out.strips, w.row_in.strips
+    for s in outs:
+        s.cue.click()
+    pump(app)
+    check(w.cue == (outs[-1].pair if outs[-1].cue.isEnabled() else None)
+          and sum(s.cue.isChecked() for s in outs) <= 1, f"cue is {w.cue}")
+    w.trim_btn.click()
+    w.move_fader(ins[0], -6.0)
+    w.choose_mute_group(ins[0], 1)
+    w.choose_solo_group(w.row_play.strips[0], 2)
+    for key in (("mute", 1), ("solo", 2)):
+        w.group_btns[key].click()
+    check(w.st["mute_groups"][0]["on"] and w.st["solo"]["play"][0], "a group did not switch on")
+    w.copy_mix(outs[0])
+    w.paste_mix(outs[1])                            # these build the strips again
+    w.mirror_mix(w.row_out.strips[-1])
+    outs, ins = w.row_out.strips, w.row_in.strips
+    w.copy_sends(ins[0])
+    for strip in (ins[0], w.row_play.strips[0], outs[0], outs[-1]):
+        QTimer.singleShot(0, lambda: QApplication.activePopupWidget().close())
+        w.strip_menu(strip, strip.mapToGlobal(strip.rect().center()))
+    pump(app)
+    check(outs[-1].key in w.st["mirror"] or len(outs) < 2, "the mirror was not made")
 
 
 def fold_rows(app, w, check):

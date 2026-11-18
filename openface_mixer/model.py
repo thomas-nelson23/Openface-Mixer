@@ -14,6 +14,9 @@ Concepts
 * Solo works like TotalMix: solo-in-place, post fader, and only in the current submix. While
   any source is soloed, the other sources are silent in the selected output pair; every other
   submix is untouched. Solo is momentary monitoring, so it is neither saved nor part of a mix.
+* As in TotalMix, an output pair can mirror another's submix (it plays that submix and follows
+  every change to it, with its own output level), a channel's sends into one submix can be
+  silenced together by a mute group, and channels can be soloed together by a solo group.
 * Strips can carry a custom name (TotalMix's names; "Custom channel names" in the settings
   switches between them and the standard ones), a colour and an icon, and whole channel groups
   (an ADAT port, AES, ...) or single strips can be hidden from view. All of these are display
@@ -39,7 +42,8 @@ FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 
 STATE_VERSION = 6        # 6: mono channels pan with constant power (convert_pan_law)
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
-MIX_KEYS = ("stereo", "mute", "sends", "out", "groups", "unlinked")
+MIX_KEYS = ("stereo", "mute", "sends", "out", "groups", "unlinked", "mirror", "mute_groups",
+            "solo_groups")
 # Keys of the state that make up a channel layout (what layout presets store): what is shown,
 # never what is heard.
 LAYOUT_KEYS = ("hidden", "hidden_strips", "folded", "custom_names")
@@ -144,6 +148,11 @@ def default_state(selected=N_PAIRS - 1):
         "out": [{"gain": 0.0, "mute": False} for _ in range(N_PAIRS)],
         "groups": {},                     # strip key ("in:0", "out:16") -> fader group 1..4
         "unlinked": {},                   # what linked pairs go back to, see set_stereo
+        "mirror": {},                     # "out:3" -> the pair whose submix it plays, set_mirror
+        # mute group g silences the sends [strip key, pair] in its list while it is on
+        "mute_groups": [{"on": False, "sends": []} for _ in range(N_GROUPS)],
+        "solo_groups": {},                # source strip key -> solo group 1..4
+        "trim": False,                    # Trim Gains: a fader moves all of its channel's sends
         "names": {},                      # strip key -> custom name
         "colors": {},                     # strip key -> "#rrggbb" (TotalMix's channel colours)
         "icons": {},                      # strip key -> icon name (theme.CHANNEL_ICONS)
@@ -235,11 +244,34 @@ def checked_mix(mix, strict=True):
             outs.append({"gain": level(o["gain"]), "mute": o["mute"]})
         return outs + full[len(outs):]
 
-    def groups(v, _full):
+    def groups(v, _full, sources=False):
         if not isinstance(v, dict):
             return bad({})
         return {k: g for k, g in v.items()
-                if (valid_key(k) and is_index(g, N_GROUPS + 1) and g) or bad(False)}
+                if (valid_key(k) and not (sources and k.startswith("out:"))
+                    and is_index(g, N_GROUPS + 1) and g) or bad(False)}
+
+    def mirror(v, _full):
+        if not isinstance(v, dict):
+            return bad({})
+        pairs = {k: p for k, p in v.items() if (valid_key(k) and k.startswith("out:")
+                                                and is_index(p, N_PAIRS) and k != f"out:{p}")
+                 or bad(False)}
+        return {k: p for k, p in pairs.items() if f"out:{p}" not in pairs or bad(False)}
+
+    def mute_groups(v, full):
+        if not isinstance(v, list):
+            return bad(full)
+        checked = []
+        for g, default in zip(v, full):
+            if not (isinstance(g, dict) and isinstance(g.get("on"), bool)
+                    and isinstance(g.get("sends"), list)):
+                g = bad(default)
+            checked.append({"on": g["on"], "sends": [
+                [s[0], s[1]] for s in g["sends"]
+                if (isinstance(s, list) and len(s) == 2 and valid_key(s[0])
+                    and not s[0].startswith("out:") and is_index(s[1], N_PAIRS)) or bad(False)]})
+        return checked + copy.deepcopy(full[len(checked):])
 
     def unlinked(v, _full):
         if not isinstance(v, dict):
@@ -262,10 +294,15 @@ def checked_mix(mix, strict=True):
         return checked
 
     checks = {"stereo": both_kinds(flags), "mute": both_kinds(flags), "sends": both_kinds(sends),
-              "out": outputs, "groups": groups, "unlinked": unlinked}
+              "out": outputs, "groups": groups, "unlinked": unlinked, "mirror": mirror,
+              "mute_groups": mute_groups,
+              "solo_groups": lambda v, full: groups(v, full, sources=True)}
     checked = {k: checks[k](mix[k], base[k]) for k in MIX_KEYS if k in mix}
     if "stereo" in checked:             # links from a file without them: nothing was kept
         checked.setdefault("unlinked", {})
+    if "sends" in checked:              # a mix from before mirrors and mute and solo groups
+        for k in ("mirror", "mute_groups", "solo_groups"):
+            checked.setdefault(k, base[k])
     return checked
 
 
@@ -314,6 +351,7 @@ def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
     st["tab"] = 1 if st["tab"] == 1 else 0
     if not is_index(st["active_slot"], N_SLOTS):
         st["active_slot"] = None
+    st["trim"] = st["trim"] is True
     st.pop("mixer_mode", None)          # software (PipeWire) mixing was removed in version 4
     st["solo"] = base["solo"]           # solo never survives a restart, like TotalMix
     st["version"] = STATE_VERSION
@@ -360,6 +398,8 @@ def compute_matrix(st, solo=True):
     """
     g = array("f", bytes(N_OUT * N_SRC * 4))
     soloing = solo and any_solo(st)
+    plays = [submix_of(st, p) for p in range(N_PAIRS)]     # mirrored pairs play their source's
+    group_muted = muted_by_groups(st)
     for kind, base in (("in", 0), ("play", N_IN)):
         n = N_IN if kind == "in" else N_PLAY
         for c in range(n):
@@ -368,11 +408,11 @@ def compute_matrix(st, solo=True):
             stereo = st["stereo"][kind][c // 2]
             left = c % 2 == 0
             # solo-in-place: unsoloed sources drop out of the current submix only
-            silenced = st["selected"] if soloing and not st["solo"][kind][c] else None
+            silenced = plays[st["selected"]] if soloing and not st["solo"][kind][c] else None
             for p in range(N_PAIRS):
-                if p == silenced:
+                if plays[p] == silenced or (kind, c, plays[p]) in group_muted:
                     continue
-                gdb, pan = st["sends"][kind][c][p]
+                gdb, pan = st["sends"][kind][c][plays[p]]
                 lin = db2lin(gdb)
                 if lin == 0.0:
                     continue
@@ -465,7 +505,7 @@ def get_strip_db(st, key):
     if kind == "out":
         g = st["out"][idx]["gain"]
     else:
-        g = st["sends"][kind][idx][st["selected"]][0]
+        g = st["sends"][kind][idx][submix_of(st, st["selected"])][0]
     return NEG_INF if g is None else g
 
 
@@ -476,7 +516,7 @@ def set_strip_db(st, key, db):
         st["out"][idx]["gain"] = val
     else:
         for c in strip_channels(st, kind, idx):
-            st["sends"][kind][c][st["selected"]][0] = val
+            st["sends"][kind][c][submix_of(st, st["selected"])][0] = val
 
 
 def display_name(st, key, standard):
@@ -550,6 +590,138 @@ def group_follow(st, key, old_db, new_db):
     return changed
 
 
+# ------------------------------------------------------------------ submix tools
+# TotalMix's right-click tools: copy, paste and mirror an output's submix, copy, paste and clear
+# a channel's sends; Trim Gains; mute and solo groups. A linked pair counts as one channel, and
+# what is kept for unlinking it (set_stereo) is changed with it, so that an unlink afterwards
+# gives the new values.
+
+def submix_of(st, pair):
+    """The pair whose sends pair plays: the one it mirrors, or itself."""
+    return st["mirror"].get(strip_key("out", pair), pair)
+
+
+def copy_mix(st, pair):
+    """The submix pair plays (every send into it, and what is kept for unlinking), for
+    paste_mix."""
+    p = submix_of(st, pair)
+    return {"sends": {kind: [list(row[p]) for row in rows] for kind, rows in st["sends"].items()},
+            "unlinked": {key: [list(own["sends"][0][p]), list(own["sends"][1][p])]
+                         for key, own in st["unlinked"].items()}}
+
+
+def paste_mix(st, pair, mix):
+    """Replace the submix into pair by mix (from copy_mix). A mirror on pair ends: it has its
+    own submix again. A pair linked since the copy keeps the pasted sends when it is unlinked."""
+    st["mirror"].pop(strip_key("out", pair), None)
+    for kind, rows in st["sends"].items():
+        for row, send in zip(rows, mix["sends"][kind]):
+            row[pair] = list(send)
+    for key, own in st["unlinked"].items():
+        kind, c = parse_key(key)
+        kept = mix["unlinked"].get(key) or (st["sends"][kind][c][pair],
+                                            st["sends"][kind][c + 1][pair])
+        own["sends"][0][pair], own["sends"][1][pair] = list(kept[0]), list(kept[1])
+
+
+def set_mirror(st, pair, source):
+    """TotalMix's Mirror: pair plays source's submix and follows every change to it; its output
+    level and mute stay its own. Pairs that mirrored pair now mirror source. False (and
+    nothing changes) if source plays pair's submix already."""
+    src = submix_of(st, source)
+    if src == pair:
+        return False
+    st["mirror"] = {k: src if p == pair else p for k, p in st["mirror"].items()}
+    st["mirror"][strip_key("out", pair)] = src
+    return True
+
+
+def remove_mirror(st, pair):
+    """End pair's mirror. It keeps the submix it played, now as its own."""
+    paste_mix(st, pair, copy_mix(st, pair))
+
+
+def copy_sends(st, kind, c):
+    """The sends of the strip at channel c into every submix (both channels of a linked pair,
+    with what is kept for unlinking it), for paste_sends."""
+    chans = strip_channels(st, kind, c)
+    own = st["unlinked"].get(strip_key(kind, c)) if len(chans) == 2 else None
+    return {"sends": [copy.deepcopy(st["sends"][kind][ch]) for ch in chans],
+            "unlinked": copy.deepcopy(own["sends"]) if own else None}
+
+
+def paste_sends(st, kind, c, sends):
+    """Replace every send of the strip at channel c by sends (from copy_sends). A mono channel
+    takes the left one of a pair; both channels of a pair take a mono channel's."""
+    chans = strip_channels(st, kind, c)
+    rows = sends["sends"]
+    for i, ch in enumerate(chans):
+        st["sends"][kind][ch] = copy.deepcopy(rows[min(i, len(rows) - 1)])
+    own = st["unlinked"].get(strip_key(kind, c)) if len(chans) == 2 else None
+    if own:
+        kept = (sends["unlinked"] if len(rows) == 2 and sends["unlinked"] else
+                [st["sends"][kind][ch] for ch in chans])
+        own["sends"] = [copy.deepcopy(row) for row in kept]
+
+
+def clear_sends(st, kind, c):
+    """Switch off every send of the strip at channel c, in every submix."""
+    paste_sends(st, kind, c, {"sends": [[[None, 0.0] for _ in range(N_PAIRS)]],
+                              "unlinked": None})
+
+
+def trim_sends(st, key, old_db, new_db):
+    """Trim Gains, after the strip's fader went from old_db to new_db in the selected submix:
+    every other send of its channel that is on moves by the same amount, so their differences
+    stay. Sends that are off stay off, and a send held at +6 dB loses the difference it would
+    have gone above that, as in a fader group. Nothing moves when the send was off (there is
+    nothing to measure from), and the channel's sends never go off this way: pulled to the
+    bottom they all stop at -80 dB, so they can come back up together. Returns the level the
+    fader shows now."""
+    kind, idx = parse_key(key)
+    if kind == "out" or old_db == NEG_INF:
+        return new_db
+    if new_db == NEG_INF:
+        new_db = FADER_MIN_DB
+        set_strip_db(st, key, new_db)
+    delta = new_db - old_db
+    chans = strip_channels(st, kind, idx)
+    sel = submix_of(st, st["selected"])
+    own = st["unlinked"].get(key) if len(chans) == 2 else None
+    rows = [(row, sel) for row in (st["sends"][kind][c] for c in chans)]
+    rows += [(row, None) for row in own["sends"]] if own else []
+    for row, skip in rows:
+        for p, send in enumerate(row):
+            if p != skip and send[0] is not None:
+                send[0] = round(max(FADER_MIN_DB, min(FADER_MAX_DB, send[0] + delta)), 2)
+    return new_db
+
+
+def muted_by_groups(st):
+    """{(kind, channel, pair)} of the sends that mute groups silence now. The right channel of
+    a linked pair has no strip, so its own membership waits until the pair is unlinked."""
+    return {(kind, c, p) for grp in st["mute_groups"] if grp["on"] for key, p in grp["sends"]
+            for kind, idx in [parse_key(key)] if not (idx % 2 and st["stereo"][kind][idx // 2])
+            for c in strip_channels(st, kind, idx)}
+
+
+def mute_group(st, key, pair):
+    """The mute group (1..4) that holds the strip's send into pair, or 0."""
+    return next((g + 1 for g, grp in enumerate(st["mute_groups"]) if [key, pair] in grp["sends"]),
+                0)
+
+
+def set_mute_group(st, key, pair, group):
+    """Put the strip's send into pair in mute group 1..4, or in none (0). As in TotalMix, a
+    mute group mutes a channel in one submix only, so no other output is muted by mistake. A
+    send added to a group that is on is muted at once."""
+    for grp in st["mute_groups"]:
+        grp["sends"] = [s for s in grp["sends"] if s != [key, pair]]
+        grp["on"] = grp["on"] and bool(grp["sends"])    # an empty group is off
+    if group:
+        st["mute_groups"][group - 1]["sends"].append([key, pair])
+
+
 # ------------------------------------------------------------------ presets
 
 def extract_layout(st, name):
@@ -575,8 +747,9 @@ def apply_mix(st, mix):
 def clear_sends_outside(st, channels):
     """Switch off every send from a source or into an output pair the interface doesn't have,
     so a mix made on a bigger interface leaves no routing that no strip shows, and take such
-    strips out of their fader groups, so that no group can bring a send back. The same for
-    what is kept for unlinking a pair (set_stereo). channels(kind) gives the interface's
+    strips out of their fader, mute and solo groups, so that no group can bring a send back,
+    and such pairs out of mirrors. The same for what is kept for unlinking a pair
+    (set_stereo). channels(kind) gives the interface's
     channels of a kind at any sample rate (Device.all_channels): what a higher rate hides for
     a while is kept."""
     outs = channels("out")
@@ -598,5 +771,10 @@ def clear_sends_outside(st, channels):
     def missing(key):
         kind, idx = parse_key(key)
         return (2 * idx if kind == "out" else idx) not in channels(kind)
-    for key in [k for k in st["groups"] if missing(k)]:
-        del st["groups"][key]
+    for groups in (st["groups"], st["solo_groups"]):
+        for key in [k for k in groups if missing(k)]:
+            del groups[key]
+    for grp in st["mute_groups"]:
+        grp["sends"] = [s for s in grp["sends"] if not missing(s[0]) and 2 * s[1] in outs]
+    st["mirror"] = {k: p for k, p in st["mirror"].items()
+                    if not missing(k) and 2 * p in outs}
