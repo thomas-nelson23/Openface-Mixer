@@ -1668,6 +1668,8 @@ class MainWindow(QMainWindow):
             e.ignore()                  # keep mixing and serving the remote; reopen to show
             self.hide()
             return
+        if self.cue is not None:        # the interface keeps mixing: Main Out's own mix again
+            self.set_cue(self.cue, False)
         super().closeEvent(e)
 
 

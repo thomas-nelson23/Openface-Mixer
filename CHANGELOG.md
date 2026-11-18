@@ -22,7 +22,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Right-click an output: *Copy mix*, *Paste mix* and *Mirror mix*, as in TotalMix. A mirrored output plays the same mix as the other and follows every change to it; *Remove mirror* gives it its own copy again.
 - Right-click an input or playback channel: *Copy sends*, *Paste sends* and *Clear sends* (all of the channel's sends, to every output). A pair counts as one channel.
 - Paste and clear keep the mix they replace for *Restore previous mix*.
-- **Cue** on each output strip: hear that output's mix on Main Out, as in TotalMix. One at a time; press it again to end it. It is not saved.
+- **Cue** on each output strip: hear that output's mix on Main Out, as in TotalMix. One at a time; press it again to end it. It is not saved, and it ends when the app quits.
 - **Trim** at the end of the Hardware inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off.
 - Mute groups and solo groups, four of each, next to Trim. A mute group mutes its channels in the submix they were added in; a solo group solos its channels. Both are part of presets and mix files.
 

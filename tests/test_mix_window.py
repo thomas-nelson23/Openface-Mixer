@@ -556,6 +556,13 @@ class MixWindowTest(unittest.TestCase):
             self.assertNotIn("cue", json.loads(config.state_file(self.dev).read_text()))
             w.hide_strip(w.strips["out:2"])             # out of sight: Cue ends
             self.assertIsNone(w.cue)
+            w.strips["out:3"].cue.click()
+            self.assertEqual(pushed[-1][4], 0.0)
+            w.st["sends"]["in"][4][3] = [0.0, -1.0]
+            w.push_matrix()
+            self.assertEqual(pushed[-1][4], 1.0)
+            self.close(w)                               # quit: Main Out's own mix again
+            self.assertEqual(pushed[-1][4], 0.0)
 
     def test_trim_moves_every_submix(self):
         w = self.window()
