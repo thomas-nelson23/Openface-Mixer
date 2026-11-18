@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
 from . import hdspe, sinks, theme, updater
 from .config import UI_SCALES, load_update_prefs, save_ui
 from .devices import DEVICES, group_title
-from .hardware import Hardware, set_card_profile
+from .hardware import (
+    FORCE_QUANTUM, FORCE_RATE, PW_QUANTA, PW_RATES, Hardware, pw_clock, set_card_profile,
+    set_pw_clock,
+)
 from .model import speed_mode
 from .theme import SANS, Section, caption_html, font, key_label, px
 
@@ -175,6 +178,8 @@ def write_failure(why, dev, tool="amixer"):
         why = f"{tool} is not installed"
     elif why == "timeout":
         why = f"{tool} did not answer"
+    elif tool == "pw-metadata" and "connect" in why:
+        why = "PipeWire is not running"
     elif dev.family == "hdspe" and "busy" in why:
         why = "the driver is busy while playback and recording are open in two programs"
     else:   # "amixer: Control hw:1 element write error: Device or resource busy": the reason
@@ -301,6 +306,7 @@ class SettingsPanel(QWidget):
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
+    _pw_clock_read = Signal(object)  # PipeWire's settings (hardware.pw_clock()), from a thread
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
     UPDATE_PROMPT = "Check GitHub for a newer Openface Mixer."
     STARTUP_CHECK_MS = 5000          # the quiet check, once the window has settled
@@ -365,6 +371,7 @@ class SettingsPanel(QWidget):
             self._build_hdspe(lay)
         else:
             self._build_digiface(lay)
+        self._build_pw_clock(self.clock_grid)
         self._control_room_at = lay.count()   # add_control_room() slots its section here
 
         self._build_ui_scale(lay, ui_scale)
@@ -613,6 +620,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         ports = Section("OPTICAL PORTS")
@@ -633,6 +641,70 @@ class SettingsPanel(QWidget):
             self.port_widgets.append((fmt, led, rate, out))
         pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
+
+    def _build_pw_clock(self, grid):
+        """PipeWire's sample rate and buffer, at the end of the CLOCK box: clock.force-rate and
+        clock.force-quantum in its settings metadata, so for every program and device. Auto
+        is 0, PipeWire's own choice. The boxes show what PipeWire has, read when the window is
+        shown (read_pw_clock). PipeWire forgets a forced value when it restarts and the app
+        does not set it again: it is not the app's alone, and the app may not even run."""
+        tip = "PipeWire's setting, for every program and every device. Auto lets PipeWire choose."
+        rate_tip = (" The card runs at its Internal rate while nothing plays, and at this rate "
+                    "while PipeWire plays." if self.dev.family == "hdspe" else
+                    " The interface follows it.") + (
+            " With an external clock, choose the rate the clock runs at.")
+        self.pw_rate, self.pw_quantum = QComboBox(), QComboBox()
+        self._pw_values = {}
+        r = grid.rowCount()
+        for i, (label, combo, key, text) in enumerate((
+                ("PipeWire rate", self.pw_rate, FORCE_RATE, tip + rate_tip),
+                ("Buffer", self.pw_quantum, FORCE_QUANTUM,
+                 "Frames per cycle: fewer means less latency and more work. " + tip))):
+            grid.addWidget(key_label(label), r + i, 0)
+            grid.addWidget(combo, r + i, 1)
+            combo.setToolTip(text)
+            combo.setEnabled(False)          # until PipeWire's values are read
+            combo.activated.connect(lambda _i, c=combo, k=key: self._set_pw_clock(k, c))
+        hint = QLabel("PipeWire's rate and buffer apply to every program and device.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        grid.addWidget(hint, r + 2, 0, 1, -1)
+        self._pw_clock_read.connect(self._show_pw_clock)
+
+    def read_pw_clock(self):
+        """Read PipeWire's rate and buffer on a thread; _show_pw_clock shows them."""
+        def run():
+            values = pw_clock()
+            try:
+                self._pw_clock_read.emit(values)
+            except RuntimeError:    # the panel went away meanwhile
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_pw_clock(self, values):
+        """values: hardware.pw_clock(), or None if PipeWire's settings can't be read."""
+        self._pw_values = values or {}
+        lo = self._pw_values.get("clock.min-quantum", PW_QUANTA[0])
+        hi = self._pw_values.get("clock.max-quantum", PW_QUANTA[-1])
+        for combo, key, choices, text in (
+                (self.pw_rate, FORCE_RATE, PW_RATES, lambda v: f"{v / 1000:g} kHz"),
+                (self.pw_quantum, FORCE_QUANTUM, [q for q in PW_QUANTA if lo <= q <= hi], str)):
+            if combo.view().isVisible():    # leave a list that is open alone
+                continue
+            value = self._pw_values.get(key, 0)
+            combo.clear()
+            combo.addItem("Auto", 0)
+            for v in sorted(set(choices) | ({value} if value else set())):
+                combo.addItem(text(v), v)
+            combo.setCurrentIndex(combo.findData(value) if values is not None else -1)
+            combo.setEnabled(values is not None)
+
+    def _set_pw_clock(self, key, combo):
+        value = combo.currentData()
+        if value == self._pw_values.get(key, 0):
+            return
+        self._report(set_pw_clock(key, value), "pw-metadata")
+        self.read_pw_clock()        # show what PipeWire has now
 
     @staticmethod
     def _status_row(grid, key):
@@ -703,6 +775,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         sync = Section("INPUT STATUS")

@@ -82,6 +82,13 @@ def exercise(app, w, check):
     w.settings.update_hw_mixer(None)
     for pw in ({"pipewire": False}, {"pipewire": True, "pw_nodes": 1, "pw_linked": 0}):
         w.settings.update_hw_mixer({**status, **pw})
+    # PipeWire's rate and buffer: shown, then one chosen (no pw-metadata here: a notice)
+    w.settings._show_pw_clock({"clock.force-rate": 0, "clock.force-quantum": 256,
+                               "clock.min-quantum": 32, "clock.max-quantum": 2048})
+    check(w.settings.pw_quantum.currentText() == "256", "the buffer PipeWire has is not shown")
+    w.settings.pw_rate.setCurrentIndex(2)
+    w.settings.pw_rate.activated.emit(2)
+    pump(app)
     # a desktop output and input added from the strip menus, and removed again
     def desktop(strip, pick):
         menu = QMenu()

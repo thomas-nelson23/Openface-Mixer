@@ -1,4 +1,5 @@
-"""Device settings held in the kernel's ALSA mixer controls, and PipeWire card info.
+"""Device settings held in the kernel's ALSA mixer controls, PipeWire card info, and PipeWire's
+sample rate and buffer.
 
 The snd-usb-audio Digiface quirk exposes clock source, per-port output format and per-port
 input status as ALSA controls, and snd-hdspm or snd-hdspe the RayDAT's clock settings and input
@@ -14,10 +15,10 @@ DIGIFACE_CARD = "Digiface USB"
 
 
 def run(cmd, timeout=2):
-    """Runs amixer or pactl without ever hanging the window. Returns (its output, None), or
-    (None, why it failed): "missing" (no such program), "timeout", or its own complaint (the
-    last line, in English: "amixer: Control hw:1 element write error: Device or resource
-    busy")."""
+    """Runs amixer, pactl or pw-metadata without ever hanging the window. Returns (its output,
+    None), or (None, why it failed): "missing" (no such program), "timeout", or its own
+    complaint (the last line, in English: "amixer: Control hw:1 element write error: Device or
+    resource busy")."""
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            env=dict(os.environ, LC_ALL="C"))
@@ -159,3 +160,30 @@ def pw_digiface_card():
 def set_card_profile(card_name, profile):
     """Returns None, or why the profile was not set (see run())."""
     return run(["pactl", "set-card-profile", card_name, profile], timeout=3)[1]
+
+
+# PipeWire's sample rates and buffer sizes (quantum, in frames) the Clock section offers. Every
+# supported interface runs at all of these rates.
+PW_RATES = (44100, 48000, 88200, 96000, 176400, 192000)
+PW_QUANTA = (32, 64, 128, 256, 512, 1024, 2048)
+FORCE_RATE, FORCE_QUANTUM = "clock.force-rate", "clock.force-quantum"
+
+
+def pw_clock():
+    """PipeWire's settings metadata as {key: whole number}: clock.force-rate and
+    clock.force-quantum (0 = not forced), clock.min-quantum and clock.max-quantum. None if it
+    can't be read (PipeWire not running, no pw-metadata)."""
+    out, _why = run(["pw-metadata", "-n", "settings", "0"])
+    if out is None:
+        return None
+    found = {}
+    for m in re.finditer(r"key:'(clock\.[\w.-]+)' value:'(\d+)'", out):
+        found[m.group(1)] = int(m.group(2))
+    return found if FORCE_RATE in found or FORCE_QUANTUM in found else None
+
+
+def set_pw_clock(key, value):
+    """Sets clock.force-rate or clock.force-quantum (0: back to what PipeWire chooses). These
+    are PipeWire's, for every program and device, until it restarts. Returns None, or why the
+    setting was not made (see run())."""
+    return run(["pw-metadata", "-n", "settings", "0", key, str(value)])[1]

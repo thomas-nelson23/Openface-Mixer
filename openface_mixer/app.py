@@ -366,7 +366,7 @@ class MainWindow(QMainWindow):
             self.engine.read_peaks()    # tells the engine to read the meters again, and
             self._last_meter = time.monotonic()    # drops the peaks held while nobody looked
             self.pace_timers()
-            for poll in (self.poll_engine, self.poll_hw, self.poll_profile):
+            for poll in (self.poll_engine, self.poll_hw, self.poll_profile, self.poll_pw_clock):
                 poll()                  # what the window shows is as old as the last hide
         if self._load_notice:
             QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
@@ -1348,6 +1348,9 @@ class MainWindow(QMainWindow):
         """Write the desktop sinks and sources for the engine if they changed, and tell it."""
         if save_sinks(self.st, self.dev):
             self.engine.reload_sinks()
+
+    def poll_pw_clock(self):
+        self.settings.read_pw_clock()   # PipeWire's rate and buffer may have changed meanwhile
 
     def ensure_engine(self):
         if self.engine.outdated():

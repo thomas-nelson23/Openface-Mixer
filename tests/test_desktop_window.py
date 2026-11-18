@@ -1,6 +1,9 @@
-"""The strip menus' desktop outputs and inputs, on the real window offscreen
-(tests/test_controls.py WindowCase: the engine and the system are stubbed, the config is in a
-temporary folder)."""
+"""The strip menus' desktop outputs and inputs and the Clock section's PipeWire rate and buffer, on
+the real window offscreen (tests/test_controls.py WindowCase: the engine and the system are
+stubbed, the config is in a temporary folder). pw-metadata is stubbed: the command lines are
+checked, nothing is run."""
+import subprocess
+import time
 import unittest
 from unittest import mock
 
@@ -10,12 +13,19 @@ if QApplication:
     from PySide6.QtWidgets import QMenu
 
 
+HINT = "PipeWire's rate and buffer apply to every program and device."
+
+
 def menu_running(run):
     """A QMenu whose exec() calls run(menu) instead of showing it."""
     class Menu(QMenu):
         def exec(self, *_args):
             run(self)
     return Menu
+
+
+def done(code=0, stderr=""):
+    return subprocess.CompletedProcess([], code, "", stderr)
 
 
 class DesktopMenuTest(WindowCase):
@@ -107,6 +117,99 @@ class DesktopMenuTest(WindowCase):
             self.w.strip_menu(self.strip(self.w.row_play, 3), None)
         self.settle()
         self.assertEqual(added, [False])
+
+
+class PipeWireClockTest(WindowCase):
+    SETTINGS = {"clock.force-rate": 0, "clock.force-quantum": 0, "clock.min-quantum": 32,
+                "clock.max-quantum": 2048}
+
+    def setUp(self):
+        from openface_mixer import hardware, settings_panel
+        self.hardware, self.sp, self.p = hardware, settings_panel, self.w.settings
+        self.notices = []
+        self.p.notice.connect(self.notices.append)
+        self.addCleanup(self.p.notice.disconnect, self.notices.append)
+        self.reads = mock.patch.object(self.p, "read_pw_clock").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def items(self, combo):
+        return [combo.itemText(i) for i in range(combo.count())]
+
+    def choose(self, combo, data, answer=None):
+        with mock.patch.object(self.hardware.subprocess, "run",
+                               return_value=answer or done()) as run:
+            i = combo.findData(data)
+            combo.setCurrentIndex(i)
+            combo.activated.emit(i)
+        return [c.args[0] for c in run.call_args_list]
+
+    def test_the_rows(self):
+        p = self.p
+        grid = p.clock_grid
+        keys = [grid.itemAtPosition(r, 0).widget().text() for r in range(grid.rowCount())
+                if grid.itemAtPosition(r, 0)]
+        self.assertEqual(keys[-3:], ["PipeWire rate", "Buffer", HINT])
+        self.assertIn("every program and every device", p.pw_rate.toolTip())
+        p._show_pw_clock(None)                      # PipeWire is not running
+        self.assertFalse(p.pw_rate.isEnabled() or p.pw_quantum.isEnabled())
+        p._show_pw_clock(dict(self.SETTINGS))
+        self.assertTrue(p.pw_rate.isEnabled() and p.pw_quantum.isEnabled())
+        self.assertEqual(self.items(p.pw_rate), ["Auto", "44.1 kHz", "48 kHz", "88.2 kHz",
+                                                 "96 kHz", "176.4 kHz", "192 kHz"])
+        self.assertEqual(self.items(p.pw_quantum),
+                         ["Auto", "32", "64", "128", "256", "512", "1024", "2048"])
+        self.assertEqual((p.pw_rate.currentText(), p.pw_quantum.currentText()), ("Auto", "Auto"))
+        p._show_pw_clock({**self.SETTINGS, "clock.min-quantum": 64,
+                          "clock.max-quantum": 1024, "clock.force-quantum": 48})
+        self.assertEqual(self.items(p.pw_quantum),
+                         ["Auto", "48", "64", "128", "256", "512", "1024"])
+        self.assertEqual(p.pw_quantum.currentText(), "48")
+
+    def test_setting_and_auto(self):
+        p = self.p
+        p._show_pw_clock(dict(self.SETTINGS))
+        self.assertEqual(self.choose(p.pw_rate, 0), [])     # Auto while Auto: nothing written
+        self.reads.assert_not_called()
+        self.assertEqual(self.choose(p.pw_rate, 96000),
+                         [["pw-metadata", "-n", "settings", "0", "clock.force-rate", "96000"]])
+        self.assertEqual(self.choose(p.pw_quantum, 128),
+                         [["pw-metadata", "-n", "settings", "0", "clock.force-quantum", "128"]])
+        self.assertEqual(self.reads.call_count, 2)          # then what PipeWire has is shown
+        p._show_pw_clock({**self.SETTINGS, "clock.force-rate": 96000})
+        self.assertEqual(p.pw_rate.currentText(), "96 kHz")
+        self.assertEqual(self.choose(p.pw_rate, 0),         # back to Auto
+                         [["pw-metadata", "-n", "settings", "0", "clock.force-rate", "0"]])
+        self.assertEqual(self.notices, [])
+
+    def test_a_failure_is_shown(self):
+        p = self.p
+        p._show_pw_clock(dict(self.SETTINGS))
+        self.choose(p.pw_rate, 48000, done(255, "can't connect: Host is down"))
+        self.assertEqual(self.notices, ["Not changed: PipeWire is not running"])
+
+    def test_read_on_a_thread(self):
+        mock.patch.stopall()
+        with mock.patch.object(self.sp, "pw_clock",
+                               return_value={**self.SETTINGS, "clock.force-quantum": 512}):
+            self.p.read_pw_clock()
+            deadline = time.monotonic() + 5
+            while self.p.pw_quantum.currentText() != "512" and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+        self.assertEqual(self.p.pw_quantum.currentText(), "512")
+
+
+class RayDATClockTest(WindowCase):
+    device = "raydat"
+
+    def test_the_rows_follow_the_cards_own(self):
+        p = self.w.settings
+        grid = p.clock_grid
+        keys = [grid.itemAtPosition(r, 0).widget().text() for r in range(grid.rowCount())
+                if grid.itemAtPosition(r, 0)]
+        self.assertEqual(keys, ["Clock mode", "Sample rate", "Prefer", "Internal rate",
+                                "PipeWire rate", "Buffer", HINT])
+        self.assertIn("Internal rate", p.pw_rate.toolTip())
 
 
 if __name__ == "__main__":

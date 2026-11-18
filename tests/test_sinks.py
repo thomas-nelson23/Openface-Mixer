@@ -1,14 +1,15 @@
 """The desktop sinks and sources (sinks.py): the list in the device's state, a damaged one, the
-sinks.conf the engine reads, the Desktop audio status row. The strip menus are in
-tests/test_desktop_window.py."""
+sinks.conf the engine reads, the Desktop audio status row and PipeWire's rate and buffer. No Qt;
+the strip menus and the Clock rows are in tests/test_desktop_window.py."""
 import json
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import config, sinks
+from openface_mixer import config, hardware, sinks
 from openface_mixer.devices import DEVICES
 from openface_mixer.model import N_IN, N_PLAY
 
@@ -171,6 +172,52 @@ class StateTest(unittest.TestCase):
         self.assertFalse(config.save_sinks(st, dev))
 
 
+def done(stdout="", code=0, stderr=""):
+    return subprocess.CompletedProcess([], code, stdout, stderr)
+
+
+SETTINGS = """Found "settings" metadata 32
+update: id:0 key:'log.level' value:'2' type:''
+update: id:0 key:'clock.rate' value:'48000' type:''
+update: id:0 key:'clock.allowed-rates' value:'[ 48000 ]' type:''
+update: id:0 key:'clock.quantum' value:'1024' type:''
+update: id:0 key:'clock.min-quantum' value:'32' type:''
+update: id:0 key:'clock.max-quantum' value:'2048' type:''
+update: id:0 key:'clock.force-quantum' value:'256' type:''
+update: id:0 key:'clock.force-rate' value:'0' type:''
+"""
+
+
+class PipeWireClockTest(unittest.TestCase):
+    def test_reading(self):
+        with mock.patch.object(hardware.subprocess, "run", return_value=done(SETTINGS)) as run:
+            values = hardware.pw_clock()
+        self.assertEqual(run.call_args.args[0], ["pw-metadata", "-n", "settings", "0"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 2)
+        self.assertEqual(values["clock.force-rate"], 0)
+        self.assertEqual(values["clock.force-quantum"], 256)
+        self.assertEqual(values["clock.max-quantum"], 2048)
+        self.assertNotIn("clock.allowed-rates", values)
+        for answer in (done(code=255, stderr="can't connect: Host is down"), done("nothing")):
+            with mock.patch.object(hardware.subprocess, "run", return_value=answer):
+                self.assertIsNone(hardware.pw_clock())
+        for error in (FileNotFoundError(), subprocess.TimeoutExpired("pw-metadata", 2)):
+            with mock.patch.object(hardware.subprocess, "run", side_effect=error):
+                self.assertIsNone(hardware.pw_clock())
+
+    def test_setting(self):
+        with mock.patch.object(hardware.subprocess, "run", return_value=done()) as run:
+            self.assertIsNone(hardware.set_pw_clock(hardware.FORCE_RATE, 96000))
+            self.assertIsNone(hardware.set_pw_clock(hardware.FORCE_QUANTUM, 0))
+        self.assertEqual([c.args[0] for c in run.call_args_list], [
+            ["pw-metadata", "-n", "settings", "0", "clock.force-rate", "96000"],
+            ["pw-metadata", "-n", "settings", "0", "clock.force-quantum", "0"]])
+        with mock.patch.object(hardware.subprocess, "run",
+                               return_value=done(code=255, stderr="can't connect: Host is down")):
+            self.assertEqual(hardware.set_pw_clock(hardware.FORCE_RATE, 48000),
+                             "can't connect: Host is down")
+
+
 try:
     from openface_mixer import settings_panel
 except ImportError:                     # no PySide6
@@ -207,6 +254,15 @@ class StatusRowTest(unittest.TestCase):
                         .endswith("None"))
         self.assertTrue(self.row([source(20)], rate=96000, pipewire=True, pw_nodes=0,
                                  pw_linked=0)[0].endswith("None at this rate"))
+
+    def test_failure_messages(self):
+        fail = settings_panel.write_failure
+        self.assertEqual(fail("can't connect: Host is down", self.dev, "pw-metadata"),
+                         "Not changed: PipeWire is not running")
+        self.assertEqual(fail("missing", self.dev, "pw-metadata"),
+                         "Not changed: pw-metadata is not installed")
+        self.assertEqual(fail("timeout", self.dev, "pw-metadata"),
+                         "Not changed: pw-metadata did not answer")
 
 
 if __name__ == "__main__":
