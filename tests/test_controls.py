@@ -17,7 +17,7 @@ except ImportError:
     QApplication = None
 
 ENGINE_STUBS = dict(status=lambda self: None, outdated=lambda self: False,
-                    attach=lambda self: False, read_peaks=lambda self: (None, None),
+                    attach=lambda self: False, read_peaks=lambda self: (None,) * 6,
                     write_matrix=lambda self, gains, out: None,
                     write_device=lambda self, block: None,
                     start=lambda self: (True, "stub"), stop=lambda self: None,

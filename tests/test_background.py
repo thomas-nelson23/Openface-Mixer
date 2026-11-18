@@ -25,7 +25,7 @@ class PollingTest(WindowCase):
         self.assertEqual(intervals(w), SHOWN)
         with mock.patch.object(w, "poll_hw") as hw, mock.patch.object(w, "poll_profile") as pro, \
                 mock.patch.object(w, "poll_engine") as eng, \
-                mock.patch.object(w.engine, "read_peaks", return_value=(None, None)) as peaks:
+                mock.patch.object(w.engine, "read_peaks", return_value=(None,) * 6) as peaks:
             w.hide()
             self.settle()
             self.assertEqual(intervals(w), HIDDEN)

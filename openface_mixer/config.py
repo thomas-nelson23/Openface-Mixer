@@ -160,8 +160,8 @@ def save_state(st, dev=DEFAULT):
 
 
 def load_ui():
-    """ui.json: the UI scale, the window size, whether the settings sidebar is open, and the
-    Updates section's two choices."""
+    """ui.json: the UI scale, the window size, whether the settings sidebar is open, the
+    Updates section's two choices, the meter options and the ARC USB keys."""
     try:
         ui = json.loads(UI_FILE.read_text())
     except BAD_FILE:
