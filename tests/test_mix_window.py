@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from openface_mixer import arc, config, engine, model as m, presets
+from openface_mixer.model import NEG_INF
 from openface_mixer.devices import DEVICES
 
 try:
@@ -438,6 +439,142 @@ class MixWindowTest(unittest.TestCase):
         self.assertFalse(m.any_solo(w.st))
         w.remote_message("/mix/in/2/0/solo", [1.0])
         self.assertTrue(w.strips["in:2"].solo.isChecked())
+
+    # ---------------------------------------------------------------- submix tools
+    def menu_entries(self, w, strip):
+        with mock.patch.object(self.app_module, "QMenu") as menu:
+            w.strip_menu(strip, None)
+        menu = menu.return_value
+        return ({c.args[-2] if callable(c.args[-1]) else c.args[0]: c
+                 for c in menu.addAction.call_args_list},
+                [c.args[0] for c in menu.addMenu.call_args_list])
+
+    def test_the_menus_offer_the_tools(self):
+        w = self.window()
+        out, src = w.strips["out:0"], w.strips["in:0"]
+        actions, menus = self.menu_entries(w, out)
+        self.assertIn("Copy mix", actions)
+        self.assertNotIn("Copy sends", actions)
+        self.assertNotIn("Solo group", menus)
+        w.copy_mix(out)
+        actions, _ = self.menu_entries(w, w.strips["out:1"])
+        self.assertIn(f"Paste mix from {out.name}", actions)
+        self.assertIn(f"Mirror mix of {out.name}", actions)
+        actions, menus = self.menu_entries(w, src)
+        self.assertEqual([k for k in actions if "sends" in k],
+                         ["Copy sends", "Paste sends", "Clear sends…"])
+        self.assertIn("Solo group", menus)
+        self.assertIn("Mute group in Phones", menus)
+
+    def test_paste_and_mirror_keep_the_mix_they_replace(self):
+        w = self.window()
+        w.st["sends"]["in"][2][0] = [-4.0, 0.5]
+        a, b = w.strips["out:0"], w.strips["out:1"]
+        w.copy_mix(a)
+        outgoing = m.extract_mix(w.st)
+        w.paste_mix(b)
+        self.assertEqual(self.previous(), outgoing)
+        self.assertEqual(w.st["sends"]["in"][2][1], [-4.0, 0.5])
+        w.restore_previous_mix()
+        self.assertEqual(m.extract_mix(w.st), outgoing)
+        w.mirror_mix(w.strips["out:3"])
+        self.assertEqual(w.st["mirror"], {"out:3": 0})
+        self.assertEqual(self.previous(), outgoing)
+        w.select_out(3, by_pair=True)
+        self.assertIn("mirrors", w.row_in._subtitle)
+        w.move_fader(w.strips["in:2"], -9.0)              # edits the mirrored submix
+        self.assertEqual(w.st["sends"]["in"][2][0][0], -9.0)
+        actions, _ = self.menu_entries(w, w.strips["out:3"])
+        actions[f"Remove mirror of {a.name}"].args[-1]()
+        self.assertEqual(w.st["mirror"], {})
+        self.assertEqual(w.st["sends"]["in"][2][3][0], -9.0)
+        self.warning.assert_not_called()
+
+    def test_clear_sends_asks_first(self):
+        w = self.window()
+        strip = w.strips["play:0"]
+        self.ask.return_value = False
+        w.clear_sends(strip)
+        self.assertEqual(w.st["sends"]["play"][0][0], [0.0, 0.0])
+        self.assertFalse(config.previous_mix_file(self.dev).exists())
+        self.assertIn(strip.name, self.ask.call_args.args[2])
+        self.ask.return_value = True
+        outgoing = m.extract_mix(w.st)
+        w.clear_sends(strip)
+        self.assertTrue(all(s[0] is None for c in (0, 1) for s in w.st["sends"]["play"][c]))
+        self.assertEqual(self.previous(), outgoing)
+        w.copy_sends(w.strips["play:2"])
+        w.change_mix(lambda st: m.paste_sends(st, "play", 0, w.sends_clipboard[1]), "x")
+        self.assertEqual(w.st["sends"]["play"][0], w.st["sends"]["play"][2])
+
+    def test_cue_plays_an_outputs_submix_on_main_out(self):
+        pushed = []
+        with mock.patch.object(engine.Engine, "write_matrix",
+                               lambda _self, g, _o: pushed.append(list(g))):
+            w = self.window()
+            w.st["sends"]["in"][4][2] = [0.0, -1.0]
+            cues = {s.pair: s.cue for s in w.row_out.strips}
+            self.assertFalse(cues[0].isEnabled())       # Main Out
+            saved = copy.deepcopy(w.st)
+            cues[2].click()
+            self.assertEqual(w.cue, 2)
+            self.assertEqual(pushed[-1][4], 1.0)        # input 5 on Main Out left
+            cues[3].click()                             # one at a time
+            self.assertEqual((w.cue, cues[2].isChecked()), (3, False))
+            self.assertEqual(pushed[-1][4], 0.0)
+            cues[3].click()
+            self.assertIsNone(w.cue)
+            cues[2].click()
+            self.assertEqual(w.st, saved)               # never part of the state
+            w.save()
+            self.assertNotIn("cue", json.loads(config.state_file(self.dev).read_text()))
+            w.hide_strip(w.strips["out:2"])             # out of sight: Cue ends
+            self.assertIsNone(w.cue)
+
+    def test_trim_moves_every_submix(self):
+        w = self.window()
+        w.st["sends"]["in"][0][0] = [-10.0, 0.0]
+        w.st["sends"]["in"][0][16] = [-20.0, 0.0]
+        w.select_out(16, by_pair=True)
+        w.trim_btn.click()
+        self.assertTrue(w.st["trim"])
+        self.assertIn("Trim", w.row_in._subtitle)
+        w.move_fader(w.strips["in:0"], -14.0)
+        self.assertEqual(w.st["sends"]["in"][0][0][0], -4.0)
+        w.move_fader(w.strips["in:0"], NEG_INF)         # held at the bottom, as shown
+        self.assertEqual(w.st["sends"]["in"][0][16][0], m.FADER_MIN_DB)
+        self.assertAlmostEqual(w.strips["in:0"].fader.db(), m.FADER_MIN_DB)
+        w.trim_btn.click()
+        w.move_fader(w.strips["in:0"], -20.0)
+        self.assertEqual(w.st["sends"]["in"][0][0][0], -70.0)
+        w.save()
+        self.close(w)
+        self.assertFalse(self.window().st["trim"])
+
+    def test_group_buttons(self):
+        w = self.window()
+        mute1, solo2 = w.group_btns["mute", 1], w.group_btns["solo", 2]
+        self.assertFalse(mute1.isEnabled())
+        w.choose_mute_group(w.strips["in:0"], 1)
+        w.choose_solo_group(w.strips["in:2"], 2)
+        w.choose_solo_group(w.strips["play:0"], 2)
+        self.assertTrue(mute1.isEnabled() and solo2.isEnabled())
+        self.assertIn(w.strips["in:0"].name, mute1.toolTip())
+        mute1.click()
+        self.assertTrue(w.st["mute_groups"][0]["on"] and mute1.isChecked())
+        self.assertEqual(w.strips["in:0"]._group_muted, 1)
+        w.select_out(0, by_pair=True)                   # muted in Phones only
+        self.assertEqual(w.strips["in:0"]._group_muted, 0)
+        solo2.click()
+        self.assertEqual((w.st["solo"]["in"][2], w.st["solo"]["play"][:2]), (True, [True, True]))
+        self.assertTrue(w.strips["in:2"].solo.isChecked() and solo2.isChecked())
+        solo2.click()
+        self.assertFalse(m.any_solo(w.st))
+        w.choose_mute_group(w.strips["in:0"], 0)        # back in Phones? no: in AD1 1/2
+        w.select_out(16, by_pair=True)
+        w.choose_mute_group(w.strips["in:0"], 0)
+        self.assertFalse(mute1.isEnabled() or w.st["mute_groups"][0]["on"])
+        self.assertEqual(w.strips["in:0"]._group_muted, 0)
 
 
 if __name__ == "__main__":
