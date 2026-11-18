@@ -10,10 +10,11 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import hdspe, theme, updater
+from . import hdspe, sinks, theme, updater
 from .config import UI_SCALES, load_update_prefs, save_ui
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
+from .model import speed_mode
 from .theme import SANS, Section, caption_html, font, key_label, px
 
 # Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
@@ -137,6 +138,35 @@ def read_failure(hw, short):
     if hw.error == "timeout":
         return "amixer did not answer", ""
     return "Can't read settings", hw.error or "The card's ALSA controls are not the expected ones."
+
+
+def desktop_audio(dev, lst, status):
+    """The Desktop audio row of STATUS: (value, tooltip), from the engine's status
+    (Engine.status()) and the device's sinks and sources (st["sinks"])."""
+    mode = speed_mode(status.get("rate"))
+
+    def where(e):
+        kind = sinks.kind_of(e)
+        label = (dev.pair_label if e["stereo"] else dev.chan_label)(kind, e["ch"], mode)
+        return f"{'playback' if kind == 'play' else 'input'} {label}"
+
+    here = [e for e in lst if sinks.pcm_map(dev, e)[(1, 2, 4).index(mode)][0] >= 0]
+    tip = "<br>".join(html.escape(f"{sinks.description(e['name'])}: " + (
+        where(e) if e in here else "not at this sample rate")) for e in lst)
+    if not status.get("pipewire", True):
+        return light(OFF, "PipeWire not running"), (
+            "The hardware mixer works without PipeWire. The desktop outputs and inputs come "
+            "back when it starts.")
+    if not here:
+        return light(OFF, "None at this rate" if lst else "None"), tip or (
+            "Right-click a playback or input channel to add one.")
+    made = status.get("pw_nodes", len(here))
+    linked = status.get("pw_linked", made if status["sink_linked"] else 0)
+    if made and linked == made:
+        return (f"Linked to {where(here[0])}" if made == 1 else f"{made} linked"), tip
+    short = dev.name.replace("RME ", "")
+    return light(RED, f"Not linked to the {short}" if not linked else
+                 f"{linked} of {made} linked"), tip
 
 
 def write_failure(why, dev, tool="amixer"):
@@ -310,7 +340,7 @@ class SettingsPanel(QWidget):
             self._build_card_profile(el)
         self.hw_label, self.routes_label, self.eng_label, self.sink_label = (
             self._status_row(el, key) for key in ("Hardware mixer", "Routes", "Engine",
-                                                  "Playback sink"))
+                                                  "Desktop audio"))
         self.status_note = QLabel()
         self.status_note.setObjectName("note")
         self.status_note.setWordWrap(True)
@@ -345,9 +375,9 @@ class SettingsPanel(QWidget):
         eng.setToolTip(
             f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
             "has no added latency and the mix keeps running with the computer idle or the "
-            f"engine stopped.\n\nPlayback {dev.sink_channels} = the Openface Mixer Playback "
-            "sink. Other playback channels: send apps to the interface's own output channels "
-            "(Pro Audio profile) with qpwgraph/Helvum.")
+            "engine stopped.\n\nDesktop audio: the outputs and inputs apps play to and record "
+            "from. Right-click a playback channel to add a desktop output on it, or an input "
+            "channel to add a desktop input.")
         lay.addStretch()
 
     def add_control_room(self, section):
@@ -986,6 +1016,7 @@ class SettingsPanel(QWidget):
             self.routes_label.setText("—")
             self.eng_label.setText(light(RED, "Stopped"))
             self.sink_label.setText("—")
+            self.sink_label.setToolTip("")
             self.show_status_note(html.escape(engine_error) if engine_error else
                                   "The hardware keeps its last mix. Start the engine to "
                                   "change it.")
@@ -1004,9 +1035,10 @@ class SettingsPanel(QWidget):
             self.routes_label.setText("—")
         self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
                                light(RED, "Not responding"))
-        self.sink_label.setText(
-            f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
-            light(RED, f"Not linked to the {self.dev.name.replace('RME ', '')}"))
+        value, tip = desktop_audio(
+            self.dev, self.st.get("sinks", sinks.default_list(self.dev)), status)
+        self.sink_label.setText(value)
+        self.sink_label.setToolTip(tip)
         self.show_status_note(note)
         self.eng_btn.setText("Restart engine")
 

@@ -16,12 +16,12 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fx, hdspe, osc_remote
+from . import arc, control_room, fx, hdspe, osc_remote, sinks
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
     device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
-    previous_mix_file, save_device_choice, save_state, save_ui_scale, save_window,
+    previous_mix_file, save_device_choice, save_sinks, save_state, save_ui_scale, save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -1004,10 +1004,68 @@ class MainWindow(QMainWindow):
             menu.addAction("Copy effects", lambda: self.copy_effects(strip))
             paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
             paste.setEnabled(self.fx_clipboard is not None)
+        if strip.kind in ("play", "in"):
+            self.desktop_menu(menu, strip)
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
         menu.deleteLater()
+
+    # ------------------------------------------------------------------ desktop sinks, sources
+    def desktop_menu(self, menu, strip):
+        """The strip menu's desktop output (a playback pair's sink) or desktop input (an input
+        channel's or pair's source): add one, or rename or remove the one there."""
+        kind, lst = strip.kind, self.st["sinks"]
+        if kind == "play":
+            first = strip.channels[0] - strip.channels[0] % 2
+            entry = {"kind": "sink", "ch": first, "stereo": True}
+        else:
+            entry = {"kind": "source", "ch": strip.channels[0], "stereo": len(strip.channels) > 1}
+        what = "output" if kind == "play" else "input"
+        menu.addSeparator()
+        i = sinks.find(lst, entry["kind"], sinks.channels(entry))
+        if i is not None:
+            name = sinks.description(lst[i]["name"])
+            menu.addAction(f"Rename desktop {what} “{name}”…", lambda: self.rename_desktop(i))
+            menu.addAction(f"Remove desktop {what} “{name}”", lambda: self.remove_desktop(i))
+            return
+        if set(sinks.channels(entry)) <= set(self.dev.pcm_channels(sinks.kind_of(entry),
+                                                                    self.mode)):
+            add = menu.addAction(f"Add desktop {what}…", lambda: self.add_desktop(entry))
+            add.setEnabled(len(lst) < sinks.MAX)
+
+    def _desktop_where(self, entry):
+        k, c = sinks.kind_of(entry), entry["ch"]
+        label = (self.dev.pair_label if entry["stereo"] else self.dev.chan_label)(k, c, self.mode)
+        return f"{'Playback' if k == 'play' else 'Input'} {label}"
+
+    def _ask_desktop_name(self, title, entry, text):
+        name, ok = QInputDialog.getText(
+            self, title, f"Name for {self._desktop_where(entry).lower()} in the desktop's sound "
+            f"settings (shown after “{sinks.PREFIX}”):", text=text)
+        return sinks.clean_name(name) if ok else ""
+
+    def add_desktop(self, entry):
+        what = "output" if entry["kind"] == "sink" else "input"
+        name = self._ask_desktop_name(f"Add desktop {what}", entry, self._desktop_where(entry))
+        if name:
+            self.st["sinks"].append({**entry, "name": name})
+            self.save()
+
+    def rename_desktop(self, i):
+        entry = self.st["sinks"][i]
+        what = "output" if entry["kind"] == "sink" else "input"
+        old = entry["name"]
+        name = self._ask_desktop_name(f"Rename desktop {what}", entry,
+                                      old[len(sinks.PREFIX) + 1:] if old.startswith(
+                                          sinks.PREFIX + " ") else old)
+        if name:
+            entry["name"] = name
+            self.save()
+
+    def remove_desktop(self, i):
+        del self.st["sinks"][i]
+        self.save()
 
     @staticmethod
     def _swatch(hexcol):
@@ -1284,12 +1342,20 @@ class MainWindow(QMainWindow):
 
     def save(self):
         save_state(self.st, self.dev)
+        self.sync_sinks()
+
+    def sync_sinks(self):
+        """Write the desktop sinks and sources for the engine if they changed, and tell it."""
+        if save_sinks(self.st, self.dev):
+            self.engine.reload_sinks()
 
     def ensure_engine(self):
         if self.engine.outdated():
             self.restart_engine()   # an older engine from before an upgrade is still running
         elif self.engine.status() is None:
             self.start_engine()
+        else:
+            self.sync_sinks()       # one already running reads a list changed meanwhile
 
     def start_engine(self):
         """Starts the engine and returns at once. poll_engine then looks for it every 50 ms, for

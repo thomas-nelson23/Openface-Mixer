@@ -31,7 +31,7 @@ def pump(app):
 
 def exercise(app, w, check):
     """Click through one device's window. check(condition, what) records a failure."""
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QMenu, QPushButton
     from openface_mixer import engine, updater
     from openface_mixer.channel_settings import ChannelSettings
     from openface_mixer.remote_link import autostart_file
@@ -80,6 +80,27 @@ def exercise(app, w, check):
         for state in engine.HW_STATES:
             w.settings.update_hw_mixer({**status, "hw": state})
     w.settings.update_hw_mixer(None)
+    for pw in ({"pipewire": False}, {"pipewire": True, "pw_nodes": 1, "pw_linked": 0}):
+        w.settings.update_hw_mixer({**status, **pw})
+    # a desktop output and input added from the strip menus, and removed again
+    def desktop(strip, pick):
+        menu = QMenu()
+        w.desktop_menu(menu, strip)
+        found = [a for a in menu.actions() if a.text().startswith(pick) and a.isEnabled()]
+        for action in found:
+            action.trigger()
+        menu.deleteLater()
+        pump(app)
+        return found
+
+    before = list(w.st["sinks"])
+    for row in (w.row_play, w.row_in):
+        strip = next((s for s in reversed(row.strips) if desktop(s, "Add desktop")), None)
+        check(strip and len(w.st["sinks"]) == len(before) + 1,
+              f"no desktop output or input added in {row.title}")
+        if strip:
+            desktop(strip, "Remove desktop")
+    check(w.st["sinks"] == before, f"the desktop outputs and inputs: {w.st['sinks']}")
     # the login entry names the command by its full path (or as found on PATH in a checkout)
     w.remote_panel.autostart.click()
     entry = autostart_file(dev.key)
@@ -215,6 +236,7 @@ def drive(home):
         raise OSError("the smoke test runs no other programs")
 
     ofm_app.Engine = StubEngine
+    ofm_app.QInputDialog.getText = staticmethod(lambda *_a, **_kw: ("Smoke test", True))
     subprocess.run = subprocess.Popen = no_subprocess       # amixer, pactl, systemctl, git
     arc.find_port = lambda: None                            # leave a connected ARC USB alone
     # exceptions in slots and event handlers end up here instead of stopping the test

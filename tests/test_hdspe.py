@@ -210,7 +210,7 @@ class ChannelTest(unittest.TestCase):
         self.assertEqual(AIO.chan_label("in", 19, 1), "A 8")
         dev = devices.DEVICES["aio"]
         self.assertEqual(dev.phones_pair(1), 3)
-        self.assertEqual(dev.sink_channels, "AN 1/2")
+        self.assertEqual(dev.pcm_channels("play", 1)[:2], [0, 1])     # the playback sink: AN 1/2
         self.assertEqual(devices.DEVICES["aiopro"].channels("in", 1), AIO.channels("in", 1))
 
     def test_aes(self):

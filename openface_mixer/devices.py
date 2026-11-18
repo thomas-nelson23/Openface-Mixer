@@ -33,7 +33,6 @@ class Device:
     phones_pairs = ()        # output pairs that are headphones
     max_routes = None        # hardware mixer crosspoint limit, or None (full matrix)
     alsa_card = None         # ALSA card short name holding its settings controls (Hardware)
-    sink_channels = "1/2"    # playback channels the engine's playback sink feeds (PCM 1/2)
 
     @property
     def shm_name(self):
@@ -55,6 +54,12 @@ class Device:
         """The channels of this kind the device has at any sample rate, as a set. A mix keeps
         its sends on these only (model.clear_sends_outside)."""
         return {c for mode in (1, 2, 4) for c in self.channels(kind, mode)}
+
+    def pcm_channels(self, kind, mode):
+        """The inputs ("in") or playback channels ("play") the driver streams at speed mode
+        1/2/4, in the order of its PCM channels, which PipeWire's ports follow (capture_AUXn,
+        playback_AUXn): the desktop sinks and sources are linked by it (sinks.py)."""
+        return self.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         raise NotImplementedError
@@ -232,6 +237,9 @@ class Fireface802USB(ClassCompliantUSB, Fireface802):
     def channels(self, kind, mode):
         return fireface802.usb_channels(kind, mode)
 
+    def pcm_channels(self, kind, mode):
+        return fireface802.usb_channels("play", mode)   # the same 22 channels both ways
+
     def missing_hint(self):
         if find_firewire_unit(RME_OUI, self.unit_version) is not None:
             return ("This 802 is connected over FireWire. Choose “RME Fireface 802” "
@@ -286,7 +294,6 @@ class HDSPeCard(Device):
         self.key = model.key
         self.name = name
         self.alsa_card = model.card
-        self.sink_channels = model.sink_channels
         self.phones_pairs = model.phones_pairs
 
     def channels(self, kind, mode):
@@ -294,6 +301,9 @@ class HDSPeCard(Device):
 
     def all_channels(self, kind):
         return super().all_channels(kind) | set(self.model.extension)
+
+    def pcm_channels(self, kind, mode):
+        return self.model.pcm_channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         return self.model.chan_label(kind, c, mode)
