@@ -2,6 +2,8 @@ import copy
 import json
 import os
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from array import array
@@ -110,7 +112,7 @@ class StateFileTest(unittest.TestCase):
 
     def test_data_is_synced_before_it_replaces_the_file(self):
         self.path.write_text("old")
-        tmp = Path(str(self.path) + ".tmp")
+        tmp = Path(f"{self.path}.{os.getpid()}.tmp")
         seen = []
 
         def fsync(fd, real=os.fsync):
@@ -125,6 +127,18 @@ class StateFileTest(unittest.TestCase):
         self.assertFalse(self.bak.exists())
         config.atomic_write(self.path, b"bytes")
         self.assertEqual(self.path.read_bytes(), b"bytes")
+
+    def test_two_windows_can_save_at_once(self):
+        # two mixers started at login for two interfaces both write the device file at once
+        code = ("import sys; from pathlib import Path; from openface_mixer import config\n"
+                "for _ in range(300): config.atomic_write(Path(sys.argv[1]), 'x\\n')")
+        repo = Path(__file__).resolve().parent.parent
+        procs = [subprocess.Popen([sys.executable, "-c", code, str(self.path)], cwd=repo,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for p in procs:
+            err = p.communicate(timeout=60)[1]
+            self.assertEqual((p.returncode, err), (0, ""))
+        self.assertEqual(sorted(f.name for f in self.dir.iterdir()), [self.path.name])
 
     def test_backup_is_the_save_before(self):
         first, second = good_state(), good_state()

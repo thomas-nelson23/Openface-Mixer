@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from . import hdspe, theme, updater
 from .config import PEAK_HOLDS, UI_SCALES, load_meter_prefs, load_update_prefs, save_ui
-from .devices import DEVICES, group_title
+from .devices import DEVICES, connected, group_title
 from .hardware import Hardware, set_card_profile
 from .model import N_SLOTS
 from .theme import SANS, Section, caption_html, font, key_label, px
@@ -98,9 +98,15 @@ def hw_color(state):
 
 def hw_state(dev, state):
     """(short value for the Hardware mixer row, what to do about it or "")."""
+    text, note = hw_words(dev, state)
+    return light(hw_color(state), text), note
+
+
+def hw_words(dev, state):
+    """(the words of the Hardware mixer row, what to do about it or "")."""
     short = dev.name.replace("RME ", "")
     hint = dev.missing_hint() if state == "no-device" else ""
-    text, note = {
+    return {
         "starting": ("Connecting…", ""),
         "no-device": ("Not found", f"{short} not found on {dev.bus}."
                       + (hint and f"<br>{hint}")),
@@ -125,7 +131,6 @@ def hw_state(dev, state):
                      f"The {short} is connected but has not answered, so changes may not "
                      "reach it."),
     }.get(state, (state, ""))
-    return light(hw_color(state), text), note
 
 
 def read_failure(hw, short):
@@ -254,6 +259,36 @@ class Sidebar(QFrame):
         self._anim.start()
 
 
+class WideList(QComboBox):
+    """A box whose open list is as wide as its longest entry, however narrow the box is. The
+    wheel scrolls the settings past it and never changes it (as ChannelBox)."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+    def showPopup(self):
+        # the entries' own width, plus the tick column and the list's padding and frame
+        self.view().setMinimumWidth(self.view().sizeHintForColumn(0) + px(40))
+        super().showPopup()
+
+
+class DeviceBox(WideList):
+    """The Device list. While it is open, the interfaces that are connected say so; they keep
+    their place, so nothing moves under the mouse."""
+
+    def showPopup(self):
+        found = connected()
+        for i in range(self.count()):
+            d = DEVICES[self.itemData(i)]
+            self.setItemText(i, f"{d.name} (connected)" if d.key in found else d.name)
+        super().showPopup()
+
+    def hidePopup(self):
+        super().hidePopup()
+        for i in range(self.count()):
+            self.setItemText(i, DEVICES[self.itemData(i)].name)
+
+
 class ChannelBox(QComboBox):
     """What updates follow. The wheel scrolls the settings past it and never changes it, so
     nobody lands on the testers' channel by scrolling."""
@@ -291,7 +326,7 @@ class SettingsPanel(QWidget):
 
         box = Section("DEVICE")
         bl = QVBoxLayout(box)
-        self.device = QComboBox()
+        self.device = DeviceBox()
         for d in DEVICES.values():
             self.device.addItem(d.name, d.key)
         self.device.setCurrentIndex(self.device.findData(dev.key))

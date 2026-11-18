@@ -30,6 +30,9 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - **Cue** on each output strip: hear that output's mix on Main Out, as in TotalMix. One at a time; press it again to end it. It is not saved, and it ends when the app quits.
 - **Trim** at the end of the Hardware inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off.
 - Mute groups and solo groups, four of each, next to Trim. A mute group mutes its channels in the submix they were added in; a solo group solos its channels. Both are part of presets and mix files.
+- A tray icon for a mixer started at login without a window: click it to show or hide the window, right-click for Dim, Mute main out, the presets and Quit. *Tray icon* below *Start at login* can show it always or never.
+- The *Device* list marks the interfaces that are connected.
+- Commands for desktop shortcuts: `openface-mixer --dim`, `--mute-main`, `--recall 3` and `--show` act on the running mixer, so the desktop's keyboard settings can give them hotkeys (see the README).
 
 ### Changed
 
@@ -54,6 +57,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - With the window hidden or closed to the background, the app stops polling and the engine reads the interface's meters once a second instead of about a hundred times. Meters are live again the moment the window is shown, and peak readouts start fresh.
 - If PipeWire crashes or is restarted, the engine stops with a clear log line and systemd starts it again, so the playback sink comes back by itself.
 - The engine and the window share a new meter layout, so the app restarts an engine from before the update once, by itself.
+- A mixer started at login without a window that switches to an interface whose window is already open shows that window and keeps running hidden, instead of quitting.
 
 ### Fixed
 
@@ -81,6 +85,9 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The Digiface engine shuts down cleanly when it is stopped.
 - ARC USB: the snapshot key goes out when its preset is cleared, and unplugging the ARC at the wrong moment no longer raises an error.
 - Network remote: a *Send to* host given by name no longer freezes the window at startup when the name server is slow.
+- A mixer started at login without a window stays in background mode after an update restart, a new UI scale or a device switch, so closing the window still only hides it.
+- Two mixers started at login for two interfaces no longer stop each other from starting when they save at the same moment.
+- Scrolling the settings with the mouse over *Device* no longer switches to another interface.
 
 ### Not yet tried on hardware
 
@@ -135,6 +142,8 @@ people who have one can try them. Please try the points for your interface and
 - After the update the engine restarts once by itself and the meters move. The RMS bar sits inside the peak bar and falls with it.
 - Cue the Phones output while listening on Main Out: you hear the Phones mix at the Main Out level, Dim and Talkback still work, and a second press brings Main Out's own mix back.
 - Mirror one output's mix onto another, switch a mute group on, and move a fader with Trim on: what you hear follows what the faders show.
+- With *Start at login* ticked, log in again: the tray icon is there, its Dim, Mute main out and presets act as the buttons do, and the window it opens only hides when closed (KDE Plasma, GNOME with a tray extension, X11 and Wayland).
+- A keyboard shortcut set to `openface-mixer --dim` dims the running mixer, also with its window hidden.
 
 **Every Fireface and HDSPe card**
 
@@ -145,3 +154,4 @@ people who have one can try them. Please try the points for your interface and
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
 - ARC USB: give a key another function under *Keys*: it does that function, its light follows it, and *Reset to default* brings back the printed layout. The Phones keys still behave as above.
 - Cue, Mirror, mute groups and Trim, as for the Digiface. HDSPe: a cued mix plays at the Main Out level, which the card adds into every send.
+- The *Device* list says “(connected)” next to the interface while it is connected, and no longer once it is unplugged or switched off.

@@ -183,7 +183,8 @@ still need a tester with the hardware.
 
 ## First run
 
-1. Open **Openface Mixer**.
+1. Open **Openface Mixer**. It opens the interface that is connected; to pick another, use
+   **Device** at the top of the settings, where the connected interfaces say so.
 2. Monitoring works in any PipeWire profile, because the mix happens in the interface. To
    *record* all 32 inputs in apps, switch the Digiface to the **Pro Audio** profile: click
    *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound
@@ -255,6 +256,23 @@ The same list is in the app: **Keyboard shortcuts** at the bottom of the setting
 | Effects knob | Home | Default value |
 | Effects knob | Enter | Type a value |
 
+### Desktop shortcuts
+
+A running mixer takes commands, so the desktop's own keyboard shortcut settings can give it
+global hotkeys. On KDE Plasma: *System Settings → Keyboard → Shortcuts → Add New → Command or
+Script*. On GNOME: *Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts*.
+
+| Command | What it does |
+| --- | --- |
+| `openface-mixer --dim` | Dim on or off |
+| `openface-mixer --mute-main` | Main Out mute on or off |
+| `openface-mixer --recall 3` | Recall preset 3 (1 to 8) |
+| `openface-mixer --show` | Show the window, starting the mixer if needed |
+
+With two interfaces, add `--device <key>` (for example `--device ff802`). If that mixer is not
+running, a command other than `--show` does nothing, so a hotkey never opens a window by
+surprise: it prints why and exits with status 1.
+
 ### Control room and ARC USB
 
 The **Control Room** box in the settings panel has TotalMix's monitoring switches. They act on
@@ -323,7 +341,15 @@ Anyone who can reach the port can change the mix while the remote is on, so only
 a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
 tick **Start at login, no window**, or run `openface-mixer --background --device <key>`. Opening
 Openface Mixer again for that device shows the window, and closing it only hides it; **Ctrl+Q**
-quits. Each device has its own window and login entry, so two interfaces can run side by side.
+quits. It stays that way after an update restart, a new UI scale or a switch to another device.
+Each device has its own window and login entry, so two interfaces can run side by side.
+
+A mixer started this way has an icon in the system tray: click it to show or hide the window,
+right-click it for Dim, Mute main out, the presets and Quit. The icon gets a cyan dot while Dim
+or the main out mute is on, and is greyed with a red dot while the engine is stopped or the
+interface can't be used. **Tray icon**, below Start at login, can show it **Always** (closing the
+window then only hides it, for any mixer) or **Never**. On a desktop without a tray (GNOME without
+an extension) nothing changes.
 
 ### Fireface 802
 
@@ -441,7 +467,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options and the ARC USB keys, shared by all devices |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options, the ARC USB keys and the Tray icon setting, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 

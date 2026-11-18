@@ -72,7 +72,7 @@ def atomic_write(path, data, keep_backup=False):
     one, never a part of one: to a temporary file, synced to disk, then renamed over path.
     keep_backup first moves the file being replaced to backup_file(path)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")     # two windows may save at once
     try:
         with open(tmp, "w" if isinstance(data, str) else "wb") as f:
             f.write(data)

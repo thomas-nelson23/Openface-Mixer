@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 DIGIFACE_CARD = "Digiface USB"
+ASOUND_CARDS = Path("/proc/asound/cards")
 
 
 def run(cmd, timeout=2):
@@ -48,7 +49,7 @@ class Hardware:
         if not card_name:
             return []
         try:
-            text = Path("/proc/asound/cards").read_text()
+            text = ASOUND_CARDS.read_text()
         except OSError:
             return []
         # a name ending in a letter or digit must end there ("RME AIO" isn't "RME AIO Pro"),
@@ -68,7 +69,7 @@ class Hardware:
     def card_driver(card):
         """The ALSA driver name of card number card (e.g. "HDSPM", "HDSPe"), or None."""
         try:
-            text = Path("/proc/asound/cards").read_text()
+            text = ASOUND_CARDS.read_text()
         except OSError:
             return None
         m = re.search(rf"^\s*{card}\s+\[.*?\]:\s*(\S+)\s+-", text, re.M)

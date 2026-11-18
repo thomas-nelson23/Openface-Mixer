@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fx, hdspe, osc_remote
+from . import arc, commands, control_room, fx, hdspe, osc_remote, tray
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
@@ -39,11 +39,12 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, export_workspace, import_mix, import_workspace
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
-from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
+from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, hw_words, light
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, SOLO, WARN,
     apply_theme, compact_boxes, icon_pixmap, px,
 )
+from .tray_icon import Tray
 from .widgets import Meter, Row, Strip, small_button
 
 
@@ -57,7 +58,8 @@ class MainWindow(QMainWindow):
     def __init__(self, dev, background=False):
         super().__init__()
         self.dev = dev
-        self.background = background       # started at login: closing hides the window
+        self.background = background       # started without a window: closing hides it
+        self.tray = None                   # the tray icon, made once the window is built
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
@@ -84,6 +86,7 @@ class MainWindow(QMainWindow):
         self.cue = None                    # output pair heard on Main Out (Cue), never saved
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
+        self.engine_status, self.hw_text = None, ""    # as of the last poll, for the tray icon
         self._engine_up = False            # the engine answered the last poll
         self._engine_due = 0.0             # until when a started engine may take to answer
         self._start_timer = QTimer(self, singleShot=True, interval=300, timeout=self.start_engine)
@@ -169,6 +172,7 @@ class MainWindow(QMainWindow):
             lambda st: self.remote_panel.set_status(st, self.remote.target_error))
         self.remote.status_changed.connect(lambda _st: self.pace_timers())
         self.remote_panel.changed.connect(self.apply_remote_settings)
+        self.remote_panel.tray_changed.connect(lambda: self.tray.apply())
         self._hw_active = False
         compact_boxes(self.settings)
         self.arc = ArcLink(self)
@@ -196,6 +200,7 @@ class MainWindow(QMainWindow):
         self.rebuild_all()
         self.refresh_slots()
         self.ensure_engine()
+        self.engine_status = self.engine.status()   # so the tray icon starts out right
         self.push_matrix()
         self.apply_remote_settings()    # also starts the polls a hidden window needs
         self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
@@ -208,6 +213,7 @@ class MainWindow(QMainWindow):
         self.fit_top_bar(width)          # sets the bar's compact minimum before the first resize
         self.resize(width, height)
         self.tab_focus_only()
+        self.tray = Tray(self)
 
     # ------------------------------------------------------------------ top bar
     def _build_top_bar(self):
@@ -414,11 +420,13 @@ class MainWindow(QMainWindow):
         if self._load_notice:
             QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
             self._load_notice = None
+        self.refresh_tray()
 
     def hideEvent(self, e):
         super().hideEvent(e)
         self._shown = False
         self.pace_timers()
+        self.refresh_tray()
 
     def pace_timers(self):
         """Nothing polls for a window nobody sees (closed with --background, never opened, or
@@ -954,8 +962,65 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.quit()
 
+    def show_window(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def window_shown(self):
+        return self.isVisible() and not self.isMinimized()
+
+    def command(self, name, slot=None):
+        """A command from a desktop shortcut (commands.py) or the tray menu: the same as the
+        button. The tray also has "hide" and "quit"."""
+        if name == "show":
+            self.show_window()
+        elif name == "hide":
+            self.close()                # as the window's close button: saves, then hides
+        elif name == "quit":
+            self.quit_app()
+        elif name == "dim":
+            control_room.toggle(self.st, "dim")
+            self.push_matrix()
+        elif name == "mute-main":
+            main = control_room.control_room(self.st)["main"]
+            self.set_out_mute(main, not self.st["out"][main]["mute"])
+            self.sync_strips()
+        elif name == "recall" and self.presets.slots[slot]:
+            self.recall_slot(slot)
+
+    def tray_view(self):
+        """(menu, icon state, tooltip) for the tray icon (tray.py)."""
+        cr = control_room.control_room(self.st)
+        muted = self.st["out"][cr["main"]]["mute"]
+        status = self.engine_status
+        if status is None and self._engine_due:
+            status = {"hw": "starting", "processing": True, "rate": 0}     # being started
+        return (tray.menu(self.window_shown(), cr["dim"], muted,
+                          [self.presets.name(i) for i in range(N_SLOTS)],
+                          self.st.get("active_slot")),
+                tray.icon_state(status, cr["dim"], muted),
+                tray.tooltip(self.dev.name, status, self.hw_text or "Connecting…", cr["dim"],
+                             muted))
+
+    def refresh_tray(self):
+        if self.tray is not None:
+            self.tray.refresh()
+
+    def hides_on_close(self):
+        """Closing the window hides it while something can bring it back: the tray icon, or
+        opening the app again for a mixer started without a window."""
+        return self.background or (self.tray is not None and self.tray.visible())
+
     def switch_device(self, key):
         if key == self.dev.key:
+            return
+        if self.background and tell_running(DEVICES[key]):
+            # that device has a window already, which shows now: this one keeps running hidden
+            self.settings.device.setCurrentIndex(self.settings.device.findData(self.dev.key))
+            self.close()
             return
         self.switch_to = key
         self.close()
@@ -976,8 +1041,11 @@ class MainWindow(QMainWindow):
         server = QApplication.instance().findChild(QLocalServer)
         if server is not None:
             server.close()              # or the new process would hand over to this one and exit
-        launched = QProcess.startDetached(
-            sys.executable, ["-m", "openface_mixer", "--device", self.dev.key], os.getcwd())
+        # a background instance stays one, with its window shown as it is now
+        args = ["--device", self.dev.key] + (["--background", "--show"] if self.background
+                                             else [])
+        launched = QProcess.startDetached(sys.executable, ["-m", "openface_mixer"] + args,
+                                          os.getcwd())
         if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
             launched = launched[0]
         if not launched:
@@ -1276,6 +1344,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ presets
     def refresh_slots(self):
         self.update_arc_leds()
+        self.refresh_tray()
         active = self.st.get("active_slot")
         for i, b in enumerate(self.slot_btns):
             name = self.presets.name(i)
@@ -1492,6 +1561,7 @@ class MainWindow(QMainWindow):
         self.control.refresh()
         self.refresh_groups()
         self.update_arc_leds()
+        self.refresh_tray()
         self.schedule_save()
 
     def show_limited(self):
@@ -1686,6 +1756,8 @@ class MainWindow(QMainWindow):
         if s is not None and not self._engine_up:
             self.push_matrix()          # a (re)started engine: the mix as it is now
         self._engine_up = s is not None
+        self.engine_status, self.hw_text = s, hw_words(self.dev, s["hw"])[0] if s else ""
+        self.refresh_tray()
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
@@ -1775,8 +1847,9 @@ class MainWindow(QMainWindow):
         self.save()
         size = (self.normalGeometry() if self.isMaximized() else self.geometry()).size()
         save_window(size.width(), size.height(), self.sidebar.is_open())
-        if self.background and self.switch_to is None and not self._quitting:
-            e.ignore()                  # keep mixing and serving the remote; reopen to show
+        if self.hides_on_close() and self.switch_to is None and not self._quitting:
+            e.ignore()                  # keep serving the ARC USB and the remote; the tray icon
+                                        # or opening the app again shows the window
             self.hide()
             return
         if self.cue is not None:        # the interface keeps mixing: Main Out's own mix again
@@ -1784,24 +1857,100 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
-def _single_instance(app, dev):
-    """Make this the only running Openface Mixer window for dev (each device has its own engine,
-    mix and window, so one per device may run). If one is already running, ask it to show its
-    window and return None; otherwise return the server that answers later starts."""
-    name = f"{APP_ID}-{os.getuid()}-{dev.key}"
-    probe = QLocalSocket()
-    probe.connectToServer(name)
-    if probe.waitForConnected(300):
-        probe.write(b"show\n")
-        probe.waitForBytesWritten(300)
-        probe.disconnectFromServer()
-        return None
+def socket_name(dev):
+    """The single-instance socket of dev's window: each device has its own engine, mix and
+    window, so one window per device may run."""
+    return f"{APP_ID}-{os.getuid()}-{dev.key}"
+
+
+def tell_running(dev, lines=("show",)):
+    """Send lines (commands.py) to dev's running window. False if none is running."""
+    sock = QLocalSocket()
+    sock.connectToServer(socket_name(dev))
+    if not sock.waitForConnected(300):
+        return False
+    sock.write("".join(line + "\n" for line in lines).encode())
+    sock.waitForBytesWritten(300)
+    sock.disconnectFromServer()
+    return True
+
+
+def listen(app, dev):
+    """The server that later starts for dev talk to (see tell_running)."""
+    name = socket_name(dev)
     QLocalServer.removeServer(name)            # left behind by a crashed instance
     server = QLocalServer(app)
     if not server.listen(name):
         print(f"openface-mixer: single-instance socket {name}: {server.errorString()}",
               file=sys.stderr)
     return server
+
+
+def serve(server, handle):
+    """Call handle(command, slot) for each command line (commands.parse) that a later start
+    sends to server; anything else is dropped. Reads as the lines come, never waiting."""
+    def accept():
+        while server.hasPendingConnections():
+            sock = server.nextPendingConnection()
+            buf = bytearray()
+
+            def read(sock=sock, buf=buf):
+                buf.extend(sock.readAll().data())
+                *lines, rest = bytes(buf).split(b"\n")
+                buf[:] = rest[:commands.MAX_LINE + 1]     # enough to know it is too long
+                for line in lines:
+                    cmd = commands.parse(line)
+                    if cmd is not None:
+                        handle(*cmd)
+            sock.readyRead.connect(read)
+            sock.disconnected.connect(sock.deleteLater)
+    server.newConnection.connect(accept)
+
+
+def run(app, dev, background, show):
+    """Run dev's window until the app quits; returns the exit code. background: closing only
+    hides the window (started with --background). A device switch or a new UI scale opens the
+    next window in its place, shown, and a background instance stays one: it was started to
+    keep running, now for the device it was switched to."""
+    current = {}
+
+    def claim(dev):
+        """This process becomes dev's window, or hands over to the one already running."""
+        if tell_running(dev):
+            return None
+        server = listen(app, dev)
+        serve(server, lambda cmd, slot: current["window"].command(cmd, slot))
+        return server
+
+    server = claim(dev)
+    if server is None:
+        return 0
+    geometry = None
+    while True:
+        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
+        save_device_choice(dev)
+        w = MainWindow(dev, background)
+        current["window"] = w
+        if geometry is not None:
+            w.setGeometry(geometry)
+        if show:
+            w.show()
+        code = app.exec()
+        if w.switch_to is None:
+            return code
+        show = True                  # the user switched devices or the scale in the window
+        dev = DEVICES[w.switch_to]
+        geometry = w.reopen_geometry
+        w.arc.disconnect_port()      # so the next window can open the ARC USB
+        w.remote.stop()              # and the next one can bind the remote's port
+        w.tray.remove()              # the next window brings its own icon
+        w.deleteLater()
+        if w.dev is not dev:         # the other device may already have a window: show that
+            server.close()
+            server.deleteLater()
+            server = claim(dev)
+            if server is None:
+                return 0
 
 
 def main():
@@ -1816,48 +1965,14 @@ def main():
             sys.exit(f"--device: one of {', '.join(DEVICES)}")
     else:
         dev = detect(load_device_choice())
-    background = "--background" in args
-    app.setQuitOnLastWindowClosed(not background)
-    current = {}
-
-    def show_window():
-        w = current.get("window")
-        if w is not None:
-            w.show()
-            w.raise_()
-            w.activateWindow()
-
-    def claim(dev):
-        """This process becomes dev's window, or hands over to the one already running."""
-        server = _single_instance(app, dev)
-        if server is None:
+    try:
+        lines = commands.from_args(args)
+    except ValueError as e:
+        sys.exit(f"openface-mixer: {e}")
+    if lines:
+        if tell_running(dev, lines):
             sys.exit(0)
-        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
-                                              show_window()))
-        return server
-
-    server = claim(dev)
-    geometry = None
-    while True:
-        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
-        save_device_choice(dev)
-        w = MainWindow(dev, background)
-        current["window"] = w
-        if geometry is not None:
-            w.setGeometry(geometry)
-        if not background:
-            w.show()
-        code = app.exec()
-        if w.switch_to is None:
-            sys.exit(code)
-        background = False               # the user switched devices in the window: show the next
-        app.setQuitOnLastWindowClosed(True)
-        dev = DEVICES[w.switch_to]
-        geometry = w.reopen_geometry
-        w.arc.disconnect_port()      # so the next window can open the ARC USB
-        w.remote.stop()              # and the next one can bind the remote's port
-        w.deleteLater()
-        if w.dev is not dev:         # the other device may already have a window: show that
-            server.close()
-            server.deleteLater()
-            server = claim(dev)
+        if lines != ["show"]:       # a shortcut pressed with the mixer off opens no window
+            sys.exit(f"openface-mixer: the {dev.name} mixer is not running")
+    background = "--background" in args
+    sys.exit(run(app, dev, background, not background or "show" in lines))

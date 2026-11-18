@@ -106,6 +106,8 @@ app.MainWindow
  ├─ fx.py / fx_panels.py  TotalMix FX effects (802, UCX II): model and commands / EQ, D, FX panels
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
  ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
+ ├─ commands.py     lines a second start sends on the window's local socket (app.serve)
+ ├─ tray_icon.py    Tray (QSystemTrayIcon) ⇄ tray.py (when it shows, menu, state; no Qt)
  └─ config.py       state.json / matrix.bin / presets.json
 ```
 
