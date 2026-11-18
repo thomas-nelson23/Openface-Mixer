@@ -19,6 +19,12 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   Pick an output, and the input and playback faders set the submix sent to it.
 - **Matrix view:** route any input or playback channel to any output with a click.
 - **Presets:** 8 snapshot slots, like TotalMix, plus export and import of mixes as files.
+- **Workspaces:** *Save workspace* in the Mix section of the settings puts everything for one
+  interface in one file, as TotalMix's workspaces do: the mix, names, colours, icons, layouts,
+  presets, control room, device and effect settings, and the meter and ARC key options.
+  *Load workspace* checks the whole file before it changes anything, keeps the mix it replaces
+  for *Restore previous mix* and reopens the window. A workspace for another interface is
+  refused. Solo and the network remote's settings are not part of a workspace.
 - **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.
@@ -46,6 +52,16 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing; hiding one switches its solo off.
+- **Layouts:** eight *Layouts* slots in the Display section store the view: hidden channel
+  groups and strips, folded rows and *Custom channel names*. Click *Store*, then a slot, to save
+  the view under a name; click a filled slot to bring it back. A layout never changes the mix
+  (a strip it hides has its solo switched off). Layouts are saved per device.
+- **Meters like TotalMix:** the bright bar is the RMS level and the dimmer bar above it the
+  peak, on interfaces that report RMS (Digiface, 802 over USB, UCX II, and HDSPe inputs and
+  playback; the FireWire Firefaces show peak only). In the Display section, *Show RMS level*
+  switches the RMS bar off, *Peak hold* sets how long the peak line stays, and on the HDSPe
+  cards *Clip after* sets how many full-scale samples in a row light the clip light. These are
+  kept for this computer, for all devices.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
 - **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
   centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
@@ -191,6 +207,8 @@ still need a tester with the hardware.
 | Solo | **S** on a strip: solo-in-place in the current submix |
 | Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
+| Save or load everything for this interface | Settings → Mix → *Save workspace…* / *Load workspace…* |
+| Store or recall a layout | Settings → Display → *Layouts*: **Store**, then a slot (Esc cancels); click a filled slot to recall it |
 | Recall a preset | Click a lit slot |
 | Take back a recall, import, reset, paste or clear | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
@@ -265,8 +283,10 @@ TotalMix layout printed on it:
   (in the order they were ticked) while its key is lit. With one Phones output both keys
   select it and both light up. Faders grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
-it to work (its window can be hidden, see below).
+Key LEDs follow the state. **Keys** beside the ARC's status in the Control Room box lists the
+keys: each can do any of these functions instead, and *Reset to default* brings back the printed
+layout. The choice is kept for this computer, not with the mix. The ARC needs no driver or
+setup; Openface Mixer must be running for it to work (its window can be hidden, see below).
 
 ### Network remote (OSC)
 
@@ -413,7 +433,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/state.json.bak` | The save before the current one, loaded if `state.json` can't be read (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
 | `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
-| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import or reset, for *Restore previous mix* (Digiface) |
+| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import, reset or workspace load, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
@@ -421,7 +441,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size and the Updates choices, shared by all devices |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options and the ARC USB keys, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
@@ -474,8 +494,7 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
   plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
   (before version 2.1) are not supported.
-- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
-  supported (it sent nothing in testing).
+- ARC USB: the footswitch is not supported (it sent nothing in testing).
 
 ### Interfaces not supported yet
 

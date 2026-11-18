@@ -19,6 +19,11 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - A *Keyboard shortcuts* list at the bottom of the settings, and the same list in the README.
 - Control room: set the Dim amount and the Talkback dim amount, send talkback to further outputs with *Talkback to*, and set Main Out to a stored listening level with *Recall*.
 - Control room: up to four Phones outputs. With two or more, the ARC USB's two Phones keys select the first and the second.
+- Meters show the RMS level as a bright bar inside a dimmer peak bar, as TotalMix does, on interfaces that report it (Digiface, 802 over USB, UCX II, and HDSPe inputs and playback). Untick *Show RMS level* in Display for peak only.
+- Display: *Peak hold* sets how long the peak line stays (0.5 to 9.9 seconds), and on HDSPe cards *Clip after* sets how many full-scale samples in a row light the clip light. Both are kept for this computer.
+- Display: eight *Layouts* store which channel groups and strips are hidden, which rows are folded and whether custom names are shown. Click *Store* and a slot to save the view, click a slot to bring it back. A layout never changes the mix, and a strip it hides has its solo switched off. Layouts are kept per interface.
+- Mix: *Save workspace* puts everything for this interface in one file: mix, names, colours, icons, layouts, presets, control room, device and effect settings, and the meter and ARC key options. *Load workspace* brings it all back after checking the whole file, and the mix it replaces stays available as *Restore previous mix*. A workspace for another interface is refused.
+- ARC USB: *Keys* beside the ARC status lists the 15 keys. Give any key any function (a preset, Dim, Mono, Talkback, Speaker B, External In, or the volume of Main Out or a Phones output), or *Reset to default*. The lights follow the keys, and the choice is kept for this computer.
 - Right-click an output: *Copy mix*, *Paste mix* and *Mirror mix*, as in TotalMix. A mirrored output plays the same mix as the other and follows every change to it; *Remove mirror* gives it its own copy again.
 - Right-click an input or playback channel: *Copy sends*, *Paste sends* and *Clear sends* (all of the channel's sends, to every output). A pair counts as one channel.
 - Paste and clear keep the mix they replace for *Restore previous mix*.
@@ -48,6 +53,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Updating keeps only the three newest config backups.
 - With the window hidden or closed to the background, the app stops polling and the engine reads the interface's meters once a second instead of about a hundred times. Meters are live again the moment the window is shown, and peak readouts start fresh.
 - If PipeWire crashes or is restarted, the engine stops with a clear log line and systemd starts it again, so the playback sink comes back by itself.
+- The engine and the window share a new meter layout, so the app restarts an engine from before the update once, by itself.
 
 ### Fixed
 
@@ -94,6 +100,7 @@ people who have one can try them. Please try the points for your interface and
 - USB: the status reaches "Active". Please report it if it stays at "Connected, no reply from the DSP" while the mix works, or if the unit reconnects by itself.
 - Effect knobs with a mouse wheel and a touchpad, and typing a value on FX Send in the channel settings (X11 and Wayland).
 - After an engine restart the routing, clock, levels, gains, 48V, Inst and all effect settings are as saved.
+- USB: the RMS bar on a sine at -20 dBFS sits about 3 dB below the peak, as in TotalMix. FireWire shows no RMS.
 
 **Fireface UCX II**
 
@@ -102,6 +109,7 @@ people who have one can try them. Please try the points for your interface and
 - AN 1 passes audio after another controller muted it.
 - The status reaches "Active", the unit never reconnects by itself, and unplugging and replugging reconnects.
 - After an engine restart the routing, clock, levels and all effect settings are as saved.
+- The RMS bar on a sine at -20 dBFS sits about 3 dB below the peak, as in TotalMix.
 
 **Fireface 800 and 400**
 
@@ -115,6 +123,7 @@ people who have one can try them. Please try the points for your interface and
 - The "busy" explanation when playback and recording are open in two programs.
 - AIO and AIO Pro with AI4S or AO4S boards: analog 3 to 6 keep their routing and still play.
 - An existing mix opened at 48 kHz and at 96 or 192 kHz has every send you had set.
+- The RMS bar on inputs and playback sits about 3 dB below the peak on a sine (outputs show peak only), and *Clip after* set to 3 lights the clip light only for three or more full-scale samples in a row.
 
 **Digiface USB**
 
@@ -123,6 +132,7 @@ people who have one can try them. Please try the points for your interface and
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
+- After the update the engine restarts once by itself and the meters move. The RMS bar sits inside the peak bar and falls with it.
 - Cue the Phones output while listening on Main Out: you hear the Phones mix at the Main Out level, Dim and Talkback still work, and a second press brings Main Out's own mix back.
 - Mirror one output's mix onto another, switch a mute group on, and move a fader with Trim on: what you hear follows what the faders show.
 
@@ -133,4 +143,5 @@ people who have one can try them. Please try the points for your interface and
 - ARC USB: with one Phones output both Phones keys light together as before; with two, each key lights alone and the encoder turns its own output.
 - With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
+- ARC USB: give a key another function under *Keys*: it does that function, its light follows it, and *Reset to default* brings back the printed layout. The Phones keys still behave as above.
 - Cue, Mirror, mute groups and Trim, as for the Digiface. HDSPe: a cued mix plays at the Main Out level, which the card adds into every send.

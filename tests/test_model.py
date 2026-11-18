@@ -567,6 +567,71 @@ class DamagedStateTest(unittest.TestCase):
                          ({"in:0": "Vocal"}, {"out:16": "#ff0000"}, {"play:2": "mic"}))
 
 
+class LayoutTest(unittest.TestCase):
+    def view(self, st):
+        return {k: st[k] for k in m.LAYOUT_KEYS}
+
+    def test_a_layout_shows_what_was_stored_and_never_touches_the_mix(self):
+        st = m.default_state()
+        st.update(hidden=["AD3"], hidden_strips=["in:4", "out:2"], folded=["play"],
+                  custom_names=False)
+        stored = m.extract_layout(st, "Drums")
+        self.assertEqual(stored, {"name": "Drums", **self.view(st)})
+        st["hidden"].append("AD4")                  # a copy: later changes are not stored
+        self.assertEqual(stored["hidden"], ["AD3"])
+        other = m.default_state()
+        other["mute"]["in"][4] = True
+        other["solo"]["in"][4] = True
+        other["sends"]["in"][4][0] = [-6.0, 0.5]
+        mix = m.extract_mix(other)
+        m.apply_layout(other, stored)
+        self.assertEqual(self.view(other), self.view(stored))
+        self.assertEqual(m.extract_mix(other), mix)
+        self.assertTrue(other["solo"]["in"][4])     # the window clears it (solo_as_shown)
+        other["hidden"].append("AD1")
+        self.assertEqual(stored["hidden"], ["AD3"])
+
+    def test_layouts_are_kept_across_a_save(self):
+        st = m.default_state()
+        st["layouts"][2] = m.extract_layout(dict(st, hidden=["AES"], folded=["in"]), "Live")
+        again = m.upgrade_state(json.loads(json.dumps(st)), strict=True)
+        self.assertEqual(again["layouts"], st["layouts"])
+        self.assertEqual(again["layouts"][2]["hidden"], ["AES"])
+
+    def test_a_damaged_layout_is_an_empty_slot(self):
+        good = {"name": "Drums", "hidden": ["AD3"], "hidden_strips": [], "folded": [],
+                "custom_names": True}
+        for value in ("x", 7, None, {"a": 1}, [1, "x", None, []], [good] * 9):
+            with self.subTest(value=value):
+                st = m.default_state()
+                st["layouts"] = copy.deepcopy(value)
+                st = m.upgrade_state(st, strict=True)
+                self.assertEqual(len(st["layouts"]), m.N_SLOTS)
+                self.assertEqual(st["layouts"], [good] * 8 if value == [good] * 9
+                                 else [None] * m.N_SLOTS)
+        st = m.default_state()
+        st["layouts"] = [good, {"name": ""}, {"hidden": []}, {"name": 5},
+                         {"name": "Mixed", "hidden": ["AD1", 3], "hidden_strips": ["in:9", "x"],
+                          "folded": ["out", "matrix"], "custom_names": "no"},
+                         {"name": "Bare"}]
+        st = m.upgrade_state(st, strict=True)
+        self.assertEqual(st["layouts"][:4], [good, None, None, None])
+        self.assertEqual(st["layouts"][4], {"name": "Mixed", "hidden": ["AD1"],
+                                            "hidden_strips": ["in:9"], "folded": ["out"],
+                                            "custom_names": True})
+        self.assertEqual(st["layouts"][5], {"name": "Bare", "hidden": [], "hidden_strips": [],
+                                            "folded": [], "custom_names": True})
+        # a state from before layouts has eight empty slots
+        old = m.default_state()
+        del old["layouts"]
+        self.assertEqual(m.upgrade_state(old, strict=True)["layouts"], [None] * m.N_SLOTS)
+
+    def test_layouts_are_not_part_of_a_mix(self):
+        st = m.default_state()
+        st["layouts"][0] = m.extract_layout(st, "All")
+        self.assertNotIn("layouts", m.extract_mix(st))
+
+
 class MissingChannelsTest(unittest.TestCase):
     def test_sends_outside_the_interface_are_switched_off(self):
         have = {"in": {0, 1}, "play": {0, 1, 2, 3}, "out": {0, 1, 4, 5}}

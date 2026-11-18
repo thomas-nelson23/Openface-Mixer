@@ -70,7 +70,9 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 	if (req == SNDRV_HDSPM_IOCTL_GET_PEAK_RMS) {
 		struct hdspm_peak_rms *m = arg;
 		memset(m, 0, sizeof(*m));
-		m->input_peaks[1] = 0x7fffff00;
+		m->input_peaks[1] = 0x7fffff03;       /* three full-scale samples in a row */
+		m->input_rms[1] = (uint64_t)(0.0625 * 1125899638407184.0 * 8191.0);   /* RMS 0.25 */
+		m->output_rms[15] = m->input_rms[1];  /* hdspmixer shows none for outputs */
 		m->playback_peaks[2] = 0x40000000;
 		m->output_peaks[15] = 0x7fffff00;
 		m->output_peaks[40] = 0x7fffff00;     /* past every card's channels */
@@ -204,6 +206,11 @@ static void check_writes(const struct ofm_backend *be, int n_ch)
 	check("input 2 at full scale", s.peak_src[1] == 1.0f, 1);
 	check("playback 3 at half", fabsf(s.peak_src[OFM_N_IN + 2] - 0.5f) < 1e-3f, 1);
 	check("output 16", s.peak_out[15] == 1.0f, 1);
+	check("input 2 RMS", fabsf(s.rms_src[1] - 0.25f) < 1e-6f, 1);
+	check("no RMS without signal", s.rms_src[0] == 0.0f && s.rms_src[OFM_N_IN + 2] == 0.0f, 1);
+	check("no output RMS", s.rms_out[15] == 0.0f, 1);
+	check("input 2 overs", s.over_src[1] == 3.0f, 1);
+	check("no overs at half scale", s.over_src[OFM_N_IN + 2] == 0.0f, 1);
 	be->destroy(h);
 }
 

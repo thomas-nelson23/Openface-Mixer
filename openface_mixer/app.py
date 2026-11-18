@@ -20,8 +20,9 @@ from . import arc, control_room, fx, hdspe, osc_remote
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
-    device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
-    previous_mix_file, save_device_choice, save_state, save_ui_scale, save_window,
+    device_block, load_device_choice, load_state, load_ui, load_ui_scale, load_window,
+    presets_file, previous_mix_file, save_device_choice, save_state, save_ui, save_ui_scale,
+    save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -29,21 +30,21 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends, clear_sends_outside,
-    compute_matrix, compute_out_gains, copy_mix, copy_sends, default_state, display_name,
-    extract_mix, get_strip_db, group_follow, group_members, mute_group, parse_key, paste_mix,
-    paste_sends, remove_mirror, set_mirror, set_mute_group, set_stereo, set_strip_color,
-    set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels, strip_color,
-    strip_hidden, strip_icon, strip_key, submix_of, trim_sends,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_layout, apply_mix, clear_sends,
+    clear_sends_outside, compute_matrix, compute_out_gains, copy_mix, copy_sends, default_state,
+    display_name, extract_layout, extract_mix, get_strip_db, group_follow, group_members,
+    mute_group, parse_key, paste_mix, paste_sends, remove_mirror, set_mirror, set_mute_group,
+    set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode,
+    strip_channels, strip_color, strip_hidden, strip_icon, strip_key, submix_of, trim_sends,
 )
-from .presets import PresetBank, export_mix, import_mix
+from .presets import PresetBank, export_mix, export_workspace, import_mix, import_workspace
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, SOLO, WARN,
     apply_theme, compact_boxes, icon_pixmap, px,
 )
-from .widgets import Row, Strip, small_button
+from .widgets import Meter, Row, Strip, small_button
 
 
 def reason(e):
@@ -143,14 +144,21 @@ class MainWindow(QMainWindow):
         self.settings.card_chosen.connect(self.restart_engine)
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
+        self.settings.meters_changed.connect(self.apply_meter_prefs)
+        self.settings.layout_stored.connect(self.store_layout)
+        self.settings.layout_recalled.connect(self.recall_layout)
         self.settings.export_btn.clicked.connect(self.export_mix)
         self.settings.import_btn.clicked.connect(self.import_mix)
+        self.settings.save_ws_btn.clicked.connect(self.save_workspace)
+        self.settings.load_ws_btn.clicked.connect(self.load_workspace)
         self.settings.reset_btn.clicked.connect(self.reset_mix)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
         self.settings.update_waiting.connect(self.show_update_waiting)
-        self.control = ControlRoomPanel(self.st)
+        self.arc_keys = arc.assignment(load_ui().get("arc_keys"))   # this computer's ARC
+        self.control = ControlRoomPanel(self.st, self.arc_keys)
         self.control.changed.connect(self.push_matrix)
+        self.control.arc_keys_changed.connect(self.set_arc_keys)
         self.control.recall.connect(self.recall_main)
         self.settings.add_control_room(self.control)
         self.remote_panel = RemotePanel(self.st, dev)
@@ -182,6 +190,7 @@ class MainWindow(QMainWindow):
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
         self._build_shortcuts()
 
+        self.apply_meter_prefs()
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
         self.rebuild_all()
@@ -361,10 +370,12 @@ class MainWindow(QMainWindow):
             sc.activated.connect(slot)
 
     def escape(self):
-        """Esc un-arms Store; with nothing to un-arm it closes an effects panel."""
-        if self.store_btn.isChecked():
-            self.store_btn.setChecked(False)
-        else:
+        """Esc un-arms Store (of the presets or the layouts); with nothing to un-arm it closes
+        an effects panel."""
+        armed = [b for b in (self.store_btn, self.settings.layout_store) if b.isChecked()]
+        for b in armed:
+            b.setChecked(False)
+        if not armed:
             self.close_fx_panel()
 
     def tab_focus_only(self):
@@ -1360,6 +1371,30 @@ class MainWindow(QMainWindow):
                 self.schedule_save()
             self.refresh_slots()
 
+    def store_layout(self, i):
+        old = self.st["layouts"][i]
+        name, ok = QInputDialog.getText(self, "Store layout", f"Name for layout {i + 1}:",
+                                        text=old["name"] if old else f"Layout {i + 1}")
+        if not ok:
+            return
+        name = name.strip() or f"Layout {i + 1}"
+        self.st["layouts"][i] = extract_layout(self.st, name)
+        self.settings.refresh_layouts()
+        self.schedule_save()
+        self.notify(f"Saved layout “{name}” in {i + 1}")
+
+    def recall_layout(self, i):
+        """Show the channels and rows as layout i has them. Only what is shown changes; a solo
+        on a channel the layout hides is switched off (rebuild_sources), as when hiding it."""
+        layout = self.st["layouts"][i]
+        apply_layout(self.st, layout)
+        for r in (self.row_in, self.row_play, self.row_out):
+            r.set_folded(r.kind in layout["folded"])
+        self.settings.show_view()
+        self.rebuild_all()
+        self.schedule_save()
+        self.notify(f"Layout “{layout['name']}”")
+
     def export_mix(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export mix", "mix.ofmix.json",
                                               "Openface Mixer mix (*.json)")
@@ -1382,6 +1417,59 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{reason(e)}")
             return
         self.replace_mix(mix, f"Imported “{name}”")
+
+    def save_workspace(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace",
+                                              f"{self.dev.key}.workspace.json",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            export_workspace(path, self.dev, self.st, self.presets.slots,
+                             {**self.settings.meter_prefs, "arc_keys": self.arc_keys})
+        except OSError as e:
+            QMessageBox.warning(self, "Save workspace", f"Could not save to {path}:\n{reason(e)}")
+            return
+        self.notify("Saved the workspace")
+
+    def load_workspace(self):
+        """Every part of the file is checked before anything is replaced. The mix it replaces
+        is kept for Restore previous mix, and the window then reopens with what was loaded,
+        as after a change of UI scale."""
+        path, _ = QFileDialog.getOpenFileName(self, "Load workspace", "",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            st, slots, ui = import_workspace(path, self.dev)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not load {path}:\n{reason(e)}")
+            return
+        if not ask(self, "Load workspace", "Replace the mix, names, presets, layouts and "
+                   "settings with the workspace? The current mix can be brought back with "
+                   "Restore previous mix.", "Load workspace"):
+            return
+        if self.dev.family == "hdspe":
+            st["hw"] = self.st["hw"]        # which card and its driver answer: this computer's
+        if "remote" in self.st:
+            st["remote"] = self.st["remote"]    # so is the OSC remote (never in a workspace)
+        try:
+            export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
+        except OSError:
+            pass                    # a full disk must not stop it, as for a recall
+        self.st.clear()
+        self.st.update(st)
+        self.presets.slots = slots
+        try:
+            self.save()
+            self.presets.save()
+            save_ui(**ui)
+        except OSError as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not save it all:\n{reason(e)}")
+        self.reopen_geometry = self.geometry()
+        self.switch_to = self.dev.key
+        self.close()
+        QApplication.quit()             # main() opens the window again with the workspace
 
     def reset_mix(self):
         if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
@@ -1428,7 +1516,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ ARC USB
     def arc_key(self, key, pressed):
         """An ARC key went down or up. Keys act on press; Talkback also on release."""
-        action = arc.DEFAULT_KEYS[key]
+        action = self.arc_keys[key]
         cr = control_room.control_room(self.st)
         if action == "talkback":
             if pressed:
@@ -1450,8 +1538,9 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action in ("phones", "phones2"):         # a lit key again: back to Main Out
-            cr["encoder"] = "main" if arc.key_lit(self.st, action, None) else action
+        if action in control_room.ENCODER_TARGETS:  # a lit Phones key again: back to Main Out
+            lit = action != "main" and arc.key_lit(self.st, action, None)
+            cr["encoder"] = "main" if lit else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1490,7 +1579,16 @@ class MainWindow(QMainWindow):
         slot = self.st.get("active_slot")
         if slot is not None and not self.presets.slots[slot]:
             slot = None                 # an empty slot's key stays dark, whatever the state says
-        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
+        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in self.arc_keys])
+
+    def set_arc_keys(self, keys):
+        """What each ARC key does, from the Control Room section; kept for this computer."""
+        self.arc_keys = keys
+        try:
+            save_ui(arc_keys=keys)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.update_arc_leds()
 
     def schedule_save(self):
         self._save_timer.start()
@@ -1644,18 +1742,31 @@ class MainWindow(QMainWindow):
         if self.dev.key == "digiface":
             self.settings.update_profile(*pw_digiface_card())
 
+    def apply_meter_prefs(self):
+        prefs = self.settings.meter_prefs
+        Meter.show_rms = prefs["meter_rms"]
+        Meter.hold_s = prefs["peak_hold"]
+        Meter.over_count = prefs["over_samples"]
+        for s in self.strips.values():
+            s.meter.update()
+
     def update_meters(self):
         now = time.monotonic()
         dt, self._last_meter = now - self._last_meter, now
-        src, out = self.engine.read_peaks()
-        if src is None:
+        meters = self.engine.read_peaks()
+        if meters[0] is None:
             return
-        for s in self.row_in.strips:
-            s.meter.push([src[c] for c in s.channels], dt)
-        for s in self.row_play.strips:
-            s.meter.push([src[N_IN + c] for c in s.channels], dt)
-        for s in self.row_out.strips:
-            s.meter.push([out[c] for c in s.channels], dt)
+        src, out, rms_src, rms_out, over_src, over_out = meters
+        for row, base, peaks, rms, overs in (
+                (self.row_in, 0, src, rms_src, over_src),
+                (self.row_play, N_IN, src, rms_src, over_src),
+                (self.row_out, 0, out, rms_out, over_out)):
+            with_rms = row.kind in self.dev.meter_rms
+            for s in row.strips:
+                chans = [base + c for c in s.channels]
+                s.meter.push([peaks[c] for c in chans], dt,
+                             [rms[c] for c in chans] if with_rms else None,
+                             [overs[c] for c in chans] if self.dev.meter_overs else None)
         self.remote.add_peaks("in", self.channels("in"), src)
         self.remote.add_peaks("play", self.channels("play"), src[N_IN:])
         self.remote.add_peaks("out", self.channels("out"), out)
