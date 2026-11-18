@@ -648,7 +648,8 @@ class SettingsPanel(QWidget):
         is 0, PipeWire's own choice. The boxes show what PipeWire has, read when the window is
         shown (read_pw_clock). PipeWire forgets a forced value when it restarts and the app
         does not set it again: it is not the app's alone, and the app may not even run."""
-        tip = "PipeWire's setting, for every program and every device. Auto lets PipeWire choose."
+        tip = ("PipeWire's setting, for every program and every device, until PipeWire restarts. "
+               "Auto lets PipeWire choose.")
         rate_tip = (" The card runs at its Internal rate while nothing plays, and at this rate "
                     "while PipeWire plays." if self.dev.family == "hdspe" else
                     " The interface follows it.") + (

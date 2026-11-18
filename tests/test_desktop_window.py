@@ -155,7 +155,8 @@ class PipeWireClockTest(WindowCase):
         keys = [grid.itemAtPosition(r, 0).widget().text() for r in range(grid.rowCount())
                 if grid.itemAtPosition(r, 0)]
         self.assertEqual(keys[-3:], ["PipeWire rate", "Buffer", HINT])
-        self.assertIn("every program and every device", p.pw_rate.toolTip())
+        self.assertIn("every program and every device, until PipeWire restarts",
+                      p.pw_rate.toolTip())
         p._show_pw_clock(None)                      # PipeWire is not running
         self.assertFalse(p.pw_rate.isEnabled() or p.pw_quantum.isEnabled())
         p._show_pw_clock(dict(self.SETTINGS))
