@@ -370,6 +370,18 @@ class MuteGroupTest(unittest.TestCase):
         self.assertEqual(g[4 * m.N_SRC + m.N_IN + 4], 0.0)
         self.assertEqual(g[5 * m.N_SRC + m.N_IN + 5], 0.0)
 
+    def test_a_right_channel_in_a_group_waits_while_its_pair_is_linked(self):
+        st = m.default_state()
+        st["sends"]["in"][5][2] = [0.0, 1.0]
+        m.set_mute_group(st, "in:5", 2, 1)
+        st["mute_groups"][0]["on"] = True
+        m.set_stereo(st, "in", 4, True)             # the pair shows no group: neither side
+        st["sends"]["in"][4][2] = st["sends"]["in"][5][2] = [0.0, 0.0]
+        g = m.compute_matrix(st)
+        self.assertEqual((g[4 * m.N_SRC + 4], g[5 * m.N_SRC + 5]), (1.0, 1.0))
+        m.set_stereo(st, "in", 4, False)
+        self.assertEqual(m.compute_matrix(st)[5 * m.N_SRC + 5], 0.0)
+
     def test_one_group_per_send_and_an_empty_group_is_off(self):
         st = m.default_state()
         m.set_mute_group(st, "in:0", 4, 1)

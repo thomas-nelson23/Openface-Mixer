@@ -677,9 +677,11 @@ def trim_sends(st, key, old_db, new_db):
 
 
 def muted_by_groups(st):
-    """{(kind, channel, pair)} of the sends that mute groups silence now."""
+    """{(kind, channel, pair)} of the sends that mute groups silence now. The right channel of
+    a linked pair has no strip, so its own membership waits until the pair is unlinked."""
     return {(kind, c, p) for grp in st["mute_groups"] if grp["on"] for key, p in grp["sends"]
-            for kind, idx in [parse_key(key)] for c in strip_channels(st, kind, idx)}
+            for kind, idx in [parse_key(key)] if not (idx % 2 and st["stereo"][kind][idx // 2])
+            for c in strip_channels(st, kind, idx)}
 
 
 def mute_group(st, key, pair):
