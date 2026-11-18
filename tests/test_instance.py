@@ -57,7 +57,7 @@ class FakeWindow:
     def __init__(self, dev, background):
         self.dev, self.background = dev, background
         self.shown, self.switch_to, self.reopen_geometry = False, None, None
-        self.arc, self.remote = mock.Mock(), mock.Mock()
+        self.arc, self.remote, self.tray = mock.Mock(), mock.Mock(), mock.Mock()
 
     def show(self):
         self.shown = True

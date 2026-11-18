@@ -309,6 +309,13 @@ Openface Mixer again for that device shows the window, and closing it only hides
 quits. It stays that way after an update restart, a new UI scale or a switch to another device.
 Each device has its own window and login entry, so two interfaces can run side by side.
 
+A mixer started this way has an icon in the system tray: click it to show or hide the window,
+right-click it for Dim, Mute main out, the presets and Quit. The icon gets a cyan dot while Dim
+or the main out mute is on, and is greyed with a red dot while the engine is stopped or the
+interface can't be used. **Tray icon**, below Start at login, can show it **Always** (closing the
+window then only hides it, for any mixer) or **Never**. On a desktop without a tray (GNOME without
+an extension) nothing changes.
+
 ### Fireface 802
 
 Connect the 802 over **FireWire** or **USB**. Openface Mixer opens the connected interface, or
@@ -425,7 +432,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size and the Updates choices, shared by all devices |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices and the Tray icon setting, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 

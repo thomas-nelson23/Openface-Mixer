@@ -97,9 +97,15 @@ def hw_color(state):
 
 def hw_state(dev, state):
     """(short value for the Hardware mixer row, what to do about it or "")."""
+    text, note = hw_words(dev, state)
+    return light(hw_color(state), text), note
+
+
+def hw_words(dev, state):
+    """(the words of the Hardware mixer row, what to do about it or "")."""
     short = dev.name.replace("RME ", "")
     hint = dev.missing_hint() if state == "no-device" else ""
-    text, note = {
+    return {
         "starting": ("Connecting…", ""),
         "no-device": ("Not found", f"{short} not found on {dev.bus}."
                       + (hint and f"<br>{hint}")),
@@ -124,7 +130,6 @@ def hw_state(dev, state):
                      f"The {short} is connected but has not answered, so changes may not "
                      "reach it."),
     }.get(state, (state, ""))
-    return light(hw_color(state), text), note
 
 
 def read_failure(hw, short):
@@ -251,6 +256,15 @@ class Sidebar(QFrame):
         self._anim.setStartValue(self.width())
         self._anim.setEndValue(self.full_width if on else 0)
         self._anim.start()
+
+
+class WideList(QComboBox):
+    """A box whose open list is as wide as its longest entry, however narrow the box is."""
+
+    def showPopup(self):
+        # the entries' own width, plus the tick column and the list's padding and frame
+        self.view().setMinimumWidth(self.view().sizeHintForColumn(0) + px(40))
+        super().showPopup()
 
 
 class ChannelBox(QComboBox):

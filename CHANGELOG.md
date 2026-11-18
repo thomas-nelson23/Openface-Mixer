@@ -19,6 +19,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - A *Keyboard shortcuts* list at the bottom of the settings, and the same list in the README.
 - Control room: set the Dim amount and the Talkback dim amount, send talkback to further outputs with *Talkback to*, and set Main Out to a stored listening level with *Recall*.
 - Control room: up to four Phones outputs. With two or more, the ARC USB's two Phones keys select the first and the second.
+- A tray icon for a mixer started at login without a window: click it to show or hide the window, right-click for Dim, Mute main out, the presets and Quit. *Tray icon* below *Start at login* can show it always or never.
 - Commands for desktop shortcuts: `openface-mixer --dim`, `--mute-main`, `--recall 3` and `--show` act on the running mixer, so the desktop's keyboard settings can give them hotkeys (see the README).
 
 ### Changed
