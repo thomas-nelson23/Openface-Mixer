@@ -662,7 +662,7 @@ class MainWindow(QMainWindow):
         for pair in self.out_pairs():
             title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
-            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
+            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False, show_cue=True,
                       standard=self.standard_label("out", 2 * pair, True),
                       color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
@@ -672,7 +672,6 @@ class MainWindow(QMainWindow):
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
             s.mute.setChecked(o["mute"])
-            s.cue.setVisible(True)
             s.cue.toggled.connect(lambda on, pr=pair: self.set_cue(pr, on))
             s.clicked.connect(lambda pr=pair: self.select_out(pr, by_pair=True))
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
@@ -1140,7 +1139,7 @@ class MainWindow(QMainWindow):
         its channels, or switches their solo off when they all are soloed, as TotalMix does."""
         if kind == "mute":
             grp = self.st["mute_groups"][group - 1]
-            grp["on"] = not grp["on"]
+            grp["on"] = not grp["on"] and bool(grp["sends"])
         else:
             chans = self.solo_group_channels(group)
             on = not all(self.st["solo"][k][c] for k, c in chans)
@@ -1200,6 +1199,7 @@ class MainWindow(QMainWindow):
             s.cue.setChecked(s.pair == self.cue)
             s.cue.setEnabled(s.pair != main)
             s.cue.blockSignals(False)
+            s.show_flags()                  # a folded strip's edge
 
     def _add_submix_tools(self, menu, strip):
         """TotalMix's copy, paste and mirror of an output's submix, and copy, paste and clear

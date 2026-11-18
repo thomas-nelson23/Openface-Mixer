@@ -101,6 +101,12 @@ class MixWindowTest(unittest.TestCase):
                               ("state.json", '{"sends": "x", "selected": 99}'),
                               ("state.json", json.dumps(kept)),
                               ("state.json", json.dumps(dict(kept, unlinked="x", version="x"))),
+                              ("state.json", json.dumps(dict(
+                                  kept, mirror={"out:1": 1, "out:2": "x"}, trim="yes",
+                                  mute_groups=[{"on": 1}, "x", {"on": True, "sends": [[1, 2]]}],
+                                  solo_groups={"out:0": 1, "in:0": 9}))),
+                              ("state.json", json.dumps(dict(kept, mirror=[3], mute_groups={},
+                                                             solo_groups=None, trim=None))),
                               ("presets.json", "[1]"), ("presets.json", '{"slots": 5}')):
             with self.subTest(name=name, content=content):
                 path = config.device_dir(self.dev) / name
@@ -115,6 +121,10 @@ class MixWindowTest(unittest.TestCase):
                 self.qt.processEvents()
                 w.control.recall.emit()
                 w.arc_encoder(1)
+                for g in (1, 2):
+                    w.toggle_group("mute", g)
+                    w.toggle_group("solo", g)
+                w.move_fader(w.strips["in:0"], -3.0)
                 w.push_matrix()
                 w.save()
                 self.close(w)

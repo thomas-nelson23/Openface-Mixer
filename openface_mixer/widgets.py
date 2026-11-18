@@ -656,8 +656,8 @@ class Strip(QFrame):
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.fader.type_requested.connect(self.type_level)
         self.meter.peak_changed.connect(self._show_peak)
-        self.solo.toggled.connect(lambda _on: self.show_flags())
-        self.mute.toggled.connect(lambda _on: self.show_flags())
+        for b in (self.solo, self.mute, self.cue):
+            b.toggled.connect(lambda _on: self.show_flags())
         self._set_title()
         self.set_selected(False)
 
@@ -705,7 +705,8 @@ class Strip(QFrame):
                 edit._end()
             self._put_away = [w for w in (
                 self.settings_btn, self.pan, self.pan_text, self.solo, self.mute, self.cue,
-                self.stereo, self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak) if not w.isHidden()]
+                self.stereo, self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak)
+                if not w.isHidden()]
         for w in self._put_away:
             w.setVisible(not on)
         self.meter.set_horizontal(on)
@@ -722,8 +723,9 @@ class Strip(QFrame):
 
     def show_flags(self):
         """A folded strip shows what its buttons and readouts would: an amber edge while it is
-        soloed, a red one once it clipped, a dimmed name while it is muted."""
-        flags = (self.solo.isChecked(), self.mute.isChecked(), self.clipped)
+        soloed or cued, a red one once it clipped, a dimmed name while it is muted."""
+        flags = (self.solo.isChecked() or self.cue.isChecked(), self.mute.isChecked(),
+                 self.clipped)
         if self.folded and flags != self._flags:
             self._flags = flags
             self.set_selected(self._selected)
@@ -823,7 +825,7 @@ class Strip(QFrame):
                       if self.group else "")
         tag = label_style(col, sel)
         if self.folded:
-            if self.clipped or self.solo.isChecked():
+            if self.clipped or self.solo.isChecked() or self.cue.isChecked():
                 border = (RED if self.clipped else SOLO).name()
             if self.mute.isChecked() and not sel:
                 tag += f"color:{MUTED};"
@@ -937,6 +939,7 @@ class Row(QWidget):
                 text = "folded · click a name to unfold" if self.strips else "folded"
             for word, color, strips in (
                     ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
+                    ("Cue", SOLO, [s for s in self.strips if s.cue.isChecked()]),
                     ("Clip", RED, [s for s in self.strips if s.clipped])):
                 if strips:
                     names = ", ".join(html.escape(s.title.text()) for s in strips[:3])
