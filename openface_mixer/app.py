@@ -1040,8 +1040,9 @@ class MainWindow(QMainWindow):
         return f"{'Playback' if k == 'play' else 'Input'} {label}"
 
     def _ask_desktop_name(self, title, entry, text):
+        where = self._desktop_where(entry)
         name, ok = QInputDialog.getText(
-            self, title, f"Name for {self._desktop_where(entry).lower()} in the desktop's sound "
+            self, title, f"Name for {where[0].lower()}{where[1:]} in the desktop's sound "
             f"settings (shown after “{sinks.PREFIX}”):", text=text)
         return sinks.clean_name(name) if ok else ""
 

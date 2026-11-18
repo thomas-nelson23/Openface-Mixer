@@ -73,6 +73,8 @@ class DesktopMenuTest(WindowCase):
         self.assertEqual(self.menu(third), ["Add desktop output…"])
         self.menu(third, "Add desktop output")
         self.assertEqual(self.asked.call_args.kwargs["text"], "Playback AD1 3/4")
+        self.assertEqual(self.asked.call_args.args[2], "Name for playback AD1 3/4 in the "
+                         "desktop's sound settings (shown after “Openface”):")
         self.assertEqual(w.st["sinks"][-1], {"kind": "sink", "ch": 2, "stereo": True,
                                              "name": "Music"})
         self.assertEqual(self.conf()[-1], "sink openface_mixer_play_3_4 2 3 2 3 2 3 Openface Music")
