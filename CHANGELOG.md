@@ -69,6 +69,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - The Digiface engine shuts down cleanly when it is stopped.
 - ARC USB: the snapshot key goes out when its preset is cleared, and unplugging the ARC at the wrong moment no longer raises an error.
 - Network remote: a *Send to* host given by name no longer freezes the window at startup when the name server is slow.
+- A mixer started at login without a window stays in background mode after an update restart, a new UI scale or a device switch, so closing the window still only hides it.
 
 ### Not yet tried on hardware
 

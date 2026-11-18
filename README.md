@@ -289,7 +289,8 @@ Anyone who can reach the port can change the mix while the remote is on, so only
 a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
 tick **Start at login, no window**, or run `openface-mixer --background --device <key>`. Opening
 Openface Mixer again for that device shows the window, and closing it only hides it; **Ctrl+Q**
-quits. Each device has its own window and login entry, so two interfaces can run side by side.
+quits. It stays that way after an update restart, a new UI scale or a switch to another device.
+Each device has its own window and login entry, so two interfaces can run side by side.
 
 ### Fireface 802
 

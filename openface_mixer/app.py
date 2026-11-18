@@ -891,6 +891,11 @@ class MainWindow(QMainWindow):
     def switch_device(self, key):
         if key == self.dev.key:
             return
+        if self.background and tell_running(DEVICES[key]):
+            # that device has a window already, which shows now: this one keeps running hidden
+            self.settings.device.setCurrentIndex(self.settings.device.findData(self.dev.key))
+            self.close()
+            return
         self.switch_to = key
         self.close()
         QApplication.quit()             # also ends app.exec() when started with --background
@@ -910,8 +915,11 @@ class MainWindow(QMainWindow):
         server = QApplication.instance().findChild(QLocalServer)
         if server is not None:
             server.close()              # or the new process would hand over to this one and exit
-        launched = QProcess.startDetached(
-            sys.executable, ["-m", "openface_mixer", "--device", self.dev.key], os.getcwd())
+        # a background instance stays one, with its window shown as it is now
+        args = ["--device", self.dev.key] + (["--background", "--show"] if self.background
+                                             else [])
+        launched = QProcess.startDetached(sys.executable, ["-m", "openface_mixer"] + args,
+                                          os.getcwd())
         if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
             launched = launched[0]
         if not launched:
@@ -1458,24 +1466,87 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
-def _single_instance(app, dev):
-    """Make this the only running Openface Mixer window for dev (each device has its own engine,
-    mix and window, so one per device may run). If one is already running, ask it to show its
-    window and return None; otherwise return the server that answers later starts."""
-    name = f"{APP_ID}-{os.getuid()}-{dev.key}"
-    probe = QLocalSocket()
-    probe.connectToServer(name)
-    if probe.waitForConnected(300):
-        probe.write(b"show\n")
-        probe.waitForBytesWritten(300)
-        probe.disconnectFromServer()
-        return None
+def socket_name(dev):
+    """The single-instance socket of dev's window: each device has its own engine, mix and
+    window, so one window per device may run."""
+    return f"{APP_ID}-{os.getuid()}-{dev.key}"
+
+
+def tell_running(dev, line="show"):
+    """Send a line to dev's running window. False if none is running."""
+    sock = QLocalSocket()
+    sock.connectToServer(socket_name(dev))
+    if not sock.waitForConnected(300):
+        return False
+    sock.write(line.encode() + b"\n")
+    sock.waitForBytesWritten(300)
+    sock.disconnectFromServer()
+    return True
+
+
+def listen(app, dev):
+    """The server that later starts for dev talk to (see tell_running)."""
+    name = socket_name(dev)
     QLocalServer.removeServer(name)            # left behind by a crashed instance
     server = QLocalServer(app)
     if not server.listen(name):
         print(f"openface-mixer: single-instance socket {name}: {server.errorString()}",
               file=sys.stderr)
     return server
+
+
+def run(app, dev, background, show):
+    """Run dev's window until the app quits; returns the exit code. background: closing only
+    hides the window (started with --background). A device switch or a new UI scale opens the
+    next window in its place, shown, and a background instance stays one: it was started to
+    keep running, now for the device it was switched to."""
+    current = {}
+
+    def show_window():
+        w = current.get("window")
+        if w is not None:
+            w.show()
+            w.raise_()
+            w.activateWindow()
+
+    def claim(dev):
+        """This process becomes dev's window, or hands over to the one already running."""
+        if tell_running(dev):
+            return None
+        server = listen(app, dev)
+        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
+                                              show_window()))
+        return server
+
+    server = claim(dev)
+    if server is None:
+        return 0
+    app.setQuitOnLastWindowClosed(not background)
+    geometry = None
+    while True:
+        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
+        save_device_choice(dev)
+        w = MainWindow(dev, background)
+        current["window"] = w
+        if geometry is not None:
+            w.setGeometry(geometry)
+        if show:
+            w.show()
+        code = app.exec()
+        if w.switch_to is None:
+            return code
+        show = True                  # the user switched devices or the scale in the window
+        dev = DEVICES[w.switch_to]
+        geometry = w.reopen_geometry
+        w.arc.disconnect_port()      # so the next window can open the ARC USB
+        w.remote.stop()              # and the next one can bind the remote's port
+        w.deleteLater()
+        if w.dev is not dev:         # the other device may already have a window: show that
+            server.close()
+            server.deleteLater()
+            server = claim(dev)
+            if server is None:
+                return 0
 
 
 def main():
@@ -1491,47 +1562,4 @@ def main():
     else:
         dev = detect(load_device_choice())
     background = "--background" in args
-    app.setQuitOnLastWindowClosed(not background)
-    current = {}
-
-    def show_window():
-        w = current.get("window")
-        if w is not None:
-            w.show()
-            w.raise_()
-            w.activateWindow()
-
-    def claim(dev):
-        """This process becomes dev's window, or hands over to the one already running."""
-        server = _single_instance(app, dev)
-        if server is None:
-            sys.exit(0)
-        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
-                                              show_window()))
-        return server
-
-    server = claim(dev)
-    geometry = None
-    while True:
-        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
-        save_device_choice(dev)
-        w = MainWindow(dev, background)
-        current["window"] = w
-        if geometry is not None:
-            w.setGeometry(geometry)
-        if not background:
-            w.show()
-        code = app.exec()
-        if w.switch_to is None:
-            sys.exit(code)
-        background = False               # the user switched devices in the window: show the next
-        app.setQuitOnLastWindowClosed(True)
-        dev = DEVICES[w.switch_to]
-        geometry = w.reopen_geometry
-        w.arc.disconnect_port()      # so the next window can open the ARC USB
-        w.remote.stop()              # and the next one can bind the remote's port
-        w.deleteLater()
-        if w.dev is not dev:         # the other device may already have a window: show that
-            server.close()
-            server.deleteLater()
-            server = claim(dev)
+    sys.exit(run(app, dev, background, not background or "--show" in args))
