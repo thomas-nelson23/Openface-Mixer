@@ -239,6 +239,18 @@ class TrayWindowTest(WindowCase):
         self.assertTrue(w.tray.visible())
         self.assertFalse(w.tray._retry.isActive())
 
+    def test_a_damaged_ui_file(self):
+        w = self.w
+        w.background = True
+        config.UI_FILE.parent.mkdir(parents=True, exist_ok=True)
+        for text in ("[1, 2]", '{"tray": ["always"]}', "\x00not json"):
+            config.UI_FILE.write_text(text)
+            w.tray.apply()
+            self.assertTrue(w.tray.visible(), text)     # the default: in background mode
+        config.UI_FILE.write_text('{"tray": "never"}')
+        w.tray.apply()
+        self.assertFalse(w.tray.visible())
+
     def test_setting_in_the_sidebar(self):
         w = self.w
         box = w.remote_panel.tray_mode

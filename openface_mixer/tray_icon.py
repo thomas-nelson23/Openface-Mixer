@@ -67,10 +67,10 @@ class Tray(QObject):
     def apply(self):
         """Show or remove the icon as the setting says."""
         self._tries = 0
-        self._retry.stop()
         if not tray.wanted(load_ui().get("tray"), self.w.background):
             self.remove()
         elif self.icon is None:
+            self._retry.stop()
             self._look_again()
         self._quit_on_close()
 
@@ -100,6 +100,7 @@ class Tray(QObject):
         self.icon.show()
 
     def remove(self):
+        self._retry.stop()
         if self.icon is not None:
             self.icon.hide()
             self.icon.deleteLater()

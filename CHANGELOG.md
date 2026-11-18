@@ -121,6 +121,8 @@ people who have one can try them. Please try the points for your interface and
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
+- With *Start at login* ticked, log in again: the tray icon is there, its Dim, Mute main out and presets act as the buttons do, and the window it opens only hides when closed (KDE Plasma, GNOME with a tray extension, X11 and Wayland).
+- A keyboard shortcut set to `openface-mixer --dim` dims the running mixer, also with its window hidden.
 
 **Every Fireface and HDSPe card**
 
@@ -129,3 +131,4 @@ people who have one can try them. Please try the points for your interface and
 - ARC USB: with one Phones output both Phones keys light together as before; with two, each key lights alone and the encoder turns its own output.
 - With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
+- The *Device* list says “(connected)” next to the interface while it is connected, and no longer once it is unplugged or switched off.
