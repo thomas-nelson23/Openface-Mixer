@@ -27,7 +27,7 @@ import re
 import struct
 
 from . import control_room
-from .model import NEG_INF, any_solo, display_name, strip_channels, strip_key
+from .model import NEG_INF, any_solo, display_name, strip_channels, strip_key, submix_of
 
 DEFAULT_PORT = 7001        # TotalMix's default "Port incoming"
 DEFAULT_OUT_PORT = 9001    # TotalMix's default "Port outgoing"
@@ -229,7 +229,8 @@ def snapshot(st, dev, mode, filled_slots, hw_active):
             s[f"/{bus}/{c}/mute"] = 1.0 if st["mute"][kind][c] else 0.0
             solo = 1.0 if st["solo"][kind][c] else 0.0
             for p in pairs:
-                s[f"/mix/{seg}/{c}/{2 * p}/faderlin"] = db_to_faderlin(st["sends"][kind][c][p][0])
+                send = st["sends"][kind][c][submix_of(st, p)]
+                s[f"/mix/{seg}/{c}/{2 * p}/faderlin"] = db_to_faderlin(send[0])
                 s[f"/mix/{seg}/{c}/{2 * p}/solo"] = solo
     for c in out_chans:
         o = st["out"][c // 2]
@@ -331,7 +332,7 @@ def apply(st, dev, mode, address, args):
             return Result("changed", selected=pair)
         db = _clean_db(faderlin_to_db(v) if what == "faderlin" else v)
         for ch in chans:
-            st["sends"][kind][ch][pair][0] = db
+            st["sends"][kind][ch][submix_of(st, pair)][0] = db
         return Result("changed")
 
     m = re.fullmatch(r"/(input|playback|output)/(\d+)/(mute|stereo|faderlin|volume|fader)", address)

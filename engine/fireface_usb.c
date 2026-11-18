@@ -110,19 +110,24 @@ uint32_t ff802usb_rate(unsigned int value)
 static void levels(const struct ffusb_model *m, int subid, const uint8_t *p, size_t n_words,
 		   struct ofm_shm *s)
 {
-	float *dst;
+	float *dst, *rms;
 	int n;
 
 	switch (subid) {
-	case 4: dst = s->peak_src; n = m->n_in; break;                 /* inputs, pre FX */
-	case 2: dst = s->peak_src + OFM_N_IN; n = m->n_out; break;      /* playback */
-	case 5: dst = s->peak_out; n = m->n_out; break;                 /* outputs, post fader */
+	case 4: dst = s->peak_src; rms = s->rms_src; n = m->n_in; break;     /* inputs, pre FX */
+	case 2: dst = s->peak_src + OFM_N_IN; rms = s->rms_src + OFM_N_IN; n = m->n_out;
+		break;                                                    /* playback */
+	case 5: dst = s->peak_out; rms = s->rms_out; n = m->n_out; break;  /* outputs, post fader */
 	default: return;
 	}
 	for (int i = 0; i < n && 3 * (size_t)i + 2 < n_words; i++) {
 		uint32_t peak = get_word(p + 5 * (3 * i + 2));
 		float v = (float)((peak >> 4) & 0xffffff) / 8388608.0f;
 		raise_peak(&dst[i], v > 1.0f ? 1.0f : v);
+		/* twice the mean square of the peak words, as the Digiface's (oscmix, "Protocol") */
+		uint64_t ms = get_word(p + 5 * (3 * i)) | (uint64_t)get_word(p + 5 * (3 * i + 1)) << 32;
+		float r = (float)sqrt((double)ms / 0x1p55);
+		raise_peak(&rms[i], r > 1.0f ? 1.0f : r);
 	}
 }
 

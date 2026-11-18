@@ -103,6 +103,7 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 | `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
 | `out_gain[36]` | GUI | output master per channel, 0 when muted |
 | `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
+| `rms_src`, `rms_out`, `over_src`, `over_out` (after `dev_cmd`) | engine raises, GUI zeroes | RMS levels where the device reports them (Digiface, USB Firefaces; HDSPe inputs and playback), and full-scale samples in a row where it counts them (HDSPe) |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
 | `dev_config`, `dev_cmd[4096]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
 | `pw_reload` | GUI | counted up after the GUI writes `sinks.conf`; the engine reads it again |
@@ -125,6 +126,8 @@ app.MainWindow
  │                  hardware.pw_clock, set_pw_clock (pw-metadata: PipeWire's rate and buffer)
  ├─ sinks.py        the desktop sinks and sources (no Qt) ──config.save_sinks()──▶ sinks.conf
  ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
+ ├─ commands.py     lines a second start sends on the window's local socket (app.serve)
+ ├─ tray_icon.py    Tray (QSystemTrayIcon) ⇄ tray.py (when it shows, menu, state; no Qt)
  └─ config.py       state.json / matrix.bin / presets.json / sinks.conf
 ```
 
@@ -178,8 +181,24 @@ app.MainWindow
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
   fader floor (−80 dB), so a group can go all the way down and come back up together.
+- **Mute and solo groups** (TotalMix's, 4 of each). `state["mute_groups"]` holds per group
+  whether it is on and its sends as `[strip_key, pair]`: a mute group mutes a channel in one
+  submix only, and `compute_matrix()` leaves those sends out while the group is on.
+  `state["solo_groups"]` is `{strip_key: 1..4}`; a solo group button just sets the solo of its
+  channels, so solo itself is unchanged.
+- **Mirror** (`state["mirror"]`, `{"out:3": 1}`): the pair plays the other pair's submix and
+  follows it, with its own output level. `model.submix_of()` gives the pair whose sends a pair
+  plays; the faders, the matrix view and the remote edit that one. Copy, paste and clear of a
+  submix or of a channel's sends (`copy_mix`, `paste_mix`, `copy_sends`, ...) also change what
+  a linked pair keeps for unlinking, and the window applies them through `replace_mix`, so
+  *Restore previous mix* takes them back.
+- **Trim** (`state["trim"]`, saved, not part of a mix): a source fader moves every send of its
+  channel that is on by the same dB (`model.trim_sends`), between -80 and +6 dB. A drag that
+  starts at -∞ switches on the send in the selected submix only, so it can't lift the others.
+- **Cue** is the window's `cue` (an output pair or None), never saved: `control_room.apply()`
+  copies that pair's rows of the matrix over Main Out's before Mono, Speaker B, Dim and Talkback.
 - **Presets** store `extract_mix(state)`: stereo links and what they keep for unlinking, mutes,
-  sends, output levels and groups.
+  sends, output levels, mirrors and the fader, mute and solo groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
 - **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's

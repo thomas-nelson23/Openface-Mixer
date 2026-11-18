@@ -1,5 +1,5 @@
 """TotalMix-style control room functions: Main Out, Dim, Recall, Mono, Speaker B, Phones,
-Talkback, External In.
+Talkback, External In, Cue.
 
 These are what the ARC USB's keys and encoder drive. Pure Python, no Qt. They live in
 st["control_room"] (not in MIX_KEYS, so presets don't recall them, as in TotalMix) and are applied
@@ -132,16 +132,22 @@ def step_volume(st, clicks):
     return pair, NEG_INF if out["gain"] is None else out["gain"]
 
 
-def apply(st, gains, out_gains, talkback=True):
+def apply(st, gains, out_gains, talkback=True, cue=None):
     """Fold the control room switches into gains[out * N_SRC + src] and out_gains, in place.
 
-    talkback=False leaves Talkback out, for the copy saved to disk."""
+    talkback=False leaves Talkback out, for the copy saved to disk. cue is the output pair
+    whose submix plays on Main Out instead of its own (TotalMix's Cue), or None; it is never
+    saved, so the window passes it."""
     cr = control_room(st)
     main = cr["main"]
     ml, mr = 2 * main, 2 * main + 1
 
     def row(o):
         return range(o * N_SRC, (o + 1) * N_SRC)
+
+    if cue is not None and cue != main:     # Main Out's own level, Dim and the rest still apply
+        for o, oc in ((ml, 2 * cue), (mr, 2 * cue + 1)):
+            gains[o * N_SRC:(o + 1) * N_SRC] = gains[oc * N_SRC:(oc + 1) * N_SRC]
 
     if cr["ext_in"]:
         for o in (ml, mr):

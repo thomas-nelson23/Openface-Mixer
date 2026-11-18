@@ -272,6 +272,8 @@ int main(void)
 	memset(pkt, 0, sizeof(pkt));
 	memcpy(pkt, (uint8_t[]){ 0xf0, 0x00, 0x20, 0x0d, 0x10, 0x04 }, 6);
 	put_word(pkt + 6 + 5 * (3 * 2 + 2), (1u << 22) << 4);   /* peak word of channel 3 */
+	put_word(pkt + 6 + 5 * (3 * 2 + 1), 1u << 19);   /* its RMS, high word: 0.25^2 * 2^55 */
+	put_word(pkt + 6 + 5 * (3 * 3), 0x80000000u);     /* channel 4: low word only */
 	pkt[sizeof(pkt) - 1] = 0xf7;
 	struct ff802usb_rx rx = { 0 };
 	ff802usb_rx_feed(&rx, pkt, 100, &info, &s);
@@ -283,6 +285,11 @@ int main(void)
 	check("link: levels stopped", ffusb_link_state(&info, FFUSB_REPLY_TIMEOUT_MS), -ENODATA);
 	if (fabsf(s.peak_src[2] - 0.5f) > 1e-6f || s.peak_src[1] != 0.0f) {
 		fprintf(stderr, "input meters: %g %g\n", s.peak_src[1], s.peak_src[2]);
+		failed = 1;
+	}
+	if (fabsf(s.rms_src[2] - 0.25f) > 1e-6f || fabsf(s.rms_src[3] - 0x1p-12f) > 1e-9f ||
+	    s.rms_src[1] != 0.0f || s.over_src[2] != 0.0f) {
+		fprintf(stderr, "input RMS: %g %g %g\n", s.rms_src[1], s.rms_src[2], s.rms_src[3]);
 		failed = 1;
 	}
 

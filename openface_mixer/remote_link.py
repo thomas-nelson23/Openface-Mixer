@@ -18,10 +18,10 @@ from PySide6.QtNetwork import QHostAddress, QUdpSocket
 from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QLineEdit, QSpinBox
 
 from . import APP_ID, APP_NAME
-from . import osc_remote
-from .config import launcher
+from . import osc_remote, tray
+from .config import launcher, load_ui, save_ui
 from .osc_remote import remote_settings  # noqa: F401  (MainWindow imports it from here)
-from .settings_panel import CYAN, OFF, RED, light
+from .settings_panel import CYAN, OFF, RED, WideList, light
 from .theme import Section, key_label
 
 CLIENT_TIMEOUT_S = 60
@@ -254,9 +254,11 @@ class RemoteLink(QObject):
 
 
 class RemotePanel(Section):
-    """Sidebar section: switch the remote on, its port, levels, and start at login.
-    Emits changed() after editing st["remote"]."""
+    """Sidebar section: switch the remote on, its port, levels, start at login and the tray
+    icon. Emits changed() after editing st["remote"], tray_changed() after saving the Tray icon
+    setting."""
     changed = Signal()
+    tray_changed = Signal()
 
     def __init__(self, st, dev, parent=None):
         super().__init__("NETWORK REMOTE", parent)
@@ -302,13 +304,23 @@ class RemotePanel(Section):
         self.autostart = QCheckBox("Start at login, no window")
         self.autostart.setToolTip(f"Starts the {dev.name.replace('RME ', '')} mixer at login and "
                                   "keeps it, the ARC USB and the network remote running without "
-                                  "a window. Opening Openface Mixer shows the window; Ctrl+Q "
-                                  "quits it.")
+                                  "a window. The tray icon or opening Openface Mixer shows "
+                                  "the window; Quit in the tray menu or Ctrl+Q quits it.")
         self.autostart.setChecked(autostart_enabled(dev.key))
         if self.autostart.isChecked():      # keep the entry's command path current
             set_autostart(True, dev.key, dev.name)
         self.autostart.toggled.connect(lambda on: set_autostart(on, self.dev.key, self.dev.name))
         g.addWidget(self.autostart, 6, 0, 1, 2)
+        g.addWidget(key_label("Tray icon"), 7, 0)
+        self.tray_mode = WideList()
+        for value, text in tray.MODES:
+            self.tray_mode.addItem(text, value)
+        self.tray_mode.setCurrentIndex(self.tray_mode.findData(tray.mode(load_ui().get("tray"))))
+        self.tray_mode.setToolTip("When Openface Mixer has an icon in the system tray. While it "
+                                  "is there, closing the window only hides it. Needs a desktop "
+                                  "with a system tray.")
+        self.tray_mode.activated.connect(self._tray_mode_chosen)
+        g.addWidget(self.tray_mode, 7, 1)
         g.setColumnStretch(1, 1)
         self.set_status("off")
 
@@ -320,6 +332,10 @@ class RemotePanel(Section):
         r["out_port"] = self.out_port.value()
         r["levels"] = self.levels.isChecked()
         self.changed.emit()
+
+    def _tray_mode_chosen(self, i):
+        save_ui(tray=self.tray_mode.itemData(i))
+        self.tray_changed.emit()
 
     def set_status(self, s, target_error=None):
         if target_error:

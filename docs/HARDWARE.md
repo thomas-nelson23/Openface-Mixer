@@ -224,6 +224,9 @@ registers (host) or reports changed ones (device): `(register << 16) | value`, b
 the rest has an even number of ones, the same parity as over FireWire. Sub ID 2 with no payload
 asks for levels; the device answers with sub IDs 1–5 (inputs post/pre FX are 1/4, playback 2,
 outputs pre/post fader 3/5), three words per channel: RMS low, RMS high, peak (bits 4–27).
+The engine reads the RMS as the Digiface's, mean square × 2^55 (level = sqrt(ms / 2^55)). oscmix
+shows 10·log10(rms / 2^54), which is the same reading with TotalMix's *RMS +3 dB*. The scale is
+still to be checked against TotalMix on a sine.
 
 The registers are the FireWire DSP command words above: `(channel << 8) | command` for channel
 settings (AN 1 gain `0x0007`, AN 9 48V `0x0808`, AN 1 out volume `0x1e00`), and
@@ -543,7 +546,11 @@ drivers' maps and get no desktop sinks or sources for now.
 
 The hwdep ioctl `SNDRV_HDSPM_IOCTL_GET_PEAK_RMS` returns peak and RMS values for 64 inputs,
 playback channels and outputs. Peaks: bits 8–30 are the level, full scale `0x7fffff`; bits 0–3
-count overs. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate. Under snd-hdspm that is the
+count full-scale samples in a row (the kernel's "full-scale counters"), which *Clip after*
+compares with its setting, as hdspmixer's *FS samples for OVR* does. RMS is a 64-bit value that
+the engine scales as hdspmixer's `HDSPMixerMeter.cxx` does, level = sqrt(rms / (1125899638407184
+× 8191)). It reads RMS for inputs and playback only: hdspmixer draws the outputs of these cards
+as peak only. `SNDRV_HDSPM_IOCTL_GET_CONFIG` gives the sample rate. Under snd-hdspm that is the
 rate the driver last set, which is not the card's while it follows an input at another rate
 (set to 48 kHz and slaved to 44.1 kHz, it says 48 kHz). So there the engine reads the `System
 Sample Rate` control, the card's measured clock (47998), and takes the standard rate within

@@ -189,9 +189,13 @@ static struct ofm_shm *check_shm(void)
 	check("peak_out", offsetof(struct ofm_shm, peak_out), 10864);
 	check("dev_config", offsetof(struct ofm_shm, dev_config), 11008);
 	check("dev_cmd", offsetof(struct ofm_shm, dev_cmd), 11012);
-	check("pw_reload", offsetof(struct ofm_shm, pw_reload), 27396);
-	check("pw_linked", offsetof(struct ofm_shm, pw_linked), 27408);
-	check("segment size", sizeof(struct ofm_shm), 27412);
+	check("rms_src", offsetof(struct ofm_shm, rms_src), 27396);
+	check("rms_out", offsetof(struct ofm_shm, rms_out), 27684);
+	check("over_src", offsetof(struct ofm_shm, over_src), 27828);
+	check("over_out", offsetof(struct ofm_shm, over_out), 28116);
+	check("pw_reload", offsetof(struct ofm_shm, pw_reload), 28260);
+	check("pw_linked", offsetof(struct ofm_shm, pw_linked), 28272);
+	check("segment size", sizeof(struct ofm_shm), 28276);
 
 	first.be = second.be = &fake_backend;
 	check("first engine", shm_setup(&first), 0);

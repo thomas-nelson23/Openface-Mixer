@@ -22,7 +22,7 @@
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
 #define OFM_N_DEV_CMD 4096                  /* device setting command slots (802/UCX II effects) */
 
-#define OFM_SHM_VERSION 8
+#define OFM_SHM_VERSION 9
 
 /* Header is exactly 64 bytes; all fields but gui_heartbeat are written by the engine. */
 struct ofm_shm {
@@ -63,9 +63,18 @@ struct ofm_shm {
 	uint32_t dev_config;
 	uint32_t dev_cmd[OFM_N_DEV_CMD];
 
-	/* PipeWire: the desktop sinks and sources the engine makes, from sinks.conf in the device's
-	 * config directory. The GUI counts pw_reload up after it writes that file, and the engine
-	 * then reads it again. The rest the engine writes. */
+	/* Meter extras (version 8), raised by the engine and zeroed by the GUI with the peaks.
+	 * RMS level, linear: a full-scale sine reads 0.707; 0 where the device reports none.
+	 * Overs: the most consecutive full-scale samples the device counted (HDSPe), 0 where it
+	 * counts none. */
+	float rms_src[OFM_N_SRC];
+	float rms_out[OFM_N_OUT];
+	float over_src[OFM_N_SRC];
+	float over_out[OFM_N_OUT];
+
+	/* PipeWire (version 9): the desktop sinks and sources the engine makes, from sinks.conf in
+	 * the device's config directory. The GUI counts pw_reload up after it writes that file, and
+	 * the engine then reads it again. The rest the engine writes. */
 	uint32_t pw_reload;
 	uint32_t pw_connected;   /* 1 while the engine is connected to PipeWire */
 	uint32_t pw_nodes;       /* sinks and sources made (those on channels the interface has

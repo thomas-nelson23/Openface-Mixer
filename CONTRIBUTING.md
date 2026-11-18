@@ -33,6 +33,9 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   fx_panels.py          the EQ, Dynamics, Room EQ and Reverb / Echo panels
   osc_remote.py         TotalMix Global OSC: codec, fader curve, state ⇄ addresses (no Qt)
   remote_link.py        the OSC remote's UDP socket, sidebar section and autostart entry
+  commands.py           --dim, --mute-main, --recall, --show for a running window: lines on its socket (no Qt)
+  tray.py               when the tray icon shows, its menu, state and tooltip (no Qt)
+  tray_icon.py          the system tray icon (QSystemTrayIcon) built from tray.py
   channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain, jacks)
   engine.py             shared-memory client + starting/stopping the engine
   hardware.py           Digiface and HDSPe ALSA controls via amixer, PipeWire card profile via pactl,

@@ -19,10 +19,24 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   Pick an output, and the input and playback faders set the submix sent to it.
 - **Matrix view:** route any input or playback channel to any output with a click.
 - **Presets:** 8 snapshot slots, like TotalMix, plus export and import of mixes as files.
+- **Workspaces:** *Save workspace* in the Mix section of the settings puts everything for one
+  interface in one file, as TotalMix's workspaces do: the mix, names, colours, icons, layouts,
+  presets, control room, device and effect settings, and the meter and ARC key options.
+  *Load workspace* checks the whole file before it changes anything, keeps the mix it replaces
+  for *Restore previous mix* and reopens the window. A workspace for another interface is
+  refused. Solo and the network remote's settings are not part of a workspace.
 - **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
+- **Mute and solo groups like TotalMix:** 4 of each, switched with **MUTE 1–4** and **SOLO 1–4**
+  at the end of the Hardware Inputs title. A mute group mutes its channels in the submix they
+  were added in, so no other output is muted by mistake; a solo group solos its channels.
+- **Submix tools like TotalMix:** right-click an output to copy its mix and paste it into
+  another, or to mirror it (the other output then plays the same mix and follows every change).
+  Right-click an input or playback channel to copy, paste or clear its sends to every output.
+  **Trim** makes each fader move all of its channel's sends together, in every submix, and
+  **Cue** on an output plays its mix on Main Out.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
@@ -38,6 +52,16 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing; hiding one switches its solo off.
+- **Layouts:** eight *Layouts* slots in the Display section store the view: hidden channel
+  groups and strips, folded rows and *Custom channel names*. Click *Store*, then a slot, to save
+  the view under a name; click a filled slot to bring it back. A layout never changes the mix
+  (a strip it hides has its solo switched off). Layouts are saved per device.
+- **Meters like TotalMix:** the bright bar is the RMS level and the dimmer bar above it the
+  peak, on interfaces that report RMS (Digiface, 802 over USB, UCX II, and HDSPe inputs and
+  playback; the FireWire Firefaces show peak only). In the Display section, *Show RMS level*
+  switches the RMS bar off, *Peak hold* sets how long the peak line stays, and on the HDSPe
+  cards *Clip after* sets how many full-scale samples in a row light the clip light. These are
+  kept for this computer, for all devices.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
 - **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
   centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
@@ -166,7 +190,8 @@ still need a tester with the hardware.
 
 ## First run
 
-1. Open **Openface Mixer**.
+1. Open **Openface Mixer**. It opens the interface that is connected; to pick another, use
+   **Device** at the top of the settings, where the connected interfaces say so.
 2. Monitoring works in any PipeWire profile, because the mix happens in the interface. To
    *record* all 32 inputs in apps, switch the Digiface to the **Pro Audio** profile: click
    *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound
@@ -212,9 +237,16 @@ runs at.
 | Solo | **S** on a strip: solo-in-place in the current submix |
 | Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
+| Save or load everything for this interface | Settings → Mix → *Save workspace…* / *Load workspace…* |
+| Store or recall a layout | Settings → Display → *Layouts*: **Store**, then a slot (Esc cancels); click a filled slot to recall it |
 | Recall a preset | Click a lit slot |
-| Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
+| Take back a recall, import, reset, paste or clear | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
+| Mute and solo groups | Right-click a strip → *Mute group in …* (for the submix being edited) or *Solo group*, then switch the group with **MUTE 1–4** or **SOLO 1–4** |
+| Copy a submix | Right-click an output → *Copy mix*, then right-click another → *Paste mix from …* or *Mirror mix of …*. *Remove mirror* gives the output its own copy again |
+| Copy or clear a channel's sends | Right-click an input or playback strip → *Copy sends*, *Paste sends from …* or *Clear sends…* |
+| Trim | **Trim** at the end of the Hardware Inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off |
+| Cue | **Cue** on an output strip: hear that output's mix on Main Out. Press it again, or another output's, to end it |
 | Desktop output or input | Right-click a playback strip → *Add desktop output…*, or an input strip → *Add desktop input…*. The same menu renames or removes it |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
@@ -254,6 +286,23 @@ The same list is in the app: **Keyboard shortcuts** at the bottom of the setting
 | Effects knob | Home | Default value |
 | Effects knob | Enter | Type a value |
 
+### Desktop shortcuts
+
+A running mixer takes commands, so the desktop's own keyboard shortcut settings can give it
+global hotkeys. On KDE Plasma: *System Settings → Keyboard → Shortcuts → Add New → Command or
+Script*. On GNOME: *Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts*.
+
+| Command | What it does |
+| --- | --- |
+| `openface-mixer --dim` | Dim on or off |
+| `openface-mixer --mute-main` | Main Out mute on or off |
+| `openface-mixer --recall 3` | Recall preset 3 (1 to 8) |
+| `openface-mixer --show` | Show the window, starting the mixer if needed |
+
+With two interfaces, add `--device <key>` (for example `--device ff802`). If that mixer is not
+running, a command other than `--show` does nothing, so a hotkey never opens a window by
+surprise: it prints why and exits with status 1.
+
 ### Control room and ARC USB
 
 The **Control Room** box in the settings panel has TotalMix's monitoring switches. They act on
@@ -267,6 +316,7 @@ the output pair set as **Main Out** and are not part of presets:
 | Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level. Pick the pair under *Speaker B* first; it stays silent while Speaker B is off |
 | Talkback | Sends the talkback mic input to the Phones, with the rest of their mix turned down by the amount set under *Talkback dim* |
 | Ext In | Replaces the Main Out mix with the External In input pair |
+| Cue | **Cue** on an output strip plays that output's mix on Main Out, at the Main Out level, until it is pressed again or another output is cued. Dim, Speaker B and Talkback still work. Not saved |
 
 *Phones* takes up to four headphone outputs. Talkback always goes to all of them; tick further
 outputs under *Talkback to* if others should hear it too.
@@ -281,8 +331,10 @@ TotalMix layout printed on it:
   (in the order they were ticked) while its key is lit. With one Phones output both keys
   select it and both light up. Faders grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
-it to work (its window can be hidden, see below).
+Key LEDs follow the state. **Keys** beside the ARC's status in the Control Room box lists the
+keys: each can do any of these functions instead, and *Reset to default* brings back the printed
+layout. The choice is kept for this computer, not with the mix. The ARC needs no driver or
+setup; Openface Mixer must be running for it to work (its window can be hidden, see below).
 
 ### Network remote (OSC)
 
@@ -319,7 +371,15 @@ Anyone who can reach the port can change the mix while the remote is on, so only
 a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
 tick **Start at login, no window**, or run `openface-mixer --background --device <key>`. Opening
 Openface Mixer again for that device shows the window, and closing it only hides it; **Ctrl+Q**
-quits. Each device has its own window and login entry, so two interfaces can run side by side.
+quits. It stays that way after an update restart, a new UI scale or a switch to another device.
+Each device has its own window and login entry, so two interfaces can run side by side.
+
+A mixer started this way has an icon in the system tray: click it to show or hide the window,
+right-click it for Dim, Mute main out, the presets and Quit. The icon gets a cyan dot while Dim
+or the main out mute is on, and is greyed with a red dot while the engine is stopped or the
+interface can't be used. **Tray icon**, below Start at login, can show it **Always** (closing the
+window then only hides it, for any mixer) or **Never**. On a desktop without a tray (GNOME without
+an extension) nothing changes.
 
 ### Fireface 802
 
@@ -429,7 +489,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/state.json.bak` | The save before the current one, loaded if `state.json` can't be read (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
 | `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
-| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import or reset, for *Restore previous mix* (Digiface) |
+| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import, reset or workspace load, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
 | `~/.config/openface-mixer/sinks.conf` | The desktop outputs and inputs, written by the app for the engine (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
@@ -438,7 +498,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size and the Updates choices, shared by all devices |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options, the ARC USB keys and the Tray icon setting, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
@@ -491,8 +551,7 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
   plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
   (before version 2.1) are not supported.
-- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
-  supported (it sent nothing in testing).
+- ARC USB: the footswitch is not supported (it sent nothing in testing).
 
 ### Interfaces not supported yet
 

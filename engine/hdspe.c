@@ -57,6 +57,13 @@ float hdspe_peak(uint32_t word)
 	return (float)((word >> 8) & HDSPE_PEAK_FULL) / HDSPE_PEAK_FULL;
 }
 
+float hdspe_rms(uint64_t word)
+{
+	/* hdspmixer's scale (HDSPMixerMeter.cxx): mean square * 1125899638407184 * 8191 */
+	float v = (float)sqrt((double)word / (1125899638407184.0 * 8191.0));
+	return v > 1.0f ? 1.0f : v;
+}
+
 bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const char *name)
 {
 	return (strcmp(driver, "HDSPM") == 0 || strcmp(driver, "HDSPe") == 0) &&
@@ -359,6 +366,11 @@ static int meters(void *h, struct ofm_shm *s)
 		raise_peak(&s->peak_src[c], hdspe_peak(m.input_peaks[c]));
 		raise_peak(&s->peak_src[OFM_N_IN + c], hdspe_peak(m.playback_peaks[c]));
 		raise_peak(&s->peak_out[c], hdspe_peak(m.output_peaks[c]));
+		raise_peak(&s->rms_src[c], hdspe_rms(m.input_rms[c]));
+		raise_peak(&s->rms_src[OFM_N_IN + c], hdspe_rms(m.playback_rms[c]));
+		raise_peak(&s->over_src[c], (float)(m.input_peaks[c] & HDSPE_OVERS));
+		raise_peak(&s->over_src[OFM_N_IN + c], (float)(m.playback_peaks[c] & HDSPE_OVERS));
+		raise_peak(&s->over_out[c], (float)(m.output_peaks[c] & HDSPE_OVERS));
 	}
 	return 0;
 }
