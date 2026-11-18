@@ -29,19 +29,21 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
-    compute_matrix, compute_out_gains, default_state, display_name, extract_mix, get_strip_db,
-    group_follow, set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon,
-    speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends, clear_sends_outside,
+    compute_matrix, compute_out_gains, copy_mix, copy_sends, default_state, display_name,
+    extract_mix, get_strip_db, group_follow, group_members, mute_group, parse_key, paste_mix,
+    paste_sends, remove_mirror, set_mirror, set_mute_group, set_stereo, set_strip_color,
+    set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels, strip_color,
+    strip_hidden, strip_icon, strip_key, submix_of, trim_sends,
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
 from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
-    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, WARN, apply_theme,
-    compact_boxes, icon_pixmap, px,
+    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, SOLO, WARN,
+    apply_theme, compact_boxes, icon_pixmap, px,
 )
-from .widgets import Row, Strip
+from .widgets import Row, Strip, small_button
 
 
 def reason(e):
@@ -76,6 +78,9 @@ class MainWindow(QMainWindow):
         self._limited = set()              # HDSPe: crosspoints held at +6 dB (show_limited)
         self.fx_panels = {}                # (kind of panel, strip key) -> open effect panel
         self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
+        self.mix_clipboard = None          # (name, pair, copy_mix()) from Copy mix
+        self.sends_clipboard = None        # (name, copy_sends()) from Copy sends
+        self.cue = None                    # output pair heard on Main Out (Cue), never saved
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
         self._engine_up = False            # the engine answered the last poll
@@ -118,6 +123,7 @@ class MainWindow(QMainWindow):
         self.row_play = Row("play", "Playback", "", KIND_COLOR["play"])
         self.row_out = Row("out", "Hardware Outputs",
                            "master level · click a name tag to edit its submix", KIND_COLOR["out"])
+        self.row_in.head_row.addWidget(self._build_mix_tools())
         for r in (self.row_in, self.row_play, self.row_out):
             rows.addWidget(r)
             r.set_folded(r.kind in self.st["folded"])
@@ -292,6 +298,32 @@ class MainWindow(QMainWindow):
         self.show_update_waiting(False)
         top.addWidget(self.settings_btn)
         return top
+
+    def _build_mix_tools(self):
+        """TotalMix's Trim Gains, and its mute and solo groups, at the end of the inputs' title."""
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(px(3))
+        self.trim_btn = small_button("Trim", "#ffffff", "#0b0f1c", width=40,
+                                     tip="Trim: a channel's fader moves all of its sends by the "
+                                         "same amount, in every submix")
+        self.trim_btn.setChecked(self.st["trim"])
+        self.trim_btn.toggled.connect(self.set_trim)
+        lay.addWidget(self.trim_btn)
+        self.group_btns = {}
+        for kind, color, ink in (("mute", "#2ad4ff", "#021012"), ("solo", SOLO.name(), "#0b0f1c")):
+            lay.addSpacing(px(8))
+            lay.addWidget(self._caption(kind.upper()))
+            for g in range(1, N_GROUPS + 1):
+                b = small_button(str(g), color, ink, width=20)
+                b.clicked.connect(lambda _=False, k=kind, n=g: self.toggle_group(k, n))
+                b.setAccessibleName(f"{kind.title()} group {g}")
+                lay.addWidget(b)
+                self.group_btns[kind, g] = b
+        for b in (self.trim_btn, *self.group_btns.values()):
+            b.setFixedHeight(px(16))        # as high as the row's title, which sets the line
+        return box
 
     def show_update_waiting(self, waiting):
         """The gear button, with a dot while the Updates section has an update to install."""
@@ -630,7 +662,7 @@ class MainWindow(QMainWindow):
         for pair in self.out_pairs():
             title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
-            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
+            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False, show_cue=True,
                       standard=self.standard_label("out", 2 * pair, True),
                       color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
@@ -640,6 +672,7 @@ class MainWindow(QMainWindow):
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
             s.mute.setChecked(o["mute"])
+            s.cue.toggled.connect(lambda on, pr=pair: self.set_cue(pr, on))
             s.clicked.connect(lambda pr=pair: self.select_out(pr, by_pair=True))
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.mute.toggled.connect(lambda on, pr=pair: self.set_out_mute(pr, on))
@@ -660,16 +693,21 @@ class MainWindow(QMainWindow):
         if strips and sel not in [s.pair for s in strips]:
             sel = strips[-1].pair
         self.select_out(sel, by_pair=True)
+        cue = self.cue
+        self.refresh_cue()
+        if self.cue != cue:
+            self.push_matrix()
 
     def refresh_sends(self, kind):
         """Show the sends into the selected output pair on the source faders."""
         row = self.row_in if kind == "in" else self.row_play
-        p = self.st["selected"]
+        p = submix_of(self.st, self.st["selected"])
         for s in row.strips:
             gdb, pan = self.st["sends"][kind][s.channels[0]][p]
             s.set_fader(NEG_INF if gdb is None else gdb)
             s.pan.set_value(pan)
         self.show_limited()
+        self.refresh_groups()
 
     # ------------------------------------------------------------------ model updates
     def select_out(self, idx, by_pair=False):
@@ -680,7 +718,12 @@ class MainWindow(QMainWindow):
         i = self.submix.findData(pair)
         if i >= 0:
             self.submix.setCurrentIndex(i)
-            hint = f"faders send to&nbsp; <b style='color:{ACCENT.name()}'>{self.submix.itemText(i)}</b>"
+            hint = f"<b style='color:{ACCENT.name()}'>{self.submix.itemText(i)}</b>"
+            src = self.st["mirror"].get(strip_key("out", pair))
+            if src is not None:
+                hint += f" (mirrors {self.label('out', 2 * src, True)})"
+            hint = (f"Trim: faders move every submix · showing&nbsp; {hint}" if self.st["trim"]
+                    else f"faders send to&nbsp; {hint}")
             self.row_in.set_subtitle(hint)
             self.row_play.set_subtitle(hint)
         self.refresh_sends("in")
@@ -695,22 +738,34 @@ class MainWindow(QMainWindow):
         """A fader moved: update the model, then let its fader group follow (Shift = solo move)."""
         old = get_strip_db(self.st, strip.key)
         set_strip_db(self.st, strip.key, db)
+        moved = {strip.key: old}
         if strip.group and not (QApplication.keyboardModifiers() & Qt.ShiftModifier):
+            before = {k: get_strip_db(self.st, k) for k in group_members(self.st, strip.key)}
             for key, val in group_follow(self.st, strip.key, old, db).items():
+                moved[key] = before[key]
                 if key in self.strips:
                     self.strips[key].set_fader(val)
+        # Trim Gains: the other submixes follow (trim_sends), but not while a send is being
+        # switched on from -∞ here, which would lift them all to +6 dB
+        if self.st["trim"] and not strip.fader.dragged_from_off():
+            for key, was in moved.items():
+                now = get_strip_db(self.st, key)
+                shown = trim_sends(self.st, key, was, now)
+                if shown != now and key in self.strips:
+                    self.strips[key].set_fader(shown)
         self.push_matrix()
 
     def set_send_at(self, kind, chans, pair, db):
         """Used by the matrix view: set the send level of chans into a given output pair."""
+        p = submix_of(self.st, pair)        # a mirrored pair's cells are its source's
         for c in chans:
-            self.st["sends"][kind][c][pair][0] = None if db is None else round(db, 2)
-        if pair == self.st["selected"]:
+            self.st["sends"][kind][c][p][0] = None if db is None else round(db, 2)
+        if p == submix_of(self.st, self.st["selected"]):
             self.refresh_sends(kind)
         self.push_matrix()
 
     def set_pan(self, kind, chans, pan):
-        p = self.st["selected"]
+        p = submix_of(self.st, self.st["selected"])
         for c in chans:
             self.st["sends"][kind][c][p][1] = round(pan, 3)
         self.push_matrix()
@@ -987,13 +1042,14 @@ class MainWindow(QMainWindow):
         none.setChecked(cur_icon is None)
         none.triggered.connect(lambda: self.set_icon(strip, None))
         menu.addSeparator()
-        grp = menu.addMenu("Fader group")
-        for g in range(N_GROUPS + 1):
-            a = (grp.addAction("None") if g == 0 else
-                 grp.addAction(self._swatch(GROUP_COLOR[g].name()), f"Group {g}"))
-            a.setCheckable(True)
-            a.setChecked(strip.group == g)
-            a.triggered.connect(lambda _=False, n=g: self.set_group(strip, n))
+        self._group_menu(menu, "Fader group", strip.group, lambda n: self.set_group(strip, n))
+        if strip.kind != "out":
+            sel = self.st["selected"]
+            self._group_menu(menu, f"Mute group in {self.label('out', 2 * sel, True)}",
+                             mute_group(self.st, strip.key, submix_of(self.st, sel)),
+                             lambda n: self.choose_mute_group(strip, n))
+            self._group_menu(menu, "Solo group", self.st["solo_groups"].get(strip.key, 0),
+                             lambda n: self.choose_solo_group(strip, n))
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         if self.dev.fx is not None and strip.kind in ("in", "out"):
@@ -1004,10 +1060,20 @@ class MainWindow(QMainWindow):
             menu.addAction("Copy effects", lambda: self.copy_effects(strip))
             paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
             paste.setEnabled(self.fx_clipboard is not None)
+        self._add_submix_tools(menu, strip)
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
         menu.deleteLater()
+
+    def _group_menu(self, menu, title, current, choose):
+        grp = menu.addMenu(title)
+        for g in range(N_GROUPS + 1):
+            a = (grp.addAction("None") if g == 0 else
+                 grp.addAction(self._swatch(GROUP_COLOR[g].name()), f"Group {g}"))
+            a.setCheckable(True)
+            a.setChecked(current == g)
+            a.triggered.connect(lambda _=False, n=g: choose(n))
 
     @staticmethod
     def _swatch(hexcol):
@@ -1050,6 +1116,151 @@ class MainWindow(QMainWindow):
             self.st["groups"].pop(strip.key, None)
         strip.set_group(group)
         self.schedule_save()
+
+    # ------------------------------------------------------------------ mute and solo groups
+    def choose_mute_group(self, strip, group):
+        """The strip's send into the submix being edited goes into mute group group (0: none)."""
+        set_mute_group(self.st, strip.key, submix_of(self.st, self.st["selected"]), group)
+        self.push_matrix()
+
+    def choose_solo_group(self, strip, group):
+        if group:
+            self.st["solo_groups"][strip.key] = group
+        else:
+            self.st["solo_groups"].pop(strip.key, None)
+        self.refresh_groups()
+        self.schedule_save()
+
+    def solo_group_channels(self, group):
+        """[(kind, channel)] of the strips in the solo group that are shown."""
+        return [(s.kind, c) for key, g in self.st["solo_groups"].items() if g == group
+                for s in [self.strips.get(key)] if s is not None for c in s.channels]
+
+    def toggle_group(self, kind, group):
+        """A mute group button switches its sends' mutes on or off; a solo group button solos
+        its channels, or switches their solo off when they all are soloed, as TotalMix does."""
+        if kind == "mute":
+            grp = self.st["mute_groups"][group - 1]
+            grp["on"] = not grp["on"] and bool(grp["sends"])
+        else:
+            chans = self.solo_group_channels(group)
+            on = not all(self.st["solo"][k][c] for k, c in chans)
+            for k, c in chans:
+                self.st["solo"][k][c] = on
+            self.sync_strips()
+        self.push_matrix()
+
+    def refresh_groups(self):
+        """The group buttons, and the mute buttons of channels a mute group silences in the
+        submix being edited."""
+        sel = submix_of(self.st, self.st["selected"])
+        for (kind, g), b in self.group_btns.items():
+            if kind == "mute":
+                sends = self.st["mute_groups"][g - 1]["sends"]
+                on = self.st["mute_groups"][g - 1]["on"]
+                names = [f"{self.key_name(k)} in {self.label('out', 2 * p, True)}"
+                         for k, p in sends]
+            else:
+                chans = self.solo_group_channels(g)
+                on = bool(chans) and all(self.st["solo"][k][c] for k, c in chans)
+                names = [self.key_name(k) for k, n in self.st["solo_groups"].items() if n == g]
+            b.setChecked(on)
+            b.setEnabled(bool(names))
+            b.setToolTip(f"{kind.title()} group {g}: {', '.join(names)}" if names else
+                         f"{kind.title()} group {g} is empty · add channels from their "
+                         "right-click menu")
+        for s in self.strips.values():
+            if s.kind != "out":
+                g = mute_group(self.st, s.key, sel)
+                s.set_group_muted(g if g and self.st["mute_groups"][g - 1]["on"] else 0)
+
+    def key_name(self, key):
+        """The name of the strip with this key, as it shows (or would)."""
+        kind, c = parse_key(key)
+        return self.label(kind, c, len(strip_channels(self.st, kind, c)) == 2)
+
+    # ------------------------------------------------------------------ Trim, Cue and submixes
+    def set_trim(self, on):
+        self.st["trim"] = on
+        self.select_out(self.st["selected"], by_pair=True)     # the rows say so
+        self.schedule_save()
+
+    def set_cue(self, pair, on):
+        """TotalMix's Cue: one output's submix on Main Out at a time, until its Cue is pressed
+        again or another output's is."""
+        self.cue = pair if on else None
+        self.push_matrix()
+
+    def refresh_cue(self):
+        """Cue ends when its output becomes Main Out or goes out of sight."""
+        main = control_room.control_room(self.st)["main"]
+        if self.cue == main or self.cue not in self.out_pairs():
+            self.cue = None
+        for s in self.row_out.strips:
+            s.cue.blockSignals(True)
+            s.cue.setChecked(s.pair == self.cue)
+            s.cue.setEnabled(s.pair != main)
+            s.cue.blockSignals(False)
+            s.show_flags()                  # a folded strip's edge
+
+    def _add_submix_tools(self, menu, strip):
+        """TotalMix's copy, paste and mirror of an output's submix, and copy, paste and clear
+        of a channel's sends."""
+        menu.addSeparator()
+        if strip.kind == "out":
+            clip = self.mix_clipboard
+            menu.addAction("Copy mix", lambda: self.copy_mix(strip))
+            menu.addAction(f"Paste mix from {clip[0]}" if clip else "Paste mix",
+                           lambda: self.paste_mix(strip)).setEnabled(clip is not None)
+            mirrors = self.st["mirror"].get(strip.key)
+            if mirrors is not None:
+                menu.addAction(f"Remove mirror of {self.label('out', 2 * mirrors, True)}",
+                               lambda: self.change_mix(lambda st: remove_mirror(st, strip.pair),
+                                                       f"{strip.name} has its own mix again"))
+            else:
+                menu.addAction(f"Mirror mix of {clip[0]}" if clip else "Mirror mix",
+                               lambda: self.mirror_mix(strip)).setEnabled(
+                    clip is not None and submix_of(self.st, clip[1]) != strip.pair)
+        else:
+            clip = self.sends_clipboard
+            menu.addAction("Copy sends", lambda: self.copy_sends(strip))
+            menu.addAction(f"Paste sends from {clip[0]}" if clip else "Paste sends",
+                           lambda: self.change_mix(
+                               lambda st: paste_sends(st, strip.kind, strip.channels[0], clip[1]),
+                               f"Pasted the sends of {clip[0]} into {strip.name}")).setEnabled(
+                clip is not None)
+            menu.addAction("Clear sends…", lambda: self.clear_sends(strip))
+
+    def change_mix(self, change, message):
+        """Make a submix tool's change on a copy of the mix and use it as a recall would, so
+        that Restore previous mix can take it back."""
+        work = {**self.st, **extract_mix(self.st)}
+        change(work)
+        self.replace_mix(extract_mix(work), message, self.st["active_slot"])
+
+    def copy_mix(self, strip):
+        self.mix_clipboard = (strip.name, strip.pair, copy_mix(self.st, strip.pair))
+        self.notify(f"Copied the mix of {strip.name}")
+
+    def paste_mix(self, strip):
+        name, _pair, mix = self.mix_clipboard
+        self.change_mix(lambda st: paste_mix(st, strip.pair, mix),
+                        f"Pasted the mix of {name} into {strip.name}")
+
+    def mirror_mix(self, strip):
+        name, pair, _mix = self.mix_clipboard
+        self.change_mix(lambda st: set_mirror(st, strip.pair, pair),
+                        f"{strip.name} mirrors {name}")
+
+    def copy_sends(self, strip):
+        self.sends_clipboard = (strip.name, copy_sends(self.st, strip.kind, strip.channels[0]))
+        self.notify(f"Copied the sends of {strip.name}")
+
+    def clear_sends(self, strip):
+        if ask(self, "Clear sends", f"Switch off every send of {strip.name}, in every submix?",
+               "Clear"):
+            self.change_mix(lambda st: clear_sends(st, strip.kind, strip.channels[0]),
+                            f"Cleared the sends of {strip.name}")
 
     # ------------------------------------------------------------------ presets
     def refresh_slots(self):
@@ -1117,7 +1328,7 @@ class MainWindow(QMainWindow):
     def _add_restore_action(self, menu):
         menu.addSeparator()
         a = menu.addAction("Restore previous mix", self.restore_previous_mix)
-        a.setToolTip("The mix as it was before the last recall, import or reset")
+        a.setToolTip("The mix as it was before the last recall, import, reset, paste or clear")
         a.setEnabled(previous_mix_file(self.dev).exists())
         menu.setToolTipsVisible(True)
 
@@ -1181,8 +1392,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
+        self.refresh_cue()
         gains, out_gains = control_room.apply(self.st, compute_matrix(self.st),
-                                              compute_out_gains(self.st))
+                                              compute_out_gains(self.st), cue=self.cue)
         self.engine.write_matrix(gains, out_gains)
         self.engine.write_device(device_block(self.st, self.dev))
         if self.dev.family == "hdspe":
@@ -1190,6 +1402,7 @@ class MainWindow(QMainWindow):
             self.show_limited()
         self.matrix.update()
         self.control.refresh()
+        self.refresh_groups()
         self.update_arc_leds()
         self.schedule_save()
 
@@ -1455,6 +1668,8 @@ class MainWindow(QMainWindow):
             e.ignore()                  # keep mixing and serving the remote; reopen to show
             self.hide()
             return
+        if self.cue is not None:        # the interface keeps mixing: Main Out's own mix again
+            self.set_cue(self.cue, False)
         super().closeEvent(e)
 
 

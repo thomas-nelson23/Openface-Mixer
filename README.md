@@ -23,6 +23,14 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
+- **Mute and solo groups like TotalMix:** 4 of each, switched with **MUTE 1–4** and **SOLO 1–4**
+  at the end of the Hardware Inputs title. A mute group mutes its channels in the submix they
+  were added in, so no other output is muted by mistake; a solo group solos its channels.
+- **Submix tools like TotalMix:** right-click an output to copy its mix and paste it into
+  another, or to mirror it (the other output then plays the same mix and follows every change).
+  Right-click an input or playback channel to copy, paste or clear its sends to every output.
+  **Trim** makes each fader move all of its channel's sends together, in every submix, and
+  **Cue** on an output plays its mix on Main Out.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
@@ -184,8 +192,13 @@ still need a tester with the hardware.
 | Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
 | Recall a preset | Click a lit slot |
-| Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
+| Take back a recall, import, reset, paste or clear | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
+| Mute and solo groups | Right-click a strip → *Mute group in …* (for the submix being edited) or *Solo group*, then switch the group with **MUTE 1–4** or **SOLO 1–4** |
+| Copy a submix | Right-click an output → *Copy mix*, then right-click another → *Paste mix from …* or *Mirror mix of …*. *Remove mirror* gives the output its own copy again |
+| Copy or clear a channel's sends | Right-click an input or playback strip → *Copy sends*, *Paste sends from …* or *Clear sends…* |
+| Trim | **Trim** at the end of the Hardware Inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off |
+| Cue | **Cue** on an output strip: hear that output's mix on Main Out. Press it again, or another output's, to end it |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
@@ -237,6 +250,7 @@ the output pair set as **Main Out** and are not part of presets:
 | Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level. Pick the pair under *Speaker B* first; it stays silent while Speaker B is off |
 | Talkback | Sends the talkback mic input to the Phones, with the rest of their mix turned down by the amount set under *Talkback dim* |
 | Ext In | Replaces the Main Out mix with the External In input pair |
+| Cue | **Cue** on an output strip plays that output's mix on Main Out, at the Main Out level, until it is pressed again or another output is cued. Dim, Speaker B and Talkback still work. Not saved |
 
 *Phones* takes up to four headphone outputs. Talkback always goes to all of them; tick further
 outputs under *Talkback to* if others should hear it too.
