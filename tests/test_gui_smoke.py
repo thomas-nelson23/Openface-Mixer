@@ -200,7 +200,8 @@ def drive(home):
                     "hw_nodes": 12, "hw_levels": True, "dev_status": 0, "dev_status2": 0}
 
         def read_peaks(self):
-            return array("f", [0.25] * N_SRC), array("f", [0.25] * N_OUT)
+            src, out = array("f", [0.25] * N_SRC), array("f", [0.25] * N_OUT)
+            return src, out, src, out, src, out
 
         def start(self):
             return True, "stub"

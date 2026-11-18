@@ -87,6 +87,7 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 | `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
 | `out_gain[36]` | GUI | output master per channel, 0 when muted |
 | `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
+| `rms_src`, `rms_out`, `over_src`, `over_out` (after `dev_cmd`) | engine raises, GUI zeroes | RMS levels where the device reports them (Digiface, USB Firefaces; HDSPe inputs and playback), and full-scale samples in a row where it counts them (HDSPe) |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
 | `dev_config`, `dev_cmd[4096]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
 

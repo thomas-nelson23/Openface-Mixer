@@ -1434,15 +1434,20 @@ class MainWindow(QMainWindow):
     def update_meters(self):
         now = time.monotonic()
         dt, self._last_meter = now - self._last_meter, now
-        src, out = self.engine.read_peaks()
-        if src is None:
+        meters = self.engine.read_peaks()
+        if meters[0] is None:
             return
-        for s in self.row_in.strips:
-            s.meter.push([src[c] for c in s.channels], dt)
-        for s in self.row_play.strips:
-            s.meter.push([src[N_IN + c] for c in s.channels], dt)
-        for s in self.row_out.strips:
-            s.meter.push([out[c] for c in s.channels], dt)
+        src, out, rms_src, rms_out, over_src, over_out = meters
+        for row, base, peaks, rms, overs in (
+                (self.row_in, 0, src, rms_src, over_src),
+                (self.row_play, N_IN, src, rms_src, over_src),
+                (self.row_out, 0, out, rms_out, over_out)):
+            with_rms = row.kind in self.dev.meter_rms
+            for s in row.strips:
+                chans = [base + c for c in s.channels]
+                s.meter.push([peaks[c] for c in chans], dt,
+                             [rms[c] for c in chans] if with_rms else None,
+                             [overs[c] for c in chans] if self.dev.meter_overs else None)
         self.remote.add_peaks("in", self.channels("in"), src)
         self.remote.add_peaks("play", self.channels("play"), src[N_IN:])
         self.remote.add_peaks("out", self.channels("out"), out)

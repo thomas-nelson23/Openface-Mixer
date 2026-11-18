@@ -25,12 +25,20 @@ QWIDGETSIZE_MAX = 16777215      # Qt's "no maximum size"
 
 
 class Meter(QWidget):
+    """Peak bars with a hold line and clip lights. Where the device reports RMS the bar is lit
+    up to the RMS level and dimmed above it, up to the peak, as TotalMix draws RMS inside the
+    peak. The viewer's meter options (config.load_meter_prefs) are set on the class."""
     FLOOR_DB = -80.0
+    hold_s = 1.5            # how long the hold line stays at a peak
+    show_rms = True         # draw the RMS level where the device reports one
+    over_count = 1          # full-scale samples in a row that light the clip light, where the
+                            # device counts them (push's overs); elsewhere one sample does
     peak_changed = Signal(float)   # max peak (dBFS) since last reset
 
     def __init__(self, channels=1, parent=None):
         super().__init__(parent)
         self.levels = [0.0] * channels
+        self.rms = None                       # RMS levels, while the device reports them
         self.holds = [(0.0, 0.0)] * channels  # (level, time)
         self.clip = [False] * channels
         self.max_peak = 0.0
@@ -54,26 +62,33 @@ class Meter(QWidget):
             self.setFixedWidth(across)
             self.setMinimumHeight(px(60))
 
-    def push(self, peaks, dt):
+    def push(self, peaks, dt, rms=None, overs=None):
+        """peaks (and rms, if the device reports it) are linear levels per channel, overs the
+        full-scale samples in a row the device counted, if it counts them."""
         now = time.monotonic()
         fall = 10 ** (-26.0 * dt / 20.0)  # 26 dB/s release
         floor = 10 ** (self.FLOOR_DB / 20.0)
-        before = (self.levels[:], [h[0] for h in self.holds], self.clip[:])
+        before = (self.levels[:], self.rms, [h[0] for h in self.holds], self.clip[:])
         for i, p in enumerate(peaks):
             v = max(p, self.levels[i] * fall)
             v = v if v >= floor else 0.0    # below the scale: drawn as empty anyway
             self.levels[i] = v
-            if v >= self.holds[i][0] or now - self.holds[i][1] > 1.5:
+            if v >= self.holds[i][0] or now - self.holds[i][1] > self.hold_s:
                 self.holds[i] = (v, now)
-            if p >= 0.999:
+            if p >= 0.999 and (overs is None or self.over_count <= 1
+                               or overs[i] >= self.over_count):
                 self.clip[i] = True
             self.max_peak = max(self.max_peak, p)
+        if rms is not None:
+            old = self.rms or [0.0] * len(peaks)
+            self.rms = [v if v >= floor else 0.0
+                        for v in (max(r, o * fall) for r, o in zip(rms, old))]
         shown = round(lin2db(self.max_peak), 1) if self.max_peak > 1e-4 else None  # floor -80 dB
         if shown != self._shown_peak:
             self._shown_peak = shown
             self.peak_changed.emit(NEG_INF if shown is None else shown)
         # ~80 meters at 30 fps: repaint only the ones whose picture changed (silent ones don't)
-        if (self.levels, [h[0] for h in self.holds], self.clip) != before:
+        if (self.levels, self.rms, [h[0] for h in self.holds], self.clip) != before:
             self.update()
 
     def reset_peak(self):
@@ -109,10 +124,16 @@ class Meter(QWidget):
         grad.setColorAt(0.2, QColor("#7fe9ff"))
         grad.setColorAt(0.45, QColor("#2ad4ff"))
         grad.setColorAt(1.0, QColor("#006b88"))
+        rms = self.rms if self.show_rms else None
         for i, lv in enumerate(self.levels):
             x = 1 + i * (b + 1)
             p.fillRect(QRectF(x, top, b, h), QColor("#01070b"))
             fh = self._frac(lv) * h
+            if rms:                 # lit up to the RMS level, dimmed above it to the peak
+                p.setOpacity(0.4)
+                p.fillRect(QRectF(x, top + h - fh, b, fh), grad)
+                p.setOpacity(1.0)
+                fh = min(fh, self._frac(rms[i]) * h)
             p.fillRect(QRectF(x, top + h - fh, b, fh), grad)
             hf = self._frac(self.holds[i][0]) * h
             if hf > 0:

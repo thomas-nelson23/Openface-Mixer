@@ -34,18 +34,29 @@ class SharedMemoryTest(unittest.TestCase):
         # the offsets tests/test_engine_loop.c takes from the struct itself
         self.assertEqual((engine.OFF_GAIN, engine.OFF_OUT_GAIN, engine.OFF_PEAK_SRC,
                           engine.OFF_PEAK_OUT, engine.OFF_DEV_CONFIG, engine.OFF_DEV_CMD,
-                          engine.SHM_SIZE), (64, 10432, 10576, 10864, 11008, 11012, 27396))
+                          engine.OFF_RMS_SRC, engine.OFF_RMS_OUT, engine.OFF_OVER_SRC,
+                          engine.OFF_OVER_OUT, engine.SHM_SIZE),
+                         (64, 10432, 10576, 10864, 11008, 11012, 27396, 27684, 27828, 28116,
+                          28260))
+        # the meter extras, in this order after the command slots
+        self.assertEqual(re.findall(r"^\tfloat (\w+)\[", LAYOUT, re.M)[-4:],
+                         ["rms_src", "rms_out", "over_src", "over_out"])
 
     def test_reading_the_meters_moves_the_heartbeat(self):
         e = self.segment()
         peak = engine.OFF_PEAK_SRC + 4 * 3
         self.assertTrue(e.attach())
         struct.pack_into("<f", e.m, peak, 0.5)
-        src, _out = e.read_peaks()
-        self.assertEqual(src[3], 0.5)
+        struct.pack_into("<f", e.m, engine.OFF_RMS_SRC + 4 * 3, 0.25)
+        struct.pack_into("<f", e.m, engine.OFF_RMS_OUT + 4 * 35, 0.125)
+        struct.pack_into("<f", e.m, engine.OFF_OVER_OUT + 4 * 35, 3.0)
+        src, out, rms_src, rms_out, over_src, over_out = e.read_peaks()
+        self.assertEqual((src[3], rms_src[3], rms_out[35], over_out[35]), (0.5, 0.25, 0.125, 3))
+        self.assertEqual((len(src), len(out), len(rms_src), len(rms_out), len(over_src),
+                          len(over_out)), (72, 36, 72, 36, 72, 36))
         self.assertEqual(e.header()[engine.HDR_GUI_HEARTBEAT], 1)
-        src, _out = e.read_peaks()
-        self.assertEqual(src[3], 0.0)               # the max-hold was reset
+        src, _out, rms_src, rms_out, _over_src, over_out = e.read_peaks()
+        self.assertEqual((src[3], rms_src[3], rms_out[35], over_out[35]), (0, 0, 0, 0))  # reset
         self.assertEqual(e.header()[engine.HDR_GUI_HEARTBEAT], 2)
         struct.pack_into("<I", e.m, 4 * engine.HDR_GUI_HEARTBEAT, 0xFFFFFFFF)
         e.read_peaks()

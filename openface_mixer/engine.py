@@ -16,7 +16,7 @@ ENGINE_BINARY = "openface-mixer-engine"
 
 # Must match struct ofm_shm in engine/shm_layout.h
 SHM_MAGIC = 0x584D464F
-SHM_VERSION = 7
+SHM_VERSION = 8
 HDR_SIZE = 64
 HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
 HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED, HDR_DEV_STATUS = 7, 8, 9, 10, 11
@@ -27,7 +27,11 @@ OFF_PEAK_SRC = OFF_OUT_GAIN + N_OUT * 4
 OFF_PEAK_OUT = OFF_PEAK_SRC + N_SRC * 4
 OFF_DEV_CONFIG = OFF_PEAK_OUT + N_OUT * 4
 OFF_DEV_CMD = OFF_DEV_CONFIG + 4
-SHM_SIZE = OFF_DEV_CMD + N_DEV_CMD * 4
+OFF_RMS_SRC = OFF_DEV_CMD + N_DEV_CMD * 4      # the meter extras of version 8
+OFF_RMS_OUT = OFF_RMS_SRC + N_SRC * 4
+OFF_OVER_SRC = OFF_RMS_OUT + N_OUT * 4
+OFF_OVER_OUT = OFF_OVER_SRC + N_SRC * 4
+SHM_SIZE = OFF_OVER_OUT + N_OUT * 4
 
 # hw_state values (DFU_STATE_* in engine/digiface_usb.h)
 HW_STATES = ("starting", "no-device", "no-access", "busy", "active", "no-nodes", "error",
@@ -121,17 +125,21 @@ class Engine:
             self.m[OFF_DEV_CONFIG:OFF_DEV_CONFIG + 4] = struct.pack("<I", config)
 
     def read_peaks(self):
-        """Returns (source peaks, output peaks) as linear floats and resets the max-hold. Each
-        call moves the GUI heartbeat: the engine reads the device's meters at the full rate
-        only while someone keeps asking for them, so nothing else has to tell it."""
+        """Returns (source peaks, output peaks, source RMS, output RMS, source overs, output
+        overs) as floats (levels linear, overs the consecutive full-scale samples counted) and
+        resets the max-hold, or six Nones. Each call moves the GUI heartbeat: the engine reads
+        the device's meters at the full rate only while someone keeps asking for them, so
+        nothing else has to tell it."""
         if not self.attach():
-            return None, None
+            return (None,) * 6
         beat, = struct.unpack_from("<I", self.m, 4 * HDR_GUI_HEARTBEAT)
         struct.pack_into("<I", self.m, 4 * HDR_GUI_HEARTBEAT, (beat + 1) & 0xFFFFFFFF)
-        src = array("f", self.m[OFF_PEAK_SRC:OFF_PEAK_SRC + N_SRC * 4])
-        out = array("f", self.m[OFF_PEAK_OUT:OFF_PEAK_OUT + N_OUT * 4])
+        got = tuple(array("f", self.m[off:off + n * 4]) for off, n in (
+            (OFF_PEAK_SRC, N_SRC), (OFF_PEAK_OUT, N_OUT), (OFF_RMS_SRC, N_SRC),
+            (OFF_RMS_OUT, N_OUT), (OFF_OVER_SRC, N_SRC), (OFF_OVER_OUT, N_OUT)))
         self.m[OFF_PEAK_SRC:OFF_PEAK_OUT + N_OUT * 4] = bytes((N_SRC + N_OUT) * 4)
-        return src, out
+        self.m[OFF_RMS_SRC:SHM_SIZE] = bytes(SHM_SIZE - OFF_RMS_SRC)
+        return got
 
     # ---- process management: prefer the systemd user service, fall back to spawning
     @staticmethod

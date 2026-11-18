@@ -22,7 +22,7 @@
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
 #define OFM_N_DEV_CMD 4096                  /* device setting command slots (802/UCX II effects) */
 
-#define OFM_SHM_VERSION 7
+#define OFM_SHM_VERSION 8
 
 /* Header is exactly 64 bytes; all fields but gui_heartbeat are written by the engine. */
 struct ofm_shm {
@@ -62,6 +62,15 @@ struct ofm_shm {
 	 * its three configuration quadlets from dev_cmd[0..2], sent while dev_config is non-zero. */
 	uint32_t dev_config;
 	uint32_t dev_cmd[OFM_N_DEV_CMD];
+
+	/* Meter extras (version 8), raised by the engine and zeroed by the GUI with the peaks.
+	 * RMS level, linear: a full-scale sine reads 0.707; 0 where the device reports none.
+	 * Overs: the most consecutive full-scale samples the device counted (HDSPe), 0 where it
+	 * counts none. */
+	float rms_src[OFM_N_SRC];
+	float rms_out[OFM_N_OUT];
+	float over_src[OFM_N_SRC];
+	float over_out[OFM_N_OUT];
 };
 
 #endif
