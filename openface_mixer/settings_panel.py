@@ -11,9 +11,10 @@ from PySide6.QtWidgets import (
 )
 
 from . import hdspe, theme, updater
-from .config import UI_SCALES, load_update_prefs, save_ui
+from .config import PEAK_HOLDS, UI_SCALES, load_meter_prefs, load_update_prefs, save_ui
 from .devices import DEVICES, connected, group_title
 from .hardware import Hardware, set_card_profile
+from .model import N_SLOTS
 from .theme import SANS, Section, caption_html, font, key_label, px
 
 # Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
@@ -303,6 +304,9 @@ class SettingsPanel(QWidget):
     card_chosen = Signal()           # another card of the model (HDSPe): the engine restarts
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
+    meters_changed = Signal()        # a meter option changed (meter_prefs, saved in ui.json)
+    layout_stored = Signal(int)      # store the channel layout shown in this slot
+    layout_recalled = Signal(int)    # show the channels as this slot has them
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
@@ -419,25 +423,118 @@ class SettingsPanel(QWidget):
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
+        self.show_boxes = {}
         for i, g in enumerate(self.dev.channel_groups()):
-            cb = QCheckBox(group_title(g))
+            cb = self.show_boxes[g] = QCheckBox(group_title(g))
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
         dl.addLayout(show, 3, 0, 1, 2)
+        # TotalMix's layout presets: which channels and rows are shown, never the mix
+        dl.addWidget(key_label("Layouts"), 4, 0)
+        slots = QHBoxLayout()
+        slots.setSpacing(px(3))
+        self.layout_btns = []
+        for i in range(N_SLOTS):
+            b = QPushButton(str(i + 1))
+            b.setObjectName("slot")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, n=i: self._layout_clicked(n))
+            slots.addWidget(b)
+            self.layout_btns.append(b)
+        slots.addStretch()
+        dl.addLayout(slots, 5, 0, 1, 2)
+        self.layout_store = QPushButton("Store")
+        self.layout_store.setObjectName("store")
+        self.layout_store.setCheckable(True)
+        self.layout_store.setToolTip("Click, then click a number to save which channels and rows "
+                                     "are shown. An empty number saves with one click.")
+        dl.addWidget(self.layout_store, 4, 1, Qt.AlignRight)
+        self.refresh_layouts()
+        # meter options, for this computer (ui.json), as in TotalMix's preferences
+        self.meter_prefs = prefs = load_meter_prefs()
+        row = 6
+        self.rms_box = None         # a device that reports no RMS: peak only, nothing to choose
+        if self.dev.meter_rms:
+            self.rms_box = QCheckBox("Show RMS level")
+            self.rms_box.setChecked(prefs["meter_rms"])
+            self.rms_box.setToolTip("Light each meter up to the average (RMS) level and dim it "
+                                    "above, up to the peak.")
+            self.rms_box.toggled.connect(lambda on: self._set_meters(meter_rms=on))
+            dl.addWidget(self.rms_box, row, 0, 1, 2)
+            row += 1
+        self.hold_combo = self._meter_combo(
+            dl, row, "Peak hold", "How long the line above a meter stays at a peak", PEAK_HOLDS,
+            prefs["peak_hold"], lambda v: f"{v:g} s", "peak_hold")
+        self.over_combo = None      # a device that reports only a level: one sample clips
+        if self.dev.meter_overs:
+            self.over_combo = self._meter_combo(
+                dl, row + 1, "Clip after", "Full-scale samples in a row that light a meter's "
+                "clip light", range(1, 11), prefs["over_samples"],
+                lambda v: "1 sample" if v == 1 else f"{v} samples", "over_samples")
         lay.addWidget(disp)
 
+    def _meter_combo(self, grid, row, label, tip, values, current, text, key):
+        grid.addWidget(key_label(label), row, 0)
+        combo = QComboBox()
+        for v in values if current in values else sorted((*values, current)):
+            combo.addItem(text(v), v)
+        combo.setCurrentIndex(combo.findData(current))
+        combo.setToolTip(tip)
+        combo.activated.connect(lambda i: self._set_meters(**{key: combo.itemData(i)}))
+        grid.addWidget(combo, row, 1)
+        return combo
+
+    def _set_meters(self, **change):
+        self.meter_prefs.update(change)
+        try:
+            save_ui(**change)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.meters_changed.emit()
+
+    def _layout_clicked(self, i):
+        if self.layout_store.isChecked() or not self.st["layouts"][i]:
+            self.layout_store.setChecked(False)
+            self.layout_stored.emit(i)
+        else:
+            self.layout_recalled.emit(i)
+
+    def refresh_layouts(self):
+        for i, b in enumerate(self.layout_btns):
+            slot = self.st["layouts"][i]
+            b.setProperty("filled", slot is not None)
+            b.setToolTip(f"{i + 1}: {slot['name']}\nClick to show the channels as stored" if slot
+                         else f"{i + 1}: empty, click to store the channels shown now")
+            b.style().unpolish(b)
+            b.style().polish(b)
+
+    def show_view(self):
+        """Show the SHOW options and custom names as st has them (after a layout recall)."""
+        for box, on in [(self.names_box, self.st["custom_names"])] + [
+                (cb, g not in self.st["hidden"]) for g, cb in self.show_boxes.items()]:
+            box.blockSignals(True)
+            box.setChecked(on)
+            box.blockSignals(False)
+
     def _build_mix(self, lay):
-        """Export / import a mix as a file, or start over (the buttons are wired by the main
-        window)."""
+        """Export / import a mix as a file, save / load the workspace, or start over (the
+        buttons are wired by the main window)."""
         box = Section("MIX")
         ml = QVBoxLayout(box)
         self.export_btn = QPushButton("Export mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
+        # TotalMix's workspace: everything for this interface in one file, to back up or move
+        self.save_ws_btn = QPushButton("Save workspace…")
+        self.save_ws_btn.setToolTip("Save the mix, names, colours, presets, layouts and settings "
+                                    "for this interface to one file")
+        self.load_ws_btn = QPushButton("Load workspace…")
+        self.load_ws_btn.setToolTip("Replace all of them with a saved workspace")
         self.reset_btn = QPushButton("Reset mix to default…")
         self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
-        for b in (self.export_btn, self.import_btn, self.reset_btn):
+        for b in (self.export_btn, self.import_btn, self.save_ws_btn, self.load_ws_btn,
+                  self.reset_btn):
             ml.addWidget(b)
         lay.addWidget(box)
 

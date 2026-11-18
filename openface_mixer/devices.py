@@ -34,6 +34,8 @@ class Device:
     max_routes = None        # hardware mixer crosspoint limit, or None (full matrix)
     alsa_card = None         # ALSA card short name holding its settings controls (Hardware)
     sink_channels = "1/2"    # playback channels the engine's playback sink feeds (PCM 1/2)
+    meter_rms = ()           # kinds ("in", "play", "out") whose RMS level the engine reports
+    meter_overs = False      # the engine reports how many full-scale samples came in a row
 
     @property
     def shm_name(self):
@@ -114,6 +116,7 @@ class Digiface(Device):
     bus = "USB"
     phones_pairs = (16,)
     max_routes = 2048
+    meter_rms = ("in", "play", "out")
     alsa_card = DIGIFACE_CARD
 
     @staticmethod
@@ -208,6 +211,7 @@ class ClassCompliantUSB:
     its second USB MIDI port (engine/fireface_usb.c)."""
     bus = "USB"
     usb_card = ""
+    meter_rms = ("in", "play", "out")    # the level packets carry it (oscmix, "Protocol")
 
     def present(self):
         card = Hardware.find_card(self.usb_card)
@@ -280,6 +284,8 @@ class HDSPeCard(Device):
     """An HDSPe PCIe card (hdspe.MODELS) under snd-hdspm or snd-hdspe."""
     family = "hdspe"
     bus = "PCIe"
+    meter_rms = ("in", "play")     # hdspmixer shows no RMS for the outputs of these cards
+    meter_overs = True
 
     def __init__(self, model, name):
         self.model = model

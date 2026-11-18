@@ -30,10 +30,26 @@ ACTIONS = ("dim", "mono", "speaker_b", "talkback", "ext_in", "phones", "phones2"
 # With one Phones pair in the control room, both phones keys select it.
 DEFAULT_KEYS = [f"snapshot:{n}" for n in range(1, 9)] + [
     "mono", "phones", "phones2", "ext_in", "talkback", "speaker_b", "dim"]
+# what the settings call them
+ACTION_NAMES = {"dim": "Dim", "mono": "Mono", "speaker_b": "Speaker B", "talkback": "Talkback",
+                "ext_in": "External In", "phones": "Phones 1 volume",
+                "phones2": "Phones 2 volume", "main": "Main Out volume",
+                **{f"snapshot:{n}": f"Preset {n}" for n in range(1, 9)}}
+# the keys, by what is printed on them (their default action)
+KEY_NAMES = [f"Key {n}" for n in range(1, 9)] + [
+    "Mono", "Phones 1", "Phones 2", "Ext In", "Talkback", "Speaker B", "Dim"]
 FIRST_NOTE = 0x36
 N_KEYS = 15
 ENCODER_CC = 16
 TALKBACK_HOLD_S = 0.4     # held longer than this, Talkback is momentary; a tap latches it
+
+
+def assignment(keys):
+    """The action of every key from a saved assignment (ui.json's "arc_keys"): a key whose entry
+    is missing or not an action has its default one."""
+    keys = keys if isinstance(keys, list) else []
+    return [k if isinstance(k, str) and k in ACTIONS else default
+            for k, default in zip(keys + [None] * N_KEYS, DEFAULT_KEYS)]
 
 
 def find_port(cards_text=None):

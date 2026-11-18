@@ -232,6 +232,8 @@ int libusb_bulk_transfer(libusb_device_handle *h, unsigned char ep, unsigned cha
 		memset(data, 0, (size_t)len);
 		for (int c = 0; c < DFU_METER_CHANNELS; c += 2)   /* peak: (type + 1) / 8 on ch 1, 3, .. */
 			put64(data, 64 + c / 2, (uint64_t)(dev.meter_type + 1) << 24);
+		/* RMS (type + 1) / 16 on ch 2: mean square * 2^55 */
+		put64(data, 1, (uint64_t)(dev.meter_type + 1) * (uint64_t)(dev.meter_type + 1) << 47);
 		for (int w = 100; w < 128; w++)
 			put64(data, w, 0xFFFFFFF0FFFFFFF0ull | (uint64_t)dev.meter_type << 32 |
 				       (uint64_t)dev.meter_type);
@@ -420,6 +422,11 @@ static void check_sync(const struct ofm_backend *be, void *h)
 	check_close("playback peak", s.peak_src[OFM_N_IN], 0.25f);
 	check_close("output peak", s.peak_out[32], 0.375f);
 	expect("the other channel of the pair", s.peak_out[33] == 0.0f, 1);
+	check_close("input RMS", s.rms_src[1], 0.0625f);
+	check_close("playback RMS", s.rms_src[OFM_N_IN + 1], 0.125f);
+	check_close("output RMS", s.rms_out[1], 0.1875f);
+	expect("no RMS where there is no signal", s.rms_src[0] == 0.0f && s.rms_out[32] == 0.0f, 1);
+	expect("no overs counted", s.over_src[0] == 0.0f && s.over_out[32] == 0.0f, 1);
 
 	/* the driver re-initialised the device (replug, resume): the status says the mixer is off,
 	 * and the full resend is the first sync over again */

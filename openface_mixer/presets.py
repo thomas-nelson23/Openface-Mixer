@@ -1,12 +1,20 @@
-"""Preset snapshots, like TotalMix's 8 mix snapshots, plus export/import of single mixes."""
+"""Preset snapshots, like TotalMix's 8 mix snapshots, plus export/import of single mixes and
+of workspaces (everything for one interface)."""
 import json
 from pathlib import Path
 
-from .config import BAD_FILE, atomic_write
-from .model import N_SLOTS, checked_mix, convert_pan_law, is_index
+from . import arc
+from .config import BAD_FILE, atomic_write, load_meter_prefs, ready_state
+from .devices import DEVICES
+from .model import N_SLOTS, checked_mix, convert_pan_law, is_index, upgrade_state
 
 FILE_FORMAT = "openface-mixer-mix"
 VERSION = 2     # of presets.json and of mix files. 2: constant-power pan (convert_pan_law)
+WORKSPACE_FORMAT = "openface-mixer-workspace"
+WORKSPACE_VERSION = 1   # the parts inside have their own (state, presets)
+# never in a workspace: solo, which never survives a restart either, and the OSC remote's
+# settings, which belong to this computer's network (a file must not open a port)
+NOT_IN_WORKSPACE = ("solo", "remote")
 
 
 def read_mix(mix, data):
@@ -16,6 +24,27 @@ def read_mix(mix, data):
     mix."""
     mix = checked_mix(mix)
     return convert_pan_law(mix) if is_index(data.get("version", 1), VERSION) else mix
+
+
+def read_slots(data):
+    """(slots, damaged) from a preset file as parsed: N_SLOTS slots, each None or a checked
+    {"name", "mix"}. damaged is True if data isn't a preset file or a slot had to be left
+    empty because its mix is damaged."""
+    slots = [None] * N_SLOTS
+    found = data.get("slots") if isinstance(data, dict) else None
+    damaged = not isinstance(found, list)
+    for i, s in enumerate(() if damaged else found[:N_SLOTS]):
+        if s is None:
+            continue
+        try:
+            mix = read_mix(s.get("mix") if isinstance(s, dict) else None, data)
+        except ValueError:
+            damaged = True
+            continue
+        name = s.get("name")
+        slots[i] = {"name": name if name and isinstance(name, str) else f"Mix {i + 1}",
+                    "mix": mix}
+    return slots, damaged
 
 
 class PresetBank:
@@ -38,19 +67,7 @@ class PresetBank:
             return
         except BAD_FILE:
             data = None
-        slots = data.get("slots") if isinstance(data, dict) else None
-        self.damaged = not isinstance(slots, list)
-        for i, s in enumerate(() if self.damaged else slots[:N_SLOTS]):
-            if s is None:
-                continue
-            try:
-                mix = read_mix(s.get("mix") if isinstance(s, dict) else None, data)
-            except ValueError:
-                self.damaged = True
-                continue
-            name = s.get("name")
-            self.slots[i] = {"name": name if name and isinstance(name, str) else f"Mix {i + 1}",
-                             "mix": mix}
+        self.slots, self.damaged = read_slots(data)
 
     def save(self):
         atomic_write(self.path, json.dumps({"version": VERSION, "slots": self.slots}, indent=1),
@@ -94,3 +111,43 @@ def import_mix(path):
         raise ValueError("mix file contains no mixer settings")
     name = data.get("name")
     return name if name and isinstance(name, str) else Path(path).stem, mix
+
+
+def export_workspace(path, dev, st, slots, ui):
+    """Everything for one interface in one file, as TotalMix's workspace: the state (mix,
+    names, colours, icons, layouts, control room, device and effect settings), the preset
+    slots and the viewer's options from ui.json (ui: load_meter_prefs and arc_keys)."""
+    atomic_write(Path(path), json.dumps({
+        "format": WORKSPACE_FORMAT, "version": WORKSPACE_VERSION, "device": dev.key,
+        "state": {k: v for k, v in st.items() if k not in NOT_IN_WORKSPACE},
+        "presets": {"version": VERSION, "slots": slots}, "ui": ui}, indent=1))
+
+
+def import_workspace(path, dev):
+    """(state, preset slots, ui options) from a workspace file for dev, each checked as the
+    files they come from are (upgrade_state, ready_state, read_slots, load_meter_prefs,
+    arc.assignment), and converted from older versions as those are. Raises ValueError, with
+    a sentence to show, for a file that is not a workspace, is for another interface or has a
+    damaged mix or preset; OSError for one that can't be read. Nothing is changed. The state
+    has no solo and no OSC remote settings (NOT_IN_WORKSPACE)."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (ValueError, RecursionError):
+        data = None
+    if not isinstance(data, dict) or data.get("format") != WORKSPACE_FORMAT:
+        raise ValueError("This is not an Openface Mixer workspace.")
+    key = data.get("device")
+    if key != dev.key:
+        other = DEVICES.get(key) if isinstance(key, str) else None
+        other = f"the {other.name}" if other else "another interface"
+        raise ValueError(f"This workspace is for {other}, not the {dev.name}.")
+    try:
+        st = ready_state(upgrade_state(data.get("state"), dev.phones_pair(1), strict=True), dev)
+    except ValueError:
+        raise ValueError("The mix in this workspace is damaged.") from None
+    st.pop("remote", None)
+    slots, damaged = read_slots(data.get("presets"))
+    if damaged:
+        raise ValueError("The presets in this workspace are damaged.")
+    ui = data.get("ui") if isinstance(data.get("ui"), dict) else {}
+    return st, slots, {**load_meter_prefs(ui), "arc_keys": arc.assignment(ui.get("arc_keys"))}

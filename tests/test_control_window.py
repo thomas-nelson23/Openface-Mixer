@@ -197,6 +197,61 @@ class ControlRoomTest(WindowCase):
             self.w.arc_key(second, True)
             self.assertEqual((self.cr["encoder"], lit()), ("main", [False, False]))
 
+    def test_any_arc_key_does_any_action_and_its_light_follows(self):
+        import json
+        from unittest import mock
+        from openface_mixer import arc, config
+        panel, w = self.panel, self.w
+        lights = []
+        self.addCleanup(panel._arc_assign, None)
+
+        def assign(key, action):
+            combo = panel.arc_combos[key]
+            combo.setCurrentIndex(combo.findData(action))
+            combo.activated.emit(combo.currentIndex())
+
+        panel.arc_btn.click()
+        self.assertTrue(all(row.isVisible() for row in panel.arc_rows))
+        self.assertEqual([c.currentData() for c in panel.arc_combos], arc.DEFAULT_KEYS)
+        with mock.patch.object(w.arc, "set_leds", lights.append):
+            assign(0, "dim")                                # Key 1: Dim instead of preset 1
+            self.assertEqual(w.arc_keys[0], "dim")
+            self.assertEqual(json.loads(config.UI_FILE.read_text())["arc_keys"][:2],
+                             ["dim", "snapshot:2"])
+            self.assertFalse(lights[-1][0])
+            w.arc_key(0, True)
+            self.assertTrue(self.cr["dim"])
+            self.assertTrue(lights[-1][0] and lights[-1][14])   # and the Dim key's own light
+            w.arc_key(0, True)
+            self.assertFalse(self.cr["dim"] or lights[-1][0])
+            # the Mono key takes the encoder back to Main Out, and stays lit while it has it
+            assign(8, "main")
+            w.arc_key(9, True)                              # Phones 1
+            self.assertEqual(self.cr["encoder"], "phones")
+            self.assertEqual(lights[-1][8:10], [False, True])
+            for _ in range(2):
+                w.arc_key(8, True)
+                self.assertEqual((self.cr["encoder"], self.cr["main"]), ("main", 0))
+                self.assertEqual(lights[-1][8:10], [True, False])
+            self.assertFalse(self.cr["mono"])
+            # the second Phones on another key, with two Phones pairs
+            self.cr["phones"] = [3, 16]
+            assign(14, "phones2")
+            w.arc_key(14, True)
+            self.assertEqual(control_room.encoder_pair(self.st), 16)
+            self.assertTrue(lights[-1][14] and lights[-1][10])
+            w.arc_key(14, True)
+            self.assertEqual(self.cr["encoder"], "main")
+            # back to the printed layout, for this computer
+            panel.arc_rows[-1].click()
+            self.assertEqual(w.arc_keys, arc.DEFAULT_KEYS)
+            self.assertEqual([c.currentData() for c in panel.arc_combos], arc.DEFAULT_KEYS)
+            self.assertEqual(json.loads(config.UI_FILE.read_text())["arc_keys"],
+                             arc.DEFAULT_KEYS)
+        panel.arc_btn.click()
+        self.assertFalse(any(row.isVisible() for row in panel.arc_rows))
+        self.settle()                   # the settings laid out again without the list
+
 
 if __name__ == "__main__":
     unittest.main()

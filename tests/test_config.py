@@ -278,6 +278,22 @@ class DeviceStateTest(unittest.TestCase):
                     (kind, c, o) for kind in ("in", "play") for c in dev.all_channels(kind)
                     for o in outs})
 
+    def test_layouts_are_kept_per_interface(self):
+        for key, dev in DEVICES.items():
+            with self.subTest(key):
+                st, _problem = config.load_state(dev)
+                groups = dev.channel_groups()
+                st.update(hidden=groups[:1], hidden_strips=["in:1"], folded=["out"],
+                          custom_names=False)
+                st["layouts"][3] = m.extract_layout(st, f"{key} small")
+                config.save_state(st, dev)
+                loaded, problem = config.load_state(dev)
+                self.assertIsNone(problem)
+                self.assertEqual(loaded["layouts"], st["layouts"])
+                self.assertEqual(loaded["layouts"][3]["hidden"], groups[:1])
+        self.assertEqual(config.load_state(DEVICES["ff800"])[0]["layouts"][3]["name"],
+                         "ff800 small")          # each its own: not the last one saved
+
     def test_the_aio_extension_boards_keep_their_routing(self):
         """Analog 3-6 (AI4S/AO4S, hardware channels 2-5) have no strips yet, but the engine
         mixes them: the default playback 3-6 to outputs 3-6 must stay, or a card with an AO4S
@@ -388,6 +404,28 @@ class UiScaleTest(unittest.TestCase):
             self.assertEqual(config.load_update_prefs(), (True, False), damaged)
         config.UI_FILE.write_bytes(b"\xff\xfe")
         self.assertEqual(config.load_update_prefs(), (True, False))
+
+    def test_meter_options(self):
+        default = {"meter_rms": True, "peak_hold": 1.5, "over_samples": 1}
+        self.assertEqual(config.load_meter_prefs(), default)
+        config.save_ui_scale(1.25)
+        config.save_ui(meter_rms=False, peak_hold=3.0, over_samples=4)
+        self.assertEqual(config.load_meter_prefs(),
+                         {"meter_rms": False, "peak_hold": 3.0, "over_samples": 4})
+        self.assertEqual(config.load_ui_scale(), 1.25)
+        # TotalMix's ranges: 0.1 to 9.9 s, 1 to 10 samples
+        self.assertEqual(config.load_meter_prefs({"peak_hold": 20, "over_samples": 10}),
+                         {**default, "peak_hold": 9.9, "over_samples": 10})
+        self.assertEqual(config.load_meter_prefs({"peak_hold": 0})["peak_hold"], 0.1)
+        # a damaged or hand-edited file: anything unclear is the default
+        for damaged in ("{not json", "[]", "null", '{"peak_hold": null, "over_samples": null}',
+                        '{"meter_rms": 0, "peak_hold": "2", "over_samples": "3"}',
+                        '{"peak_hold": NaN, "over_samples": 11}',
+                        '{"peak_hold": 1e999, "over_samples": 0}',
+                        '{"peak_hold": true, "over_samples": true}',
+                        '{"over_samples": 2.5, "peak_hold": [1]}'):
+            config.UI_FILE.write_text(damaged)
+            self.assertEqual(config.load_meter_prefs(), default, damaged)
 
 
 if __name__ == "__main__":

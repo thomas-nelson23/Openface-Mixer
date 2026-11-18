@@ -15,7 +15,11 @@
  *                                   open in two different processes.
  *   hwdep SNDRV_HDSPM_IOCTL_GET_PEAK_RMS    peaks per input, playback and output channel:
  *                                   bits 8-30 are the level, full scale 0x7fffff; bits 0-3
- *                                   count overs (as hdspmixer reads them).
+ *                                   count consecutive full-scale samples (the kernel's
+ *                                   "full-scale counters", hdspmixer's "FS samples for
+ *                                   OVR"); then RMS words per input and playback channel
+ *                                   (hdspmixer shows none for the outputs), mean square
+ *                                   times about 2^63.
  *   hwdep SNDRV_HDSPM_IOCTL_GET_CONFIG      system sample rate and clock state.
  *
  * snd-hdspm (ALSA driver name "HDSPM") only runs the original cards properly. Cards from 2022
@@ -41,6 +45,7 @@
 #define HDSPE_GAIN_UNITY   32768
 #define HDSPE_GAIN_MAX     65535
 #define HDSPE_PEAK_FULL    0x7fffff
+#define HDSPE_OVERS        0xf     /* a peak word's count of consecutive full-scale samples */
 #define HDSPE_VENDOR_RME   0x1d18  /* PCI vendor of the 2022-and-later cards (older: Xilinx) */
 
 /* One card of the family. */
@@ -55,6 +60,8 @@ uint16_t hdspe_encode_gain(float lin);
 int hdspe_mixer_source(int k);
 /* Linear level of one peak word. */
 float hdspe_peak(uint32_t word);
+/* Linear RMS level of one RMS word (inputs and playback; hdspmixer shows none for outputs). */
+float hdspe_rms(uint64_t word);
 /* True for the model's ALSA card under either driver (driver and short name from
  * SNDRV_CTL_IOCTL_CARD_INFO). */
 bool hdspe_card_match(const struct hdspe_model *m, const char *driver, const char *name);
