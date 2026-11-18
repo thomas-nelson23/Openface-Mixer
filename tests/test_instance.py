@@ -316,6 +316,10 @@ class DeviceListTest(WindowCase):
         self.assertEqual([t.replace(" (connected)", "") for t in shown], names)  # same order
         self.assertEqual([box.itemText(i) for i in range(box.count())], names)
         self.assertEqual(box.currentText(), "RME Digiface USB")
+        with mock.patch.object(self.w, "switch_device") as switch:
+            self.wheel(box, 0, -120)                # scrolling the settings never switches
+        switch.assert_not_called()
+        self.assertEqual(box.currentData(), "digiface")
 
 
 class RestartTest(WindowCase):

@@ -252,10 +252,15 @@ class TrayWindowTest(WindowCase):
         self.assertFalse(w.tray.visible())
 
     def test_setting_in_the_sidebar(self):
+        from PySide6.QtWidgets import QScrollArea
         w = self.w
         box = w.remote_panel.tray_mode
         self.assertEqual([box.itemText(i) for i in range(box.count())],
                          ["In background mode", "Always", "Never"])
+        self.assertEqual(box.currentData(), "background")
+        w.sidebar.findChild(QScrollArea).ensureWidgetVisible(box)
+        self.settle()
+        self.wheel(box, 0, -120)                    # scrolling the settings past it
         self.assertEqual(box.currentData(), "background")
         box.setCurrentIndex(1)
         box.activated.emit(1)

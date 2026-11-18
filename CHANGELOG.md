@@ -75,6 +75,7 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Network remote: a *Send to* host given by name no longer freezes the window at startup when the name server is slow.
 - A mixer started at login without a window stays in background mode after an update restart, a new UI scale or a device switch, so closing the window still only hides it.
 - Two mixers started at login for two interfaces no longer stop each other from starting when they save at the same moment.
+- Scrolling the settings with the mouse over *Device* no longer switches to another interface.
 
 ### Not yet tried on hardware
 

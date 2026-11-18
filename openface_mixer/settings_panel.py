@@ -259,7 +259,11 @@ class Sidebar(QFrame):
 
 
 class WideList(QComboBox):
-    """A box whose open list is as wide as its longest entry, however narrow the box is."""
+    """A box whose open list is as wide as its longest entry, however narrow the box is. The
+    wheel scrolls the settings past it and never changes it (as ChannelBox)."""
+
+    def wheelEvent(self, e):
+        e.ignore()
 
     def showPopup(self):
         # the entries' own width, plus the tick column and the list's padding and frame
