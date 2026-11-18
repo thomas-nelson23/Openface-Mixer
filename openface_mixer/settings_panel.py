@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import hdspe, theme, updater
-from .config import UI_SCALES, load_update_prefs, save_ui
+from .config import PEAK_HOLDS, UI_SCALES, load_meter_prefs, load_update_prefs, save_ui
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 from .theme import SANS, Section, caption_html, font, key_label, px
@@ -268,6 +268,7 @@ class SettingsPanel(QWidget):
     card_chosen = Signal()           # another card of the model (HDSPe): the engine restarts
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
+    meters_changed = Signal()        # a meter option changed (meter_prefs, saved in ui.json)
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
     update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
@@ -390,7 +391,46 @@ class SettingsPanel(QWidget):
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
         dl.addLayout(show, 3, 0, 1, 2)
+        # meter options, for this computer (ui.json), as in TotalMix's preferences
+        self.meter_prefs = prefs = load_meter_prefs()
+        row = 4
+        self.rms_box = QCheckBox("Show RMS level")
+        self.rms_box.setChecked(prefs["meter_rms"])
+        self.rms_box.setToolTip("Light each meter up to the average (RMS) level and dim it "
+                                "above, up to the peak.")
+        self.rms_box.toggled.connect(lambda on: self._set_meters(meter_rms=on))
+        if self.dev.meter_rms:
+            dl.addWidget(self.rms_box, row, 0, 1, 2)
+            row += 1
+        self.hold_combo = self._meter_combo(
+            dl, row, "Peak hold", "How long the line above a meter stays at a peak", PEAK_HOLDS,
+            prefs["peak_hold"], lambda v: f"{v:g} s", "peak_hold")
+        self.over_combo = None      # a device that reports only a level: one sample clips
+        if self.dev.meter_overs:
+            self.over_combo = self._meter_combo(
+                dl, row + 1, "Clip after", "Full-scale samples in a row that light a meter's "
+                "clip light", range(1, 11), prefs["over_samples"],
+                lambda v: "1 sample" if v == 1 else f"{v} samples", "over_samples")
         lay.addWidget(disp)
+
+    def _meter_combo(self, grid, row, label, tip, values, current, text, key):
+        grid.addWidget(key_label(label), row, 0)
+        combo = QComboBox()
+        for v in values if current in values else sorted((*values, current)):
+            combo.addItem(text(v), v)
+        combo.setCurrentIndex(combo.findData(current))
+        combo.setToolTip(tip)
+        combo.activated.connect(lambda i: self._set_meters(**{key: combo.itemData(i)}))
+        grid.addWidget(combo, row, 1)
+        return combo
+
+    def _set_meters(self, **change):
+        self.meter_prefs.update(change)
+        try:
+            save_ui(**change)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.meters_changed.emit()
 
     def _build_mix(self, lay):
         """Export / import a mix as a file, or start over (the buttons are wired by the main

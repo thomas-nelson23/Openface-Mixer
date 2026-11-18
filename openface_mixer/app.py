@@ -41,7 +41,7 @@ from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, WARN, apply_theme,
     compact_boxes, icon_pixmap, px,
 )
-from .widgets import Row, Strip
+from .widgets import Meter, Row, Strip
 
 
 def reason(e):
@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self.settings.card_chosen.connect(self.restart_engine)
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
+        self.settings.meters_changed.connect(self.apply_meter_prefs)
         self.settings.export_btn.clicked.connect(self.export_mix)
         self.settings.import_btn.clicked.connect(self.import_mix)
         self.settings.reset_btn.clicked.connect(self.reset_mix)
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
         self._build_shortcuts()
 
+        self.apply_meter_prefs()
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
         self.rebuild_all()
@@ -1430,6 +1432,14 @@ class MainWindow(QMainWindow):
     def poll_profile(self):
         if self.dev.key == "digiface":
             self.settings.update_profile(*pw_digiface_card())
+
+    def apply_meter_prefs(self):
+        prefs = self.settings.meter_prefs
+        Meter.show_rms = prefs["meter_rms"]
+        Meter.hold_s = prefs["peak_hold"]
+        Meter.over_count = prefs["over_samples"]
+        for s in self.strips.values():
+            s.meter.update()
 
     def update_meters(self):
         now = time.monotonic()

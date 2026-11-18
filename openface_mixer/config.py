@@ -13,7 +13,9 @@ from pathlib import Path
 from . import APP_ID
 from . import control_room
 from .devices import DEFAULT, DEVICES
-from .model import clear_sends_outside, compute_matrix, compute_out_gains, upgrade_state
+from .model import (
+    clear_sends_outside, compute_matrix, compute_out_gains, is_index, is_num, upgrade_state,
+)
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_ID
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
@@ -29,6 +31,8 @@ BAD_FILE = (OSError, ValueError, RecursionError)
 UI_SCALE_DEFAULT = 1.0
 UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
 UI_SCALES = (0.8, 1.0, 1.25, 1.5, 1.75, 2.0)
+PEAK_HOLD_DEFAULT = 1.5
+PEAK_HOLDS = (0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 9.9)   # seconds, offered in the settings
 
 
 def launcher():
@@ -183,6 +187,20 @@ def load_update_prefs():
     with save_ui(update_check=..., update_channel="releases" or "latest")."""
     ui = load_ui()
     return ui.get("update_check") is not False, ui.get("update_channel") == "latest"
+
+
+def load_meter_prefs(ui=None):
+    """The viewer's meter options from ui.json (or the dict ui): RMS shown, the peak hold
+    time in seconds (0.1 to 9.9, as in TotalMix) and the full-scale samples in a row that
+    count as an over (1 to 10). Saved with save_ui(meter_rms=..., peak_hold=...,
+    over_samples=...); a missing or damaged value is its default."""
+    ui = load_ui() if ui is None else ui
+    hold, over = ui.get("peak_hold"), ui.get("over_samples")
+    return {
+        "meter_rms": ui.get("meter_rms") is not False,
+        "peak_hold": round(min(9.9, max(0.1, hold)), 1) if is_num(hold) else PEAK_HOLD_DEFAULT,
+        "over_samples": over if is_index(over, 11) and over else 1,
+    }
 
 
 def load_ui_scale():

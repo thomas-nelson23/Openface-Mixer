@@ -375,6 +375,28 @@ class UiScaleTest(unittest.TestCase):
         config.UI_FILE.write_bytes(b"\xff\xfe")
         self.assertEqual(config.load_update_prefs(), (True, False))
 
+    def test_meter_options(self):
+        default = {"meter_rms": True, "peak_hold": 1.5, "over_samples": 1}
+        self.assertEqual(config.load_meter_prefs(), default)
+        config.save_ui_scale(1.25)
+        config.save_ui(meter_rms=False, peak_hold=3.0, over_samples=4)
+        self.assertEqual(config.load_meter_prefs(),
+                         {"meter_rms": False, "peak_hold": 3.0, "over_samples": 4})
+        self.assertEqual(config.load_ui_scale(), 1.25)
+        # TotalMix's ranges: 0.1 to 9.9 s, 1 to 10 samples
+        self.assertEqual(config.load_meter_prefs({"peak_hold": 20, "over_samples": 10}),
+                         {**default, "peak_hold": 9.9, "over_samples": 10})
+        self.assertEqual(config.load_meter_prefs({"peak_hold": 0})["peak_hold"], 0.1)
+        # a damaged or hand-edited file: anything unclear is the default
+        for damaged in ("{not json", "[]", "null", '{"peak_hold": null, "over_samples": null}',
+                        '{"meter_rms": 0, "peak_hold": "2", "over_samples": "3"}',
+                        '{"peak_hold": NaN, "over_samples": 11}',
+                        '{"peak_hold": 1e999, "over_samples": 0}',
+                        '{"peak_hold": true, "over_samples": true}',
+                        '{"over_samples": 2.5, "peak_hold": [1]}'):
+            config.UI_FILE.write_text(damaged)
+            self.assertEqual(config.load_meter_prefs(), default, damaged)
+
 
 if __name__ == "__main__":
     unittest.main()
