@@ -20,8 +20,9 @@ from . import arc, control_room, fx, hdspe, osc_remote
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
-    device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
-    previous_mix_file, save_device_choice, save_state, save_ui_scale, save_window,
+    device_block, load_device_choice, load_state, load_ui, load_ui_scale, load_window,
+    presets_file, previous_mix_file, save_device_choice, save_state, save_ui, save_ui_scale,
+    save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -147,8 +148,10 @@ class MainWindow(QMainWindow):
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
         self.settings.update_waiting.connect(self.show_update_waiting)
-        self.control = ControlRoomPanel(self.st)
+        self.arc_keys = arc.assignment(load_ui().get("arc_keys"))   # this computer's ARC
+        self.control = ControlRoomPanel(self.st, self.arc_keys)
         self.control.changed.connect(self.push_matrix)
+        self.control.arc_keys_changed.connect(self.set_arc_keys)
         self.control.recall.connect(self.recall_main)
         self.settings.add_control_room(self.control)
         self.remote_panel = RemotePanel(self.st, dev)
@@ -1246,7 +1249,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ ARC USB
     def arc_key(self, key, pressed):
         """An ARC key went down or up. Keys act on press; Talkback also on release."""
-        action = arc.DEFAULT_KEYS[key]
+        action = self.arc_keys[key]
         cr = control_room.control_room(self.st)
         if action == "talkback":
             if pressed:
@@ -1268,8 +1271,9 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action in ("phones", "phones2"):         # a lit key again: back to Main Out
-            cr["encoder"] = "main" if arc.key_lit(self.st, action, None) else action
+        if action in control_room.ENCODER_TARGETS:  # a lit Phones key again: back to Main Out
+            lit = action != "main" and arc.key_lit(self.st, action, None)
+            cr["encoder"] = "main" if lit else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1308,7 +1312,16 @@ class MainWindow(QMainWindow):
         slot = self.st.get("active_slot")
         if slot is not None and not self.presets.slots[slot]:
             slot = None                 # an empty slot's key stays dark, whatever the state says
-        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
+        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in self.arc_keys])
+
+    def set_arc_keys(self, keys):
+        """What each ARC key does, from the Control Room section; kept for this computer."""
+        self.arc_keys = keys
+        try:
+            save_ui(arc_keys=keys)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.update_arc_leds()
 
     def schedule_save(self):
         self._save_timer.start()

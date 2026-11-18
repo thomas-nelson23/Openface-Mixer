@@ -32,7 +32,7 @@ def pump(app):
 def exercise(app, w, check):
     """Click through one device's window. check(condition, what) records a failure."""
     from PySide6.QtWidgets import QPushButton
-    from openface_mixer import engine, updater
+    from openface_mixer import arc, engine, updater
     from openface_mixer.channel_settings import ChannelSettings
     from openface_mixer.remote_link import autostart_file
 
@@ -145,6 +145,14 @@ def exercise(app, w, check):
             else:
                 box.activated.emit(0)
             w.update_meters()
+    w.control.arc_btn.click()                       # the ARC USB keys list
+    pump(app)
+    w.control.arc_combos[0].activated.emit(0)
+    w.arc_key(0, True)
+    w.control.arc_rows[-1].click()                  # Reset to default
+    w.control.arc_btn.click()
+    pump(app)
+    check(w.arc_keys == arc.DEFAULT_KEYS, "the ARC keys did not go back to the default")
     fold_rows(app, w, check)
     for rate in (96000, 192000):                    # the double and quad speed channel layouts
         w.engine.rate = rate

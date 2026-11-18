@@ -251,8 +251,10 @@ TotalMix layout printed on it:
   (in the order they were ticked) while its key is lit. With one Phones output both keys
   select it and both light up. Faders grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
-it to work (its window can be hidden, see below).
+Key LEDs follow the state. **Keys** beside the ARC's status in the Control Room box lists the
+keys: each can do any of these functions instead, and *Reset to default* brings back the printed
+layout. The choice is kept for this computer, not with the mix. The ARC needs no driver or
+setup; Openface Mixer must be running for it to work (its window can be hidden, see below).
 
 ### Network remote (OSC)
 
@@ -460,8 +462,7 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 - The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
   plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
   (before version 2.1) are not supported.
-- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
-  supported (it sent nothing in testing).
+- ARC USB: the footswitch is not supported (it sent nothing in testing).
 
 ### Interfaces not supported yet
 

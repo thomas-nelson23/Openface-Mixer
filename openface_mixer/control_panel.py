@@ -142,11 +142,21 @@ class Several(QComboBox):
         self.menu.popup(self.mapToGlobal(self.rect().bottomLeft()))
 
 
+class KeyBox(QComboBox):
+    """An ARC key's action. The wheel scrolls the settings past the fifteen of them and never
+    changes one."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
 class ControlRoomPanel(Section):
     """Switches, assignments and amounts. Emits changed() after editing st["control_room"],
-    and recall() when Main Out should go to the Recall level."""
+    and recall() when Main Out should go to the Recall level. Below them the ARC USB: its
+    status and what each of its keys does (arc_keys, emitted with arc_keys_changed)."""
     changed = Signal()
     recall = Signal()
+    arc_keys_changed = Signal(list)
     STATUS = {
         "connected": "<span style='color:#2ad4ff'>●</span> ARC USB connected",
         "absent": "<span style='color:#6f8a94'>●</span> ARC USB not connected",
@@ -168,9 +178,10 @@ class ControlRoomPanel(Section):
         "talkback_dim_db": "How far the mix on those outputs is turned down while you talk",
     }
 
-    def __init__(self, st, parent=None):
+    def __init__(self, st, arc_keys=arc.DEFAULT_KEYS, parent=None):
         super().__init__("CONTROL ROOM", parent)
         self.st = st
+        self.arc_keys = list(arc_keys)
         self._updating = False
         self.pairs = []                # (label, index) of the output pairs, see set_channels
         g = QGridLayout(self)
@@ -202,7 +213,32 @@ class ControlRoomPanel(Section):
         self.arc_label = QLabel(self.STATUS["absent"])
         self.arc_label.setObjectName("hint")
         self.arc_label.setWordWrap(True)
-        g.addWidget(self.arc_label, r + 1, 0, 1, 3)
+        g.addWidget(self.arc_label, r + 1, 0, 1, 2)
+        # what each ARC key does, as TotalMix lets any key do any of its functions
+        self.arc_btn = QPushButton("Keys")
+        self.arc_btn.setCheckable(True)
+        self.arc_btn.setToolTip("Choose what each ARC USB key does")
+        g.addWidget(self.arc_btn, r + 1, 2)
+        self.arc_combos, self.arc_rows = [], []    # shown while Keys is lit
+        for i, name in enumerate(arc.KEY_NAMES, start=r + 2):
+            c = KeyBox()
+            for action in arc.ACTIONS:
+                c.addItem(arc.ACTION_NAMES[action], action)
+            c.activated.connect(lambda _i, k=len(self.arc_combos): self._arc_assign(k))
+            label = key_label(name)
+            g.addWidget(label, i, 0)
+            g.addWidget(c, i, 1, 1, 2)
+            self.arc_combos.append(c)
+            self.arc_rows += [label, c]
+        reset = QPushButton("Reset to default")
+        reset.setToolTip("The layout printed on the ARC USB")
+        reset.clicked.connect(lambda: self._arc_assign(None))
+        g.addWidget(reset, r + 2 + arc.N_KEYS, 0, 1, 3)
+        self.arc_rows.append(reset)
+        for w in self.arc_rows:
+            w.hide()
+        self.arc_btn.toggled.connect(lambda on: [w.setVisible(on) for w in self.arc_rows])
+        self._show_arc_keys()
 
     def set_channels(self, pairs, inputs, input_pairs):
         """pairs / inputs / input_pairs: lists of (label, index) for the combos."""
@@ -253,6 +289,20 @@ class ControlRoomPanel(Section):
 
     def set_arc_status(self, s):
         self.arc_label.setText(self.STATUS.get(s, s))
+
+    def _show_arc_keys(self):
+        for c, action in zip(self.arc_combos, self.arc_keys):
+            c.setCurrentIndex(c.findData(action))
+
+    def _arc_assign(self, key):
+        """Key key takes the action chosen in its list; None puts every key back to its
+        default."""
+        if key is None:
+            self.arc_keys = list(arc.DEFAULT_KEYS)
+            self._show_arc_keys()
+        else:
+            self.arc_keys[key] = self.arc_combos[key].currentData()
+        self.arc_keys_changed.emit(list(self.arc_keys))
 
     def _switch(self, key, on):
         control_room(self.st)[key] = on

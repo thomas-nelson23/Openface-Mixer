@@ -89,6 +89,28 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual([arc.key_lit(st, a, None) for a in ("main", "phones", "phones2")],
                          [False, False, True])
 
+    def test_assignment(self):
+        self.assertEqual(arc.assignment(None), arc.DEFAULT_KEYS)
+        keys = ["dim"] * arc.N_KEYS
+        self.assertEqual(arc.assignment(keys), keys)
+        self.assertEqual(len(arc.KEY_NAMES), arc.N_KEYS)
+        self.assertEqual(set(arc.ACTION_NAMES), set(arc.ACTIONS))
+        # a damaged or hand-edited ui.json: a key without a known action has its default
+        for damaged in ("dim", 5, {"0": "dim"}, [], [None, 3, ["dim"], "Dim", "snapshot:9"]):
+            with self.subTest(damaged=damaged):
+                self.assertEqual(arc.assignment(damaged), arc.DEFAULT_KEYS)
+        self.assertEqual(arc.assignment(["mono", 7]), ["mono"] + arc.DEFAULT_KEYS[1:])
+        self.assertEqual(arc.assignment(["main"] * 20), ["main"] * arc.N_KEYS)
+
+    def test_a_reassigned_key_lights_for_its_new_action(self):
+        st = m.default_state()
+        keys = arc.assignment(["dim", "main", "phones2"])
+        cr.toggle(st, "dim")
+        lit = [arc.key_lit(st, a, None) for a in keys]
+        self.assertEqual(lit[:3], [True, True, False])      # Dim on, encoder on Main Out
+        self.assertTrue(lit[14])                            # the printed Dim key too
+        self.assertFalse(any(lit[3:8]))                     # presets: none recalled
+
 
 class PortTest(unittest.TestCase):
     def port(self, fd):
