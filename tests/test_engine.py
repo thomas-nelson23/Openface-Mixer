@@ -34,7 +34,8 @@ class SharedMemoryTest(unittest.TestCase):
         # the offsets tests/test_engine_loop.c takes from the struct itself
         self.assertEqual((engine.OFF_GAIN, engine.OFF_OUT_GAIN, engine.OFF_PEAK_SRC,
                           engine.OFF_PEAK_OUT, engine.OFF_DEV_CONFIG, engine.OFF_DEV_CMD,
-                          engine.SHM_SIZE), (64, 10432, 10576, 10864, 11008, 11012, 27396))
+                          engine.OFF_PW, engine.SHM_SIZE),
+                         (64, 10432, 10576, 10864, 11008, 11012, 27396, 27412))
 
     def test_reading_the_meters_moves_the_heartbeat(self):
         e = self.segment()
@@ -53,6 +54,21 @@ class SharedMemoryTest(unittest.TestCase):
         # nothing else in the header is the GUI's to write
         self.assertEqual(e.header()[:engine.HDR_GUI_HEARTBEAT],
                          (engine.SHM_MAGIC, engine.SHM_VERSION) + (0,) * 11)
+
+    def test_pipewire_block(self):
+        """The engine's PipeWire status, and the GUI's word that has it read sinks.conf."""
+        e = self.segment()
+        self.assertTrue(e.attach())
+        struct.pack_into("<3I", e.m, engine.OFF_PW + 4, 1, 3, 2)
+        with mock.patch.object(e, "pid_alive", return_value=True):
+            s = e.status()
+        self.assertEqual((s["pipewire"], s["pw_nodes"], s["pw_linked"]), (True, 3, 2))
+        e.reload_sinks()
+        e.reload_sinks()
+        self.assertEqual(struct.unpack_from("<4I", e.m, engine.OFF_PW), (2, 1, 3, 2))
+        struct.pack_into("<I", e.m, engine.OFF_PW, 0xFFFFFFFF)
+        e.reload_sinks()
+        self.assertEqual(struct.unpack_from("<I", e.m, engine.OFF_PW), (0,))
 
     def test_an_engine_from_another_version(self):
         """During an update one side is older for a moment: the window shows the engine as
