@@ -132,9 +132,11 @@ A sync sends for at most 10 ms of each 20 ms engine tick and carries the rest ov
 full send after a connect (about 3,700 writes on the 802) takes a few seconds while the
 meters and the engine's heartbeat keep running.
 
-The playback sink is linked to the unit's own PipeWire node, `alsa_output.firewire-<GUID>…`,
-with the GUID from the node's `guid` attribute in sysfs (`0x000a35…`), so two RME FireWire
-units each get their own sink.
+The desktop sinks and sources are linked to the unit's own PipeWire nodes,
+`alsa_output.firewire-<GUID>…` (`alsa_input.` for sources), with the GUID from the node's `guid`
+attribute in sysfs (`0x000a35…`), so two RME FireWire units each get their own. The engine takes
+the driver's PCM channels to be in the mixer's channel order (`Device.pcm_channels`), which is
+not confirmed on a unit.
 
 ## Registers
 
@@ -443,8 +445,8 @@ or `HDSPe` and short name `RME RayDAT_<serial>`.
 With two cards of one model in the computer the first is used, until another is picked in the
 settings panel (the choice only shows when there are several). The choice is the card's full
 short name, serial included: it is saved with the mix and handed to the engine as a string in
-the command slots (`dev_cmd`), and the engine opens that card and links the playback sink to
-the PipeWire node with that card name. If the named card is gone, the first one is used again.
+the command slots (`dev_cmd`), and the engine opens that card and links the desktop sinks and
+sources to the PipeWire nodes with that card name. If the named card is gone, the first one is used again.
 Each model still has one mix and one engine: the second card is mixed instead of the first, not
 beside it. Two cards whose names carry no serial can't be told apart.
 
@@ -531,7 +533,11 @@ S/PDIF, then ADAT 1–4 from 4 up (8 channels per port at single speed, 4 at dou
 packed together). ALSA's PCM channels are ordered differently (ADAT first, then AES and
 S/PDIF), so PipeWire's `playback_AUX0/1`, which the playback sink feeds, are ADAT 1 channels
 1/2. The engine finds that PipeWire node by its ALSA card name (`alsa.card_name`), since PCI
-node names only carry the slot.
+node names only carry the slot. A desktop sink or source on other channels is linked through
+the same table (`RayDAT.pcm_channels` in `openface_mixer/hdspe.py`): on AES 1/2, for example,
+`playback_AUX32/33` at single speed. The AIO's PCM order is analog, AES, S/PDIF, ADAT, then the
+phones (playback only, `AIO.pcm_channels`); the AI4S/AO4S channels come after those in the
+drivers' maps and get no desktop sinks or sources for now.
 
 ## Meters and status
 

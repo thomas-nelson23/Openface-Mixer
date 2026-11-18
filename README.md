@@ -68,6 +68,12 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   AN 1, 7 and 8, 48V on AN 7–10, and Drive, Limiter and Speaker Emulation on the AN 1
   instrument input.
 - **Input options (Fireface 400):** 48V and gain on AN 1/2, instrument, pad and gain on AN 3/4.
+- **Desktop outputs and inputs:** right-click a playback strip → *Add desktop output…* for a
+  stereo sink on that pair ("Openface Music" on playback 3/4), or an input strip → *Add desktop
+  input…* for a mono or stereo source a chat app can record from. Rename or remove them from the
+  same menu.
+- **PipeWire's sample rate and buffer** at the end of the Clock box: Auto, or a rate from 44.1
+  to 192 kHz and a buffer from 32 to 2048 frames.
 - **Several interfaces:** pick the device in the settings panel. Each has its own mix, presets
   and engine, so a Digiface and a Fireface can run side by side.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
@@ -92,7 +98,8 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - The Digiface USB on its standard firmware, **not** Class Compliant mode. Its Class Compliant
   firmware has no hardware mixer (no TotalMix), so there is nothing for Openface Mixer to
   control; switch back with RME's Firmware Update Tool (Windows or macOS)
-- PipeWire with WirePlumber
+- PipeWire with WirePlumber, for the desktop outputs and inputs and the PipeWire rate and buffer
+  settings. The hardware mixer works without it (under JACK alone, for example)
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
 - Build tools: a C compiler, `pkg-config`, and the libpipewire development headers
@@ -165,10 +172,32 @@ still need a tester with the hardware.
    *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound
    settings.
 3. To send desktop audio through the mixer, select **Openface Mixer Playback** as your output
-   device. It feeds playback channels 1/2. Send other apps or a DAW to the interface's own output
-   channels (playback channel *n* = output *n*) with qpwgraph or Helvum.
+   device. It feeds playback channels 1/2. For more, right-click a playback strip → *Add desktop
+   output…*: the sink you name ("Music" shows as **Openface Music**) feeds that pair, so
+   each app can have its own fader. *Add desktop input…* on an input strip makes a source apps
+   can record from. Status → *Desktop audio* says whether they are linked; its tooltip lists
+   them. One on a channel the interface lacks at the current sample rate is left out and comes
+   back at a rate that has it. A DAW can still use the interface's own channels (playback
+   channel *n* = output *n*) through qpwgraph or Helvum.
 4. Click an output's name tag (bottom row) to select its submix, then raise input and playback
    faders. Alternatively, click cells in the **Matrix** view.
+
+### Sample rate and buffer
+
+*PipeWire rate* and *Buffer* in the Clock box set PipeWire's `clock.force-rate` and
+`clock.force-quantum` (with `pw-metadata`), so they apply to every program and every device, not
+only this interface. **Auto** lets PipeWire choose and writes nothing. A forced value lasts
+until PipeWire restarts; Openface Mixer does not set it again at login, because it is not the
+app's alone (two devices' windows, or another tool, could disagree) and the app may not be
+running. For a permanent choice, set `default.clock.rate` and `default.clock.quantum` in a file
+under `~/.config/pipewire/pipewire.conf.d/`.
+
+The interface follows the rate PipeWire plays at. On an HDSPe card, *Internal rate* is the
+rate the card runs at while nothing plays (and its master rate when *Clock mode* is Master); as
+soon as PipeWire opens the card it sets the card to the PipeWire rate. On the FireWire
+Firefaces the rate comes from the driver the same way, and *Clock source* only says where the
+clock comes from. With an external clock (word clock, ADAT, AES), choose the rate that clock
+runs at.
 
 ### Controls
 
@@ -186,6 +215,7 @@ still need a tester with the hardware.
 | Recall a preset | Click a lit slot |
 | Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
+| Desktop output or input | Right-click a playback strip → *Add desktop output…*, or an input strip → *Add desktop input…*. The same menu renames or removes it |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
 | Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
@@ -401,6 +431,7 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
 | `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import or reset, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
+| `~/.config/openface-mixer/sinks.conf` | The desktop outputs and inputs, written by the app for the engine (Digiface) |
 | `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |

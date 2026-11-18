@@ -15,7 +15,8 @@ process, shared memory and config files, so several can run at once.
         ▼                           │
  openface-mixer-engine (C) ──libusb, interface 1──▶ Digiface DSP mixer (2048 nodes, output faders)
         │                  ◀──level meters (EP 0x84)──
-        └─ "Openface Mixer Playback" sink ──PipeWire link──▶ Digiface playback 1/2
+        └─ desktop sinks and sources ──PipeWire links──▶ Digiface playback and input channels
+           (sinks.conf, written by the GUI; by default "Openface Mixer Playback" on playback 1/2)
 ```
 
 ## Engine (`engine/openface-mixer-engine.c`)
@@ -41,16 +42,29 @@ the engine is the same for all of them.
   the last read it drops to `meter_idle_us`, once a second, only so that `hw_levels` stays
   true (the USB Firefaces ten times a second: their meter request also keeps the device's
   MIDI port awake). The first read of a GUI that comes back wakes the thread at the next tick.
-- It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
-  it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name,
-  the FireWire Firefaces by the unit's GUID in the node name), re-linking on
-  hotplug or profile changes. No audio passes through the engine itself.
+- It loads one `libpipewire-module-loopback` per desktop sink or source in the device's
+  `sinks.conf` (by default only the **Openface Mixer Playback** sink, on the driver's first two
+  playback channels) and links each to the interface's Pro Audio ports: a sink's two outputs to
+  `playback_AUXn`, a source's input or inputs from `capture_AUXn`, where n is the channel's
+  place among the driver's PCM channels at the current speed. The GUI works those out
+  (`sinks.py`; they differ from the mixer's channel numbers on the RayDAT and the AIO), so a
+  line of the file is `sink|source NODE.NAME L1 R1 L2 R2 L4 R4 description`, with -1 where the
+  interface lacks the channel at that speed: the engine leaves that one out there and makes it
+  again at a rate that has it. The interface's nodes are matched by node name prefix
+  (`alsa_output.usb-RME_Digiface_USB`, `alsa_input.` for capture; the HDSPe cards and USB
+  Firefaces by their ALSA card name, the FireWire Firefaces by the unit's GUID in the node
+  name), re-linking on hotplug or profile changes. The GUI writes the file when the list
+  changes and counts up `pw_reload`; the engine reads it again, keeps the modules whose line
+  did not change and makes or removes the others. A missing or damaged file means the default
+  sink, as before the list. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. The GUI starts the
   service of the device it opens and enables it for every login once the engine reports the
   interface as active (`Engine.enable`), so no engine or sink runs for hardware that was never
-  connected. At startup it loads the
+  connected. The units want PipeWire and start after it (`Wants=`, `After=`) but do not need
+  it, and are enabled for `default.target`, so the hardware mixer comes up at login without
+  PipeWire too; `install.sh` moves the links an older install made under
+  `pipewire.service.wants`. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
   to date; files from before the 36-channel layout are moved into place. A file it does not
   recognise (another format, cut short, or with anything left over) is ignored as a whole
@@ -60,10 +74,12 @@ the engine is the same for all of them.
   file for as long as it lives, so the kernel drops the lock however the engine ends. A second
   engine waits a second for the first to go, then says so in one line and exits with status 3,
   which the units list under `RestartPreventExitStatus`.
-- When PipeWire goes away the engine says so and exits with status 1 instead of running on
-  without its sink. `Restart=on-failure` starts it again every two seconds; each try ends at
-  the connect, before the device is opened, and the interface keeps mixing meanwhile. Once
-  PipeWire is back the new engine sends the whole mix again, as at every start.
+- PipeWire is optional: without it the engine runs the hardware mixer, meters and status as
+  usual, says once that PipeWire is not running and tries to connect again every second
+  (`pw_tick`, on the 20 ms timer). When PipeWire goes away the engine drops its sinks, sources,
+  links and connection and goes on the same way. Once PipeWire is back it connects in the same
+  process and makes the sinks and sources again; the device stays open and the mix is not sent
+  again. `pw_connected`, `pw_nodes` and `pw_linked` in the shared memory tell the GUI.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
   mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
   heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
@@ -81,7 +97,7 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 
 | Field | Writer | Meaning |
 | --- | --- | --- |
-| header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, playback sink linked |
+| header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, desktop sinks and sources all linked |
 | `gui_heartbeat` (header) | GUI | counted up with every meter read; while it moves, the engine reads the device's meters at full rate |
 | `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use, meters live |
 | `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
@@ -89,6 +105,8 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 | `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
 | `dev_config`, `dev_cmd[4096]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
+| `pw_reload` | GUI | counted up after the GUI writes `sinks.conf`; the engine reads it again |
+| `pw_connected`, `pw_nodes`, `pw_linked` | engine | connected to PipeWire; desktop sinks and sources made at this rate; how many of them are linked |
 
 No locks are used: 32-bit float stores are atomic on the supported platforms, and a torn meter
 reset costs at most one missed peak. The engine never blocks on the GUI.
@@ -104,8 +122,10 @@ app.MainWindow
  ├─ matrix_view.py  grid editor for the same sends
  ├─ fx.py / fx_panels.py  TotalMix FX effects (802, UCX II): model and commands / EQ, D, FX panels
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
+ │                  hardware.pw_clock, set_pw_clock (pw-metadata: PipeWire's rate and buffer)
+ ├─ sinks.py        the desktop sinks and sources (no Qt) ──config.save_sinks()──▶ sinks.conf
  ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
- └─ config.py       state.json / matrix.bin / presets.json
+ └─ config.py       state.json / matrix.bin / presets.json / sinks.conf
 ```
 
 ### The mixer model
@@ -169,7 +189,10 @@ app.MainWindow
   to `state.json.bak` (the save before it, kept by `atomic_write`), and only then repairs what
   it can; the window says once which of the two happened. Everything outside the mix (names,
   control room, remote, device and effect settings) is put back to its default where its type
-  or range is wrong, so no file can stop the window from opening. A preset slot that is
+  or range is wrong, so no file can stop the window from opening. The desktop sinks and sources
+  (`state["sinks"]`, not part of a mix) go through `sinks.checked()`: an entry that is damaged,
+  on channels the interface never has or on a channel an earlier one has is left out, and a
+  list that is not a list becomes the default. A preset slot that is
   damaged shows as empty; the next save keeps that `presets.json` as `presets.json.bak`.
 - **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
   which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
