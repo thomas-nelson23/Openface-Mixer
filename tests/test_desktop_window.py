@@ -5,6 +5,7 @@ checked, nothing is run."""
 import subprocess
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from tests.test_controls import QApplication, WindowCase
@@ -32,10 +33,12 @@ class DesktopMenuTest(WindowCase):
     def setUp(self):
         from openface_mixer import config, sinks
         self.sinks, self.config = sinks, config
+        self.assertNotEqual(config.CONFIG_DIR, Path.home() / ".config" / "openface-mixer")
         self.w.st["sinks"] = sinks.default_list(self.w.dev)
         self.w.save()
-        self.reload = mock.patch.object(self.w.engine, "reload_sinks").start()
-        self.addCleanup(mock.patch.stopall)
+        patch = mock.patch.object(self.w.engine, "reload_sinks")
+        self.reload = patch.start()
+        self.addCleanup(patch.stop)     # never patch.stopall: WindowCase's patches must stay
 
     def strip(self, row, ch):
         return next(s for s in row.strips if ch in s.channels)
@@ -129,8 +132,9 @@ class PipeWireClockTest(WindowCase):
         self.notices = []
         self.p.notice.connect(self.notices.append)
         self.addCleanup(self.p.notice.disconnect, self.notices.append)
-        self.reads = mock.patch.object(self.p, "read_pw_clock").start()
-        self.addCleanup(mock.patch.stopall)
+        self.reading = mock.patch.object(self.p, "read_pw_clock")
+        self.reads = self.reading.start()
+        self.addCleanup(self.reading.stop)
 
     def items(self, combo):
         return [combo.itemText(i) for i in range(combo.count())]
@@ -188,7 +192,7 @@ class PipeWireClockTest(WindowCase):
         self.assertEqual(self.notices, ["Not changed: PipeWire is not running"])
 
     def test_read_on_a_thread(self):
-        mock.patch.stopall()
+        self.reading.stop()
         with mock.patch.object(self.sp, "pw_clock",
                                return_value={**self.SETTINGS, "clock.force-quantum": 512}):
             self.p.read_pw_clock()
