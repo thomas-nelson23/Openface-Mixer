@@ -101,6 +101,25 @@ class SharedMemoryTest(unittest.TestCase):
                 e.stop()
                 kill.assert_called_once_with(4321, 15)
 
+    def test_stop_ends_an_older_engine_with_a_smaller_segment(self):
+        """Version 7 had no meter extras: its segment is too small to map, but its header
+        still names the engine to stop."""
+        f = tempfile.NamedTemporaryFile()
+        self.addCleanup(f.close)
+        f.write(struct.pack("<7I", engine.SHM_MAGIC, 7, 0, 0, 0, 0, 4321).ljust(27396, b"\0"))
+        f.flush()
+        e = engine.Engine(DEVICES["digiface"])
+        e.path = f.name
+        with mock.patch.object(e, "has_service", return_value=False), \
+                mock.patch.object(engine.os, "kill") as kill, \
+                mock.patch.object(engine.Path, "read_text", return_value="openface-mixer-\n"):
+            self.assertTrue(e.outdated())
+            self.assertFalse(e.attach())
+            self.assertIsNone(e.status())
+            e.stop()
+        kill.assert_called_once_with(4321, 15)
+        self.assertEqual(Path(f.name).stat().st_size, 27396)    # the GUI wrote nothing to it
+
 
 class ServiceTest(unittest.TestCase):
     """Starting an engine does not enable it: that waits until the interface has been seen."""

@@ -73,9 +73,13 @@ class Engine:
         return magic == SHM_MAGIC and version != SHM_VERSION
 
     def header(self):
-        if not self.attach():
+        if self.attach():
+            return struct.unpack_from("<16I", self.m, 0)
+        try:        # an older engine's smaller segment: its header still says who runs it
+            with open(self.path, "rb") as f:
+                return struct.unpack("<16I", f.read(HDR_SIZE))
+        except (OSError, struct.error):
             return None
-        return struct.unpack_from("<16I", self.m, 0)
 
     def pid(self):
         """The process id of the engine that runs on the segment, whatever its layout version,
