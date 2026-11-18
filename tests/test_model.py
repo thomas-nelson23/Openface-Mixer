@@ -45,6 +45,17 @@ def damaged_mixes():
                      {"in:0": dict(kept, sends=["x"])}, {"in:0": dict(kept, sends=[[["x", 0]]])},
                      {"in:0": {k: v for k, v in kept.items() if k != "sends"}}):
         yield f"unlinked is {unlinked!r:.60}", mix(lambda mx: mx.update(unlinked=unlinked))
+    for mirror in ({"out:0": 0}, {"out:0": 1, "out:1": 2}, {"in:0": 1}, {"out:0": 18},
+                   {"out:18": 0}, {"out:0": "1"}, {"out:0": True}, {"out:0": None}, {7: 1}):
+        yield f"mirror is {mirror!r}", mix(lambda mx: mx.update(mirror=mirror))
+    for group in ("x", None, {"on": True}, {"sends": []}, {"on": "x", "sends": []},
+                  {"on": False, "sends": "x"}, {"on": False, "sends": [["in:0"]]},
+                  {"on": False, "sends": [["out:0", 1]]}, {"on": False, "sends": [["in:0", 18]]},
+                  {"on": False, "sends": [["in:99", 0]]}, {"on": False, "sends": [["in:0", True]]},
+                  {"on": False, "sends": ["in:0"]}):
+        yield f"a mute group is {group!r}", mix(lambda mx: mx["mute_groups"].__setitem__(2, group))
+    for groups in ({"out:0": 1}, {"in:0": 5}, {"in:0": "x"}, {"in:0": 0}, {"bogus": 1}):
+        yield f"solo groups are {groups!r}", mix(lambda mx: mx.update(solo_groups=groups))
 
 
 class TaperTest(unittest.TestCase):
@@ -532,23 +543,24 @@ class DamagedStateTest(unittest.TestCase):
             with self.subTest(value=value):
                 st = m.default_state()
                 for key in ("tab", "active_slot", "names", "colors", "icons", "custom_names",
-                            "hidden", "hidden_strips", "folded"):
+                            "hidden", "hidden_strips", "folded", "trim"):
                     st[key] = copy.deepcopy(value)
                 st = self.usable(m.upgrade_state(st, strict=True))
                 self.assertEqual((st["tab"], st["names"], st["colors"], st["icons"],
                                   st["custom_names"], st["hidden"], st["hidden_strips"],
-                                  st["folded"]),
-                                 (0, {}, {}, {}, True, [], [], []))
+                                  st["folded"], st["trim"]),
+                                 (0, {}, {}, {}, True, [], [], [], False))
                 self.assertEqual(st["active_slot"], 7 if value == 7 else None)
 
     def test_good_display_settings_are_kept(self):
         st = m.default_state()
-        st.update(tab=1, active_slot=7, custom_names=False, hidden=["AD3", 5],
+        st.update(tab=1, active_slot=7, custom_names=False, trim=True, hidden=["AD3", 5],
                   hidden_strips=["in:4", "zzz", 3], names={"in:0": "Vocal", "in:1": 5, "x": "y"},
                   colors={"out:16": "#ff0000", "out:99": "#00ff00"}, icons={"play:2": "mic"},
                   folded=["play", "matrix", 3, ["in"], None, "out"])
         st = m.upgrade_state(st, strict=True)
-        self.assertEqual((st["tab"], st["active_slot"], st["custom_names"]), (1, 7, False))
+        self.assertEqual((st["tab"], st["active_slot"], st["custom_names"], st["trim"]),
+                         (1, 7, False, True))
         self.assertEqual((st["hidden"], st["hidden_strips"]), (["AD3"], ["in:4"]))
         self.assertEqual(st["folded"], ["play", "out"])
         self.assertEqual((st["names"], st["colors"], st["icons"]),
