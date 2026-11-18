@@ -1,5 +1,6 @@
-"""One window per device: commands for desktop shortcuts over its socket, and background mode
-kept across an update restart, a new UI scale and a device switch. Sockets live in a temporary
+"""One window per device: which devices are connected, commands for desktop shortcuts over a
+window's socket, and background mode kept across an update restart, a new UI scale and a device
+switch. Sockets live in a temporary
 folder; nothing is exec'd and no real window is reached."""
 import os
 import subprocess
@@ -10,11 +11,56 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import commands
+from openface_mixer import commands, devices, hardware
 from openface_mixer.devices import DEVICES
 from tests.test_controls import QApplication, WindowCase
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+# /proc/asound/cards with a Digiface, a UCX II in Class Compliant mode and an onboard card
+CARDS = """\
+ 0 [PCH            ]: HDA-Intel - HDA Intel PCH
+                      HDA Intel PCH at 0xf7f10000 irq 32
+ 1 [USB            ]: USB-Audio - Digiface USB
+                      RME Digiface USB (23592011) at usb-0000:00:14.0-2, high speed
+ 2 [UCXII          ]: USB-Audio - Fireface UCX II (24171230)
+                      RME Fireface UCX II (24171230) at usb-0000:00:14.0-3, high speed
+"""
+
+
+class ConnectedTest(unittest.TestCase):
+    """Which devices are connected, read from a stand-in /proc/asound and sysfs."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        (self.root / "firewire").mkdir()
+        (self.root / "cards").write_text(CARDS)
+        for patch in (mock.patch.object(hardware, "ASOUND_CARDS", self.root / "cards"),
+                      mock.patch.object(devices, "FIREWIRE_DEVICES", self.root / "firewire")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def firewire_unit(self, name, spec, version):
+        unit = self.root / "firewire" / name
+        unit.mkdir()
+        (unit / "specifier_id").write_text(spec + "\n")
+        (unit / "version").write_text(version + "\n")
+
+    def test_connected(self):
+        self.assertEqual(devices.connected(), {"digiface", "ucx2"})
+        self.firewire_unit("fw0.0", "0x00609e", "0x010483")      # the computer's controller
+        self.firewire_unit("fw1.0", "0x000a35", "0x000001")      # a Fireface 800
+        self.assertEqual(devices.connected(), {"digiface", "ucx2", "ff800"})
+        (self.root / "cards").write_text("--- no soundcards ---\n")
+        self.assertEqual(devices.connected(), {"ff800"})
+
+    def test_nothing_readable(self):
+        (self.root / "cards").unlink()
+        (self.root / "firewire").rmdir()
+        self.assertEqual(devices.connected(), set())
 
 
 class CommandsTest(unittest.TestCase):
@@ -236,6 +282,24 @@ class CommandWindowTest(WindowCase):
         w.command("show")
         self.settle()
         self.assertTrue(w.isVisible())
+
+
+class DeviceListTest(WindowCase):
+    def test_connected_devices_are_marked_while_the_list_is_open(self):
+        from openface_mixer import settings_panel
+        box = self.w.settings.device
+        names = [d.name for d in DEVICES.values()]
+        with mock.patch.object(settings_panel, "connected", lambda: {"digiface", "ff802usb"}):
+            box.showPopup()
+            self.settle()
+            shown = [box.itemText(i) for i in range(box.count())]
+            box.hidePopup()
+            self.settle()
+        self.assertEqual(shown[:3], ["RME Digiface USB (connected)", "RME Fireface 802",
+                                     "RME Fireface 802 (USB) (connected)"])
+        self.assertEqual([t.replace(" (connected)", "") for t in shown], names)  # same order
+        self.assertEqual([box.itemText(i) for i in range(box.count())], names)
+        self.assertEqual(box.currentText(), "RME Digiface USB")
 
 
 class RestartTest(WindowCase):

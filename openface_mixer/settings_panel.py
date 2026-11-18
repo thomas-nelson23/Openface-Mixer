@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from . import hdspe, theme, updater
 from .config import UI_SCALES, load_update_prefs, save_ui
-from .devices import DEVICES, group_title
+from .devices import DEVICES, connected, group_title
 from .hardware import Hardware, set_card_profile
 from .theme import SANS, Section, caption_html, font, key_label, px
 
@@ -267,6 +267,23 @@ class WideList(QComboBox):
         super().showPopup()
 
 
+class DeviceBox(WideList):
+    """The Device list. While it is open, the interfaces that are connected say so; they keep
+    their place, so nothing moves under the mouse."""
+
+    def showPopup(self):
+        found = connected()
+        for i in range(self.count()):
+            d = DEVICES[self.itemData(i)]
+            self.setItemText(i, f"{d.name} (connected)" if d.key in found else d.name)
+        super().showPopup()
+
+    def hidePopup(self):
+        super().hidePopup()
+        for i in range(self.count()):
+            self.setItemText(i, DEVICES[self.itemData(i)].name)
+
+
 class ChannelBox(QComboBox):
     """What updates follow. The wheel scrolls the settings past it and never changes it, so
     nobody lands on the testers' channel by scrolling."""
@@ -301,7 +318,7 @@ class SettingsPanel(QWidget):
 
         box = Section("DEVICE")
         bl = QVBoxLayout(box)
-        self.device = QComboBox()
+        self.device = DeviceBox()
         for d in DEVICES.values():
             self.device.addItem(d.name, d.key)
         self.device.setCurrentIndex(self.device.findData(dev.key))

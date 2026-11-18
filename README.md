@@ -159,7 +159,8 @@ still need a tester with the hardware.
 
 ## First run
 
-1. Open **Openface Mixer**.
+1. Open **Openface Mixer**. It opens the interface that is connected; to pick another, use
+   **Device** at the top of the settings, where the connected interfaces say so.
 2. Monitoring works in any PipeWire profile, because the mix happens in the interface. To
    *record* all 32 inputs in apps, switch the Digiface to the **Pro Audio** profile: click
    *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound

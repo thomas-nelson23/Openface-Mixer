@@ -358,10 +358,11 @@ def _read_hex(path):
         return None
 
 
-def find_firewire_unit(specifier_id, version, root=FIREWIRE_DEVICES):
+def find_firewire_unit(specifier_id, version, root=None):
     """Name of the FireWire node ("fw1") with a unit of this specifier and version, or None."""
     try:
-        units = sorted(p for p in root.iterdir() if re.fullmatch(r"fw\d+\.\d+", p.name))
+        units = sorted(p for p in (root or FIREWIRE_DEVICES).iterdir()
+                       if re.fullmatch(r"fw\d+\.\d+", p.name))
     except OSError:
         return None
     for u in units:
@@ -411,6 +412,12 @@ def find_other_digiface(root=USB_DEVICES):
         if pid == DIGIFACE_CC_PID or "digiface" in product.lower():
             return pid
     return None
+
+
+def connected():
+    """The keys of the devices that are connected, from /proc/asound and sysfs only: no device
+    is opened, so this is cheap enough to run whenever the Device list is opened."""
+    return {key for key, d in DEVICES.items() if d.present()}
 
 
 def detect(saved=None):
