@@ -419,12 +419,13 @@ class SettingsPanel(QWidget):
         # meter options, for this computer (ui.json), as in TotalMix's preferences
         self.meter_prefs = prefs = load_meter_prefs()
         row = 6
-        self.rms_box = QCheckBox("Show RMS level")
-        self.rms_box.setChecked(prefs["meter_rms"])
-        self.rms_box.setToolTip("Light each meter up to the average (RMS) level and dim it "
-                                "above, up to the peak.")
-        self.rms_box.toggled.connect(lambda on: self._set_meters(meter_rms=on))
+        self.rms_box = None         # a device that reports no RMS: peak only, nothing to choose
         if self.dev.meter_rms:
+            self.rms_box = QCheckBox("Show RMS level")
+            self.rms_box.setChecked(prefs["meter_rms"])
+            self.rms_box.setToolTip("Light each meter up to the average (RMS) level and dim it "
+                                    "above, up to the peak.")
+            self.rms_box.toggled.connect(lambda on: self._set_meters(meter_rms=on))
             dl.addWidget(self.rms_box, row, 0, 1, 2)
             row += 1
         self.hold_combo = self._meter_combo(

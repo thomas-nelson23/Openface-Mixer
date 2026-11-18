@@ -138,7 +138,7 @@ def exercise(app, w, check):
     w.row_play.fold_btn.click()
     pump(app)
     for box in (w.settings.rms_box, w.settings.hold_combo, w.settings.over_combo):
-        if box is not None and not box.isHidden():  # the meter options this device has
+        if box is not None:                         # the meter options this device has
             if box is w.settings.rms_box:
                 box.click()
                 box.click()

@@ -24,7 +24,7 @@ class MeterCase(WindowCase):
 class MeterOptionsTest(MeterCase):
     def test_the_options_apply_at_once_and_are_kept_for_this_computer(self):
         panel = self.w.settings
-        self.assertFalse(panel.rms_box.isHidden())          # the Digiface reports RMS
+        self.assertTrue(panel.rms_box.isVisibleTo(panel))   # the Digiface reports RMS
         self.assertIsNone(panel.over_combo)                 # but counts no overs
         self.assertEqual((self.Meter.show_rms, self.Meter.hold_s, self.Meter.over_count),
                          (True, 1.5, 1))
@@ -54,7 +54,7 @@ class FireWireMeterOptionsTest(WindowCase):
     device = "ff800"
 
     def test_no_rms_option_where_the_device_reports_none(self):
-        self.assertTrue(self.w.settings.rms_box.isHidden())
+        self.assertIsNone(self.w.settings.rms_box)
         self.assertIsNone(self.w.settings.over_combo)
 
 
