@@ -19,6 +19,12 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - A *Keyboard shortcuts* list at the bottom of the settings, and the same list in the README.
 - Control room: set the Dim amount and the Talkback dim amount, send talkback to further outputs with *Talkback to*, and set Main Out to a stored listening level with *Recall*.
 - Control room: up to four Phones outputs. With two or more, the ARC USB's two Phones keys select the first and the second.
+- Right-click an output: *Copy mix*, *Paste mix* and *Mirror mix*, as in TotalMix. A mirrored output plays the same mix as the other and follows every change to it; *Remove mirror* gives it its own copy again.
+- Right-click an input or playback channel: *Copy sends*, *Paste sends* and *Clear sends* (all of the channel's sends, to every output). A pair counts as one channel.
+- Paste and clear keep the mix they replace for *Restore previous mix*.
+- **Cue** on each output strip: hear that output's mix on Main Out, as in TotalMix. One at a time; press it again to end it. It is not saved.
+- **Trim** at the end of the Hardware inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off.
+- Mute groups and solo groups, four of each, next to Trim. A mute group mutes its channels in the submix they were added in; a solo group solos its channels. Both are part of presets and mix files.
 
 ### Changed
 
@@ -117,6 +123,8 @@ people who have one can try them. Please try the points for your interface and
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
+- Cue the Phones output while listening on Main Out: you hear the Phones mix at the Main Out level, Dim and Talkback still work, and a second press brings Main Out's own mix back.
+- Mirror one output's mix onto another, switch a mute group on, and move a fader with Trim on: what you hear follows what the faders show.
 
 **Every Fireface and HDSPe card**
 
@@ -125,3 +133,4 @@ people who have one can try them. Please try the points for your interface and
 - ARC USB: with one Phones output both Phones keys light together as before; with two, each key lights alone and the encoder turns its own output.
 - With the window closed to the background for several minutes the unit stays connected (802 over USB and UCX II: the status must not fall to "no reply"), and the meters move at once when the window is shown.
 - Open the app with the interface connected, then `systemctl --user is-enabled openface-mixer-engine@<device>` says `enabled`.
+- Cue, Mirror, mute groups and Trim, as for the Digiface. HDSPe: a cued mix plays at the Main Out level, which the card adds into every send.
