@@ -205,8 +205,9 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(calls.count(f"systemctl --user reenable {unit}"), 1)
         units = (self.config / "systemd" / "user" / "openface-mixer-engine.service").read_text()
         self.assertIn("\nWantedBy=default.target\n", units)
-        self.assertIn("\nWants=pipewire.service\n", units)
+        self.assertIn("\nAfter=pipewire.service wireplumber.service\n", units)
         self.assertNotIn("Requires=", units)
+        self.assertNotIn("\nWants=", units)     # would start PipeWire where it is kept off
         # the next update finds nothing to move
         for unit in (DIGIFACE, FF802):
             (wants / unit).unlink()

@@ -121,7 +121,7 @@ people who have one can try them. Please try the points for your interface and
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
 - Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the mix keeps playing, the engine is not restarted (`systemctl --user status openface-mixer-engine` shows the same start time) and Openface Mixer Playback comes back. Please report a click or dropout.
-- Stop PipeWire (`systemctl --user stop pipewire.socket pipewire`), log out and in: the mix is restored at login and Status says "PipeWire not running". Start PipeWire again and the sink appears.
+- Switch PipeWire off (`systemctl --user mask --now pipewire.socket pipewire`), log out and in: the engine runs, the mix is restored and Status says "PipeWire not running". Unmask both and start them again: the sink appears.
 - Add a desktop output on AD1 3/4 and a desktop input on AD1 1: they show in the sound settings as "Openface …" and play and record on those channels. At 96 kHz one on a channel the Digiface lacks there goes away and comes back at 48 kHz.
 - *PipeWire rate* 96 kHz: the Digiface switches to double speed and the mixer shows its 2x channels. Back to Auto: PipeWire chooses again.
 

@@ -61,9 +61,9 @@ the engine is the same for all of them.
   `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. The GUI starts the
   service of the device it opens and enables it for every login once the engine reports the
   interface as active (`Engine.enable`), so no engine or sink runs for hardware that was never
-  connected. The units want PipeWire and start after it (`Wants=`, `After=`) but do not need
-  it, and are enabled for `default.target`, so the hardware mixer comes up at login without
-  PipeWire too; `install.sh` moves the links an older install made under
+  connected. The units start after PipeWire (`After=`) but neither need nor start it (no
+  `Requires=` or `Wants=`, so a JACK-only setup keeps PipeWire off), and are enabled for
+  `default.target`, so the hardware mixer comes up at login without PipeWire too; `install.sh` moves the links an older install made under
   `pipewire.service.wants`. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
   to date; files from before the 36-channel layout are moved into place. A file it does not
