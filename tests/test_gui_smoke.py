@@ -127,6 +127,24 @@ def exercise(app, w, check):
     pump(app)
     check(not w.fx_panels, f"effects panels left open: {sorted(w.fx_panels)}")
     check(not w.fx_btn.isChecked(), "the FX button stayed lit")
+    # a layout preset: store a view with a folded row, unfold, recall it
+    w.row_play.fold_btn.click()
+    w.settings.layout_btns[0].click()               # an empty slot stores (named by the stub)
+    w.row_play.fold_btn.click()
+    w.settings.layout_btns[0].click()
+    pump(app)
+    check(w.row_play.folded and w.st["layouts"][0]["folded"] == ["play"],
+          "the layout did not come back")
+    w.row_play.fold_btn.click()
+    pump(app)
+    for box in (w.settings.rms_box, w.settings.hold_combo, w.settings.over_combo):
+        if box is not None and not box.isHidden():  # the meter options this device has
+            if box is w.settings.rms_box:
+                box.click()
+                box.click()
+            else:
+                box.activated.emit(0)
+            w.update_meters()
     fold_rows(app, w, check)
     for rate in (96000, 192000):                    # the double and quad speed channel layouts
         w.engine.rate = rate
@@ -218,6 +236,7 @@ def drive(home):
     ofm_app.Engine = StubEngine
     subprocess.run = subprocess.Popen = no_subprocess       # amixer, pactl, systemctl, git
     arc.find_port = lambda: None                            # leave a connected ARC USB alone
+    ofm_app.QInputDialog.getText = lambda *_args, **_kwargs: ("Smoke", True)    # no dialogs
     # exceptions in slots and event handlers end up here instead of stopping the test
     sys.excepthook = lambda *exc: problem("".join(traceback.format_exception(*exc)))
     qInstallMessageHandler(qt_message)

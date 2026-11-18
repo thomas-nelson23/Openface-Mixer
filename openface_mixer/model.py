@@ -40,6 +40,9 @@ FADER_MIN_DB = -80.0     # below this a fader snaps to -inf
 STATE_VERSION = 6        # 6: mono channels pan with constant power (convert_pan_law)
 # Keys of the state that make up a "mix" (what presets store). UI-only keys are left out.
 MIX_KEYS = ("stereo", "mute", "sends", "out", "groups", "unlinked")
+# Keys of the state that make up a channel layout (what layout presets store): what is shown,
+# never what is heard.
+LAYOUT_KEYS = ("hidden", "hidden_strips", "folded", "custom_names")
 
 
 # ------------------------------------------------------------------ dB helpers
@@ -148,6 +151,7 @@ def default_state(selected=N_PAIRS - 1):
         "hidden": [],                     # channel groups not shown ("AD3", "AES", see devices)
         "hidden_strips": [],              # single strips hidden with right-click > Hide channel
         "folded": [],                     # rows folded to names and meters: "in", "play", "out"
+        "layouts": [None] * N_SLOTS,      # layout presets: None or {"name", LAYOUT_KEYS...}
     }
     # transparent default: playback n -> output n, like the hardware with the mixer off
     for c in range(N_PLAY):
@@ -265,6 +269,25 @@ def checked_mix(mix, strict=True):
     return checked
 
 
+def checked_layout(d):
+    """The channel layout (LAYOUT_KEYS) that the dict d holds, with every entry of the wrong
+    type left out."""
+    view = {k: [v for v in d[k] if ok(v)] if isinstance(d.get(k), list) else []
+            for k, ok in (("hidden", lambda v: isinstance(v, str)), ("hidden_strips", valid_key),
+                          ("folded", lambda v: v in ("in", "play", "out")))}
+    view["custom_names"] = d.get("custom_names") is not False
+    return view
+
+
+def checked_layouts(slots):
+    """The N_SLOTS layout presets in slots (st["layouts"]); a damaged one is an empty slot."""
+    slots = (slots if isinstance(slots, list) else [])[:N_SLOTS]
+    slots = [{"name": s["name"], **checked_layout(s)}
+             if isinstance(s, dict) and isinstance(s.get("name"), str) and s["name"] else None
+             for s in slots]
+    return slots + [None] * (N_SLOTS - len(slots))
+
+
 def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
     """Accept older/partial state dicts (e.g. from TotalMix Lite), fill in missing keys and put
     anything of the wrong type or out of range back to its default, so a damaged or hand-edited
@@ -284,15 +307,13 @@ def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
     for k in ("names", "colors", "icons"):
         st[k] = {key: v for key, v in st[k].items() if valid_key(key) and isinstance(v, str)
                  } if isinstance(st[k], dict) else {}
-    for k, ok in (("hidden", lambda v: isinstance(v, str)), ("hidden_strips", valid_key),
-                  ("folded", lambda v: v in ("in", "play", "out"))):
-        st[k] = [v for v in st[k] if ok(v)] if isinstance(st[k], list) else []
+    st.update(checked_layout(st))
+    st["layouts"] = checked_layouts(st["layouts"])
     if not is_index(st["selected"], N_PAIRS):
         st["selected"] = selected
     st["tab"] = 1 if st["tab"] == 1 else 0
     if not is_index(st["active_slot"], N_SLOTS):
         st["active_slot"] = None
-    st["custom_names"] = st["custom_names"] is not False
     st.pop("mixer_mode", None)          # software (PipeWire) mixing was removed in version 4
     st["solo"] = base["solo"]           # solo never survives a restart, like TotalMix
     st["version"] = STATE_VERSION
@@ -530,6 +551,15 @@ def group_follow(st, key, old_db, new_db):
 
 
 # ------------------------------------------------------------------ presets
+
+def extract_layout(st, name):
+    return {"name": name, **copy.deepcopy({k: st[k] for k in LAYOUT_KEYS})}
+
+
+def apply_layout(st, layout):
+    """Show the channels as layout (extract_layout) says. The mix is left as it is."""
+    st.update(copy.deepcopy({k: layout[k] for k in LAYOUT_KEYS}))
+
 
 def extract_mix(st):
     return copy.deepcopy({k: st[k] for k in MIX_KEYS})

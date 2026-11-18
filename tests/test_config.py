@@ -264,6 +264,22 @@ class DeviceStateTest(unittest.TestCase):
                     (kind, c, o) for kind in ("in", "play") for c in dev.all_channels(kind)
                     for o in outs})
 
+    def test_layouts_are_kept_per_interface(self):
+        for key, dev in DEVICES.items():
+            with self.subTest(key):
+                st, _problem = config.load_state(dev)
+                groups = dev.channel_groups()
+                st.update(hidden=groups[:1], hidden_strips=["in:1"], folded=["out"],
+                          custom_names=False)
+                st["layouts"][3] = m.extract_layout(st, f"{key} small")
+                config.save_state(st, dev)
+                loaded, problem = config.load_state(dev)
+                self.assertIsNone(problem)
+                self.assertEqual(loaded["layouts"], st["layouts"])
+                self.assertEqual(loaded["layouts"][3]["hidden"], groups[:1])
+        self.assertEqual(config.load_state(DEVICES["ff800"])[0]["layouts"][3]["name"],
+                         "ff800 small")          # each its own: not the last one saved
+
     def test_the_aio_extension_boards_keep_their_routing(self):
         """Analog 3-6 (AI4S/AO4S, hardware channels 2-5) have no strips yet, but the engine
         mixes them: the default playback 3-6 to outputs 3-6 must stay, or a card with an AO4S

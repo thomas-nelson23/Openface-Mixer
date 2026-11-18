@@ -29,8 +29,9 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_mix, clear_sends_outside,
-    compute_matrix, compute_out_gains, default_state, display_name, extract_mix, get_strip_db,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_layout, apply_mix,
+    clear_sends_outside, compute_matrix, compute_out_gains, default_state, display_name,
+    extract_layout, extract_mix, get_strip_db,
     group_follow, set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon,
     speed_mode, strip_channels, strip_color, strip_hidden, strip_icon, strip_key,
 )
@@ -138,6 +139,8 @@ class MainWindow(QMainWindow):
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
         self.settings.meters_changed.connect(self.apply_meter_prefs)
+        self.settings.layout_stored.connect(self.store_layout)
+        self.settings.layout_recalled.connect(self.recall_layout)
         self.settings.export_btn.clicked.connect(self.export_mix)
         self.settings.import_btn.clicked.connect(self.import_mix)
         self.settings.reset_btn.clicked.connect(self.reset_mix)
@@ -331,10 +334,12 @@ class MainWindow(QMainWindow):
             sc.activated.connect(slot)
 
     def escape(self):
-        """Esc un-arms Store; with nothing to un-arm it closes an effects panel."""
-        if self.store_btn.isChecked():
-            self.store_btn.setChecked(False)
-        else:
+        """Esc un-arms Store (of the presets or the layouts); with nothing to un-arm it closes
+        an effects panel."""
+        armed = [b for b in (self.store_btn, self.settings.layout_store) if b.isChecked()]
+        for b in armed:
+            b.setChecked(False)
+        if not armed:
             self.close_fx_panel()
 
     def tab_focus_only(self):
@@ -1150,6 +1155,30 @@ class MainWindow(QMainWindow):
                 self.st["active_slot"] = None       # nothing is recalled from an empty slot
                 self.schedule_save()
             self.refresh_slots()
+
+    def store_layout(self, i):
+        old = self.st["layouts"][i]
+        name, ok = QInputDialog.getText(self, "Store layout", f"Name for layout {i + 1}:",
+                                        text=old["name"] if old else f"Layout {i + 1}")
+        if not ok:
+            return
+        name = name.strip() or f"Layout {i + 1}"
+        self.st["layouts"][i] = extract_layout(self.st, name)
+        self.settings.refresh_layouts()
+        self.schedule_save()
+        self.notify(f"Saved layout “{name}” in {i + 1}")
+
+    def recall_layout(self, i):
+        """Show the channels and rows as layout i has them. Only what is shown changes; a solo
+        on a channel the layout hides is switched off (rebuild_sources), as when hiding it."""
+        layout = self.st["layouts"][i]
+        apply_layout(self.st, layout)
+        for r in (self.row_in, self.row_play, self.row_out):
+            r.set_folded(r.kind in layout["folded"])
+        self.settings.show_view()
+        self.rebuild_all()
+        self.schedule_save()
+        self.notify(f"Layout “{layout['name']}”")
 
     def export_mix(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export mix", "mix.ofmix.json",
