@@ -28,7 +28,8 @@ case " $* " in
     *" is-enabled "*) grep -qx "$unit" "$STUB/enabled" ;;
     *" list-units "*) grep -- "${unit%\*}" "$STUB/running" | sed 's/$/ loaded active running/' ;;
     *" enable "*) echo "$unit" >> "$STUB/enabled" ;;
-    *" disable "*) sed -i "/^$unit\$/d" "$STUB/enabled" "$STUB/running" ;;
+    *" disable "*) sed -i "/^$unit\$/d" "$STUB/enabled" "$STUB/running"
+                   rm -f "$HOME/.config/systemd/user/"*.wants/"$unit" ;;
 esac
 """
 STUBS = {"systemctl": SYSTEMCTL,
@@ -187,6 +188,41 @@ class InstallTest(unittest.TestCase):
         self.assertIn(f"systemctl --user disable --now {DIGIFACE}", calls)
         self.assertNotIn(f"systemctl --user restart {DIGIFACE}", calls)
         self.assertEqual(calls.count(f"systemctl --user restart {FF802}"), 1)
+
+    def test_update_moves_engines_to_the_login(self):
+        """Before 0.4.0 the units were wanted by pipewire.service and so never started without
+        PipeWire. An update enables them again for the login (default.target), once."""
+        mix = self.config / "openface-mixer" / "state.json"
+        mix.parent.mkdir(parents=True)
+        mix.write_text("{}")
+        wants = self.config / "systemd" / "user" / "pipewire.service.wants"
+        wants.mkdir(parents=True)
+        for unit in (DIGIFACE, FF802):
+            (wants / unit).symlink_to(f"../{unit.split('@')[0]}")
+        self.set_units(enabled=(DIGIFACE, FF802), running=(DIGIFACE,))
+        _, calls = self.run_script("install.sh")
+        for unit in (DIGIFACE, FF802):
+            self.assertEqual(calls.count(f"systemctl --user reenable {unit}"), 1)
+        units = (self.config / "systemd" / "user" / "openface-mixer-engine.service").read_text()
+        self.assertIn("\nWantedBy=default.target\n", units)
+        self.assertIn("\nWants=pipewire.service\n", units)
+        self.assertNotIn("Requires=", units)
+        # the next update finds nothing to move
+        for unit in (DIGIFACE, FF802):
+            (wants / unit).unlink()
+        _, calls = self.run_script("install.sh")
+        self.assertFalse([c for c in calls if "reenable" in c])
+
+    def test_update_does_not_bring_back_an_engine_it_switched_off(self):
+        if digiface_connected():
+            self.skipTest("a Digiface is connected")
+        wants = self.config / "systemd" / "user" / "pipewire.service.wants"
+        wants.mkdir(parents=True)
+        (wants / DIGIFACE).symlink_to(f"../{DIGIFACE}")
+        self.set_units(enabled=(DIGIFACE,), running=(DIGIFACE,))
+        _, calls = self.run_script("install.sh")
+        self.assertIn(f"systemctl --user disable --now {DIGIFACE}", calls)
+        self.assertFalse([c for c in calls if "reenable" in c])
 
 
 if __name__ == "__main__":
