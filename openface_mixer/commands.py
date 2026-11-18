@@ -24,6 +24,8 @@ def from_args(args):
 
 def parse(line):
     """(command, preset slot from 0 or None) for one line received, or None if it is not one."""
+    if len(line) > MAX_LINE:
+        return None
     words = line.decode("ascii", "replace").split()
     if len(words) == 1 and words[0] in OPTIONS.values():
         return words[0], None

@@ -1571,7 +1571,7 @@ def serve(server, handle):
             def read(sock=sock, buf=buf):
                 buf.extend(sock.readAll().data())
                 *lines, rest = bytes(buf).split(b"\n")
-                buf[:] = rest if len(rest) <= commands.MAX_LINE else b""
+                buf[:] = rest[:commands.MAX_LINE + 1]     # enough to know it is too long
                 for line in lines:
                     cmd = commands.parse(line)
                     if cmd is not None:

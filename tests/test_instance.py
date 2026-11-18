@@ -79,7 +79,7 @@ class CommandsTest(unittest.TestCase):
         self.assertEqual(commands.parse(b"mute-main"), ("mute-main", None))
         self.assertEqual(commands.parse(b"recall 8"), ("recall", 7))
         for junk in (b"", b"recall", b"recall 9", b"recall 1 2", b"quit", b"dim dim",
-                     b"\xff\xfe", b"SHOW", b"recall \xd9\xa3"):
+                     b"\xff\xfe", b"SHOW", b"recall \xd9\xa3", b" " * 70 + b"dim"):
             self.assertIsNone(commands.parse(junk), junk)
 
     @unittest.skipUnless(QApplication, "needs PySide6")
@@ -226,6 +226,22 @@ class SocketTest(unittest.TestCase):
         while time.monotonic() < end:
             self.app.processEvents()
         self.assertEqual(len(self.got["digiface"]), 2)
+
+    def test_a_long_line_in_pieces_is_dropped_whole(self):
+        from PySide6.QtNetwork import QLocalSocket
+        from openface_mixer import app
+        self.start("digiface")
+        sock = QLocalSocket()
+        sock.connectToServer(app.socket_name(DEVICES["digiface"]))
+        self.assertTrue(sock.waitForConnected(1000))
+        for piece in (b" " * 100, b"dim\nmute-main\n"):   # the end of the long line looks
+            sock.write(piece)                                 # like a command on its own
+            sock.waitForBytesWritten(1000)
+            end = time.monotonic() + 0.2
+            while time.monotonic() < end:
+                self.app.processEvents()
+        sock.disconnectFromServer()
+        self.assertEqual(self.wait("digiface", 1), [("mute-main", None)])
 
     def test_nothing_running(self):
         from openface_mixer import app
