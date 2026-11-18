@@ -198,6 +198,10 @@ class PipeWireClockTest(unittest.TestCase):
         self.assertEqual(values["clock.force-quantum"], 256)
         self.assertEqual(values["clock.max-quantum"], 2048)
         self.assertNotIn("clock.allowed-rates", values)
+        # pw-metadata -d took both keys away (not forced): still read, both Auto
+        cleared = "\n".join(l for l in SETTINGS.splitlines() if "force" not in l)
+        with mock.patch.object(hardware.subprocess, "run", return_value=done(cleared)):
+            self.assertEqual(hardware.pw_clock().get(hardware.FORCE_RATE, 0), 0)
         for answer in (done(code=255, stderr="can't connect: Host is down"), done("nothing")):
             with mock.patch.object(hardware.subprocess, "run", return_value=answer):
                 self.assertIsNone(hardware.pw_clock())

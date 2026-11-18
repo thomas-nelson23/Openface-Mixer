@@ -171,15 +171,15 @@ FORCE_RATE, FORCE_QUANTUM = "clock.force-rate", "clock.force-quantum"
 
 def pw_clock():
     """PipeWire's settings metadata as {key: whole number}: clock.force-rate and
-    clock.force-quantum (0 = not forced), clock.min-quantum and clock.max-quantum. None if it
-    can't be read (PipeWire not running, no pw-metadata)."""
+    clock.force-quantum (0 or left out = not forced), clock.min-quantum and clock.max-quantum.
+    None if it can't be read (PipeWire not running, no pw-metadata)."""
     out, _why = run(["pw-metadata", "-n", "settings", "0"])
     if out is None:
         return None
     found = {}
     for m in re.finditer(r"key:'(clock\.[\w.-]+)' value:'(\d+)'", out):
         found[m.group(1)] = int(m.group(2))
-    return found if FORCE_RATE in found or FORCE_QUANTUM in found else None
+    return found or None     # clock.rate is always there
 
 
 def set_pw_clock(key, value):
