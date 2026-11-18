@@ -222,6 +222,10 @@ class Fader(QWidget):
     def mouseReleaseEvent(self, e):
         self._drag = None
 
+    def dragged_from_off(self):
+        """True during a drag that started at -∞."""
+        return self._drag is not None and self._drag[1] == db2pos(NEG_INF)
+
     def mouseDoubleClickEvent(self, e):
         self._set_pos(db2pos(0.0))
 

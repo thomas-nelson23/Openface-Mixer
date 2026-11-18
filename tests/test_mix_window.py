@@ -15,7 +15,8 @@ from openface_mixer.model import NEG_INF
 from openface_mixer.devices import DEVICES
 
 try:
-    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtCore import QCoreApplication, QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
     from PySide6.QtWidgets import QApplication, QMenu
 except ImportError:
     QApplication = None
@@ -91,6 +92,21 @@ class MixWindowTest(unittest.TestCase):
 
     def previous(self):
         return json.loads(config.previous_mix_file(self.dev).read_text())["mix"]
+
+    @staticmethod
+    def drag(fader, to):
+        """Drag the fader with the mouse through the positions (0..1 of its travel) in to."""
+        top, bot = fader._track()
+        start = fader.pos
+
+        def event(kind, pos):
+            y = bot - (pos - start) * (bot - top)
+            return QMouseEvent(kind, QPointF(5, y), QPointF(5, y), Qt.LeftButton, Qt.LeftButton,
+                               Qt.NoModifier)
+        fader.mousePressEvent(event(QEvent.MouseButtonPress, start))
+        for pos in to:
+            fader.mouseMoveEvent(event(QEvent.MouseMove, pos))
+        fader.mouseReleaseEvent(event(QEvent.MouseButtonRelease, to[-1]))
 
     # ---------------------------------------------------------------- damaged files at start
     def test_opens_on_damaged_files(self):
@@ -557,6 +573,16 @@ class MixWindowTest(unittest.TestCase):
         w.trim_btn.click()
         w.move_fader(w.strips["in:0"], -20.0)
         self.assertEqual(w.st["sends"]["in"][0][0][0], -70.0)
+        w.trim_btn.click()
+        fader = w.strips["in:2"].fader                  # off in Phones, on in Main Out
+        w.st["sends"]["in"][2][0] = [-10.0, 0.0]
+        w.refresh_sends("in")
+        self.drag(fader, [0.1, 0.4, 0.8, 0.9])          # up from -∞: only this submix
+        self.assertEqual(w.st["sends"]["in"][2][0][0], -10.0)
+        self.assertGreater(w.st["sends"]["in"][2][16][0], -10.0)
+        self.drag(fader, [0.9, 0.8])                    # then a trim
+        self.assertLess(w.st["sends"]["in"][2][0][0], -10.0)
+        w.trim_btn.click()
         w.save()
         self.close(w)
         self.assertFalse(self.window().st["trim"])

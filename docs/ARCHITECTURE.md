@@ -170,7 +170,8 @@ app.MainWindow
   a linked pair keeps for unlinking, and the window applies them through `replace_mix`, so
   *Restore previous mix* takes them back.
 - **Trim** (`state["trim"]`, saved, not part of a mix): a source fader moves every send of its
-  channel that is on by the same dB (`model.trim_sends`), between -80 and +6 dB.
+  channel that is on by the same dB (`model.trim_sends`), between -80 and +6 dB. A drag that
+  starts at -∞ switches on the send in the selected submix only, so it can't lift the others.
 - **Cue** is the window's `cue` (an output pair or None), never saved: `control_room.apply()`
   copies that pair's rows of the matrix over Main Out's before Mono, Speaker B, Dim and Talkback.
 - **Presets** store `extract_mix(state)`: stereo links and what they keep for unlinking, mutes,

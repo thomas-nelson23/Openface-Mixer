@@ -745,7 +745,9 @@ class MainWindow(QMainWindow):
                 moved[key] = before[key]
                 if key in self.strips:
                     self.strips[key].set_fader(val)
-        if self.st["trim"]:         # Trim Gains: the other submixes follow, see trim_sends
+        # Trim Gains: the other submixes follow (trim_sends), but not while a send is being
+        # switched on from -∞ here, which would lift them all to +6 dB
+        if self.st["trim"] and not strip.fader.dragged_from_off():
             for key, was in moved.items():
                 now = get_strip_db(self.st, key)
                 shown = trim_sends(self.st, key, was, now)
