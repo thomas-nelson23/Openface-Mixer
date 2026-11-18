@@ -31,7 +31,6 @@ class Model:
     key = ""
     card = ""                 # ALSA card short name, before the serial ("_1a2b3c") if any
     pci_revisions = ()        # as snd-hdspm's probe tells the cards apart
-    sink_channels = ""        # what playback channels 1/2 are called
     phones_pairs = ()
     # (label, snd-hdspm sync check, frequency control) for the INPUT STATUS box; snd-hdspe
     # reports the same inputs, named after its Preferred AutoSync Reference items
@@ -40,6 +39,11 @@ class Model:
 
     def channels(self, kind, mode):
         raise NotImplementedError
+
+    def pcm_channels(self, kind, mode):
+        """The channels in the order of the drivers' PCM channels (their channel_map_*
+        tables, the same in snd-hdspm and snd-hdspe)."""
+        return self.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         raise NotImplementedError
@@ -66,7 +70,6 @@ class RayDAT(Model):
     key = "raydat"
     card = "RME RayDAT"
     pci_revisions = (211,)
-    sink_channels = "A1 1/2"          # the driver's PCM channels start with ADAT 1
     first_adat = 4
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT 1", "ADAT 2", "ADAT 3",
                             "ADAT 4", "TCO", "Sync In")
@@ -77,6 +80,10 @@ class RayDAT(Model):
 
     def channels(self, kind, mode):
         return list(range(self.n_channels(mode)))
+
+    def pcm_channels(self, kind, mode):
+        chans = self.channels(kind, mode)       # ADAT 1-4, then AES and S/PDIF
+        return chans[self.first_adat:] + chans[:self.first_adat]
 
     def chan_label(self, kind, c, mode):
         if c < 2:
@@ -92,7 +99,6 @@ class AIO(Model):
     key = "aio"
     card = "RME AIO"
     pci_revisions = (212,)            # the AIO Pro too
-    sink_channels = "AN 1/2"
     phones_pairs = (3,)               # PH L/R, channels 6/7
     first_adat = 12
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT", "TCO", "Sync In")
@@ -103,6 +109,10 @@ class AIO(Model):
     def channels(self, kind, mode):
         fixed = [0, 1] + ([6, 7] if kind != "in" else []) + [8, 9, 10, 11]
         return fixed + list(range(self.first_adat, self.first_adat + 8 // mode))
+
+    def pcm_channels(self, kind, mode):
+        adat = list(range(self.first_adat, self.first_adat + 8 // mode))
+        return [0, 1, 8, 9, 10, 11] + adat + ([6, 7] if kind != "in" else [])   # phones last
 
     def chan_label(self, kind, c, mode):
         if c >= self.first_adat:
@@ -124,7 +134,6 @@ class AES(Model):
     key = "aes"
     card = "RME AES32"
     pci_revisions = (240, 230, 231, 232, 233, 234)
-    sink_channels = "AES 1/2"
     status_inputs = _status("Word Clock", *(f"AES {n}" for n in range(1, 9)), "TCO", "Sync In",
                             check="Sync Check")
 

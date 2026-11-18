@@ -53,7 +53,7 @@ class MixWindowTest(unittest.TestCase):
                 stop=lambda self: None),
             mock.patch.multiple(
                 app.MainWindow, poll_hw=lambda self: None, poll_profile=lambda self: None,
-                ensure_engine=lambda self: None),
+                poll_pw_clock=lambda self: None, ensure_engine=lambda self: None),
             mock.patch.object(app.QMessageBox, "warning", self.warning),
             mock.patch.object(app, "ask", self.ask),
             mock.patch.object(app.QFileDialog, "getOpenFileName", self.open_name),

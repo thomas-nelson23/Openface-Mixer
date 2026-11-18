@@ -16,7 +16,7 @@ ENGINE_BINARY = "openface-mixer-engine"
 
 # Must match struct ofm_shm in engine/shm_layout.h
 SHM_MAGIC = 0x584D464F
-SHM_VERSION = 8
+SHM_VERSION = 9
 HDR_SIZE = 64
 HDR_MAGIC, HDR_VERSION, HDR_N_SRC, HDR_N_OUT, HDR_HEARTBEAT, HDR_RATE, HDR_PID = 0, 1, 2, 3, 4, 5, 6
 HDR_HW_STATE, HDR_HW_NODES, HDR_HW_LEVELS, HDR_SINK_LINKED, HDR_DEV_STATUS = 7, 8, 9, 10, 11
@@ -31,7 +31,9 @@ OFF_RMS_SRC = OFF_DEV_CMD + N_DEV_CMD * 4      # the meter extras of version 8
 OFF_RMS_OUT = OFF_RMS_SRC + N_SRC * 4
 OFF_OVER_SRC = OFF_RMS_OUT + N_OUT * 4
 OFF_OVER_OUT = OFF_OVER_SRC + N_SRC * 4
-SHM_SIZE = OFF_OVER_OUT + N_OUT * 4
+# the PipeWire block of version 9: pw_reload (the GUI's), pw_connected, pw_nodes, pw_linked
+OFF_PW = OFF_OVER_OUT + N_OUT * 4
+SHM_SIZE = OFF_PW + 4 * 4
 
 # hw_state values (DFU_STATE_* in engine/digiface_usb.h)
 HW_STATES = ("starting", "no-device", "no-access", "busy", "active", "no-nodes", "error",
@@ -102,6 +104,7 @@ class Engine:
         if not self.pid_alive():
             return None
         h = self.header()
+        _reload, pw, made, linked = struct.unpack_from("<4I", self.m, OFF_PW)
         now = time.monotonic()
         if h[HDR_HEARTBEAT] != self._last_hb:
             self._last_hb, self._last_hb_time = h[HDR_HEARTBEAT], now
@@ -109,6 +112,8 @@ class Engine:
             "processing": now - self._last_hb_time < 1.0,
             "rate": h[HDR_RATE],
             "sink_linked": bool(h[HDR_SINK_LINKED]),
+            # PipeWire: connected, and how many desktop sinks and sources are made and linked
+            "pipewire": bool(pw), "pw_nodes": made, "pw_linked": linked,
             "hw": HW_STATES[h[HDR_HW_STATE]] if h[HDR_HW_STATE] < len(HW_STATES) else "error",
             "hw_nodes": h[HDR_HW_NODES], "hw_levels": bool(h[HDR_HW_LEVELS]),
             "dev_status": h[HDR_DEV_STATUS], "dev_status2": h[HDR_DEV_STATUS2],
@@ -128,6 +133,12 @@ class Engine:
             self.m[OFF_DEV_CMD:OFF_DEV_CMD + N_DEV_CMD * 4] = struct.pack(f"<{N_DEV_CMD}I", *cmds)
             self.m[OFF_DEV_CONFIG:OFF_DEV_CONFIG + 4] = struct.pack("<I", config)
 
+    def reload_sinks(self):
+        """Tell the engine to read sinks.conf again (config.save_sinks wrote it)."""
+        if self.attach():
+            n, = struct.unpack_from("<I", self.m, OFF_PW)
+            struct.pack_into("<I", self.m, OFF_PW, (n + 1) & 0xFFFFFFFF)
+
     def read_peaks(self):
         """Returns (source peaks, output peaks, source RMS, output RMS, source overs, output
         overs) as floats (levels linear, overs the consecutive full-scale samples counted) and
@@ -142,7 +153,7 @@ class Engine:
             (OFF_PEAK_SRC, N_SRC), (OFF_PEAK_OUT, N_OUT), (OFF_RMS_SRC, N_SRC),
             (OFF_RMS_OUT, N_OUT), (OFF_OVER_SRC, N_SRC), (OFF_OVER_OUT, N_OUT)))
         self.m[OFF_PEAK_SRC:OFF_PEAK_OUT + N_OUT * 4] = bytes((N_SRC + N_OUT) * 4)
-        self.m[OFF_RMS_SRC:SHM_SIZE] = bytes(SHM_SIZE - OFF_RMS_SRC)
+        self.m[OFF_RMS_SRC:OFF_PW] = bytes(OFF_PW - OFF_RMS_SRC)
         return got
 
     # ---- process management: prefer the systemd user service, fall back to spawning

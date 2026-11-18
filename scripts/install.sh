@@ -110,6 +110,13 @@ elif [ ! -e "$CONFIG/openface-mixer/state.json" ]; then
     # switch it off, with its playback sink that goes nowhere.
     systemctl --user disable --now "$DIGIFACE" 2>/dev/null || true
 fi
+# Before 0.4.0 the engines were wanted by pipewire.service, so they never started without it:
+# enable them again, for the login itself.
+for link in "$UNIT_DIR"/pipewire.service.wants/openface-mixer-engine*.service; do
+    if [ -L "$link" ]; then
+        systemctl --user reenable "$(basename "$link")" || true
+    fi
+done
 units=$(systemctl --user list-units --plain --no-legend 'openface-mixer-engine*' | awk '{print $1}')
 if systemctl --user --quiet is-enabled "$DIGIFACE" 2>/dev/null; then
     units="$units $DIGIFACE"

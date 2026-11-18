@@ -72,11 +72,14 @@ class WorkspaceFileTest(unittest.TestCase):
                 st = busy(dev)
                 st["solo"]["in"][0] = True              # a solo is never kept
                 st["remote"] = {"enabled": True, "port": 7001}  # nor this computer's network
+                st["sinks"].append({"kind": "source", "ch": 0, "stereo": False, "name": "Mic"})
                 export_workspace(self.path, dev, st, self.slots(st), UI)
-                self.assertNotIn("remote", json.loads(self.path.read_text())["state"])
+                saved = json.loads(self.path.read_text())["state"]
+                self.assertNotIn("remote", saved)
+                self.assertNotIn("sinks", saved)        # nor its desktop sinks and sources
                 loaded, slots, ui = import_workspace(self.path, dev)
                 expected = dict(st, solo=m.default_state()["solo"])
-                del expected["remote"]
+                del expected["remote"], expected["sinks"]
                 self.assertEqual(loaded, expected)
                 self.assertEqual(slots, self.slots(st))
                 self.assertEqual(ui, UI)
@@ -114,11 +117,14 @@ class WorkspaceFileTest(unittest.TestCase):
         self.path.write_text(json.dumps(data))
         self.refused("The mix in this workspace is damaged.")
 
-    def test_a_hand_made_remote_setting_is_left_out(self):
+    def test_a_hand_made_remote_setting_or_sink_list_is_left_out(self):
         data = self.write()
         data["state"]["remote"] = {"enabled": True}
+        data["state"]["sinks"] = []
         self.path.write_text(json.dumps(data))
-        self.assertNotIn("remote", import_workspace(self.path, self.dev)[0])
+        st = import_workspace(self.path, self.dev)[0]
+        self.assertNotIn("remote", st)
+        self.assertNotIn("sinks", st)
 
     def test_a_missing_file_is_an_os_error(self):
         with self.assertRaises(OSError):
@@ -146,7 +152,9 @@ class WorkspaceFileTest(unittest.TestCase):
         state_file = self.dir / "old-state"
         state_file.write_text(saved(old))
         with mock.patch.object(config, "state_file", lambda dev: state_file):
-            self.assertEqual(st, config.load_state(dev)[0])     # as the state file would be
+            loaded = config.load_state(dev)[0]              # as the state file would be,
+        del loaded["sinks"]                                 # but for this computer's sinks
+        self.assertEqual(st, loaded)
         bank = self.dir / "presets.json"
         bank.write_text(json.dumps({"version": 1, "slots": [{"name": "Old", "mix": mix}]}))
         self.assertEqual(slots, presets.PresetBank(bank).slots)

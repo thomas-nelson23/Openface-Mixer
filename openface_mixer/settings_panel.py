@@ -10,11 +10,14 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import hdspe, theme, updater
+from . import hdspe, sinks, theme, updater
 from .config import PEAK_HOLDS, UI_SCALES, load_meter_prefs, load_update_prefs, save_ui
 from .devices import DEVICES, connected, group_title
-from .hardware import Hardware, set_card_profile
-from .model import N_SLOTS
+from .hardware import (
+    FORCE_QUANTUM, FORCE_RATE, PW_QUANTA, PW_RATES, Hardware, pw_clock, set_card_profile,
+    set_pw_clock,
+)
+from .model import N_SLOTS, speed_mode
 from .theme import SANS, Section, caption_html, font, key_label, px
 
 # Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
@@ -145,12 +148,43 @@ def read_failure(hw, short):
     return "Can't read settings", hw.error or "The card's ALSA controls are not the expected ones."
 
 
+def desktop_audio(dev, lst, status):
+    """The Desktop audio row of STATUS: (value, tooltip), from the engine's status
+    (Engine.status()) and the device's sinks and sources (st["sinks"])."""
+    mode = speed_mode(status.get("rate"))
+
+    def where(e):
+        kind = sinks.kind_of(e)
+        label = (dev.pair_label if e["stereo"] else dev.chan_label)(kind, e["ch"], mode)
+        return f"{'playback' if kind == 'play' else 'input'} {label}"
+
+    here = [e for e in lst if sinks.pcm_map(dev, e)[(1, 2, 4).index(mode)][0] >= 0]
+    tip = "<br>".join(html.escape(f"{sinks.description(e['name'])}: " + (
+        where(e) if e in here else "not at this sample rate")) for e in lst)
+    if not status.get("pipewire", True):
+        return light(OFF, "PipeWire not running"), (
+            "The hardware mixer works without PipeWire. The desktop outputs and inputs come "
+            "back when it starts.")
+    if not here:
+        return light(OFF, "None at this rate" if lst else "None"), tip or (
+            "Right-click a playback or input channel to add one.")
+    made = status.get("pw_nodes", len(here))
+    linked = status.get("pw_linked", made if status["sink_linked"] else 0)
+    if made and linked == made:
+        return (f"Linked to {where(here[0])}" if made == 1 else f"{made} linked"), tip
+    short = dev.name.replace("RME ", "")
+    return light(RED, f"Not linked to the {short}" if not linked else
+                 f"{linked} of {made} linked"), tip
+
+
 def write_failure(why, dev, tool="amixer"):
     """The toast for a setting tool could not change (why: hardware.run()'s answer)."""
     if why == "missing":
         why = f"{tool} is not installed"
     elif why == "timeout":
         why = f"{tool} did not answer"
+    elif tool == "pw-metadata" and "connect" in why:
+        why = "PipeWire is not running"
     elif dev.family == "hdspe" and "busy" in why:
         why = "the driver is busy while playback and recording are open in two programs"
     else:   # "amixer: Control hw:1 element write error: Device or resource busy": the reason
@@ -349,7 +383,7 @@ class SettingsPanel(QWidget):
             self._build_card_profile(el)
         self.hw_label, self.routes_label, self.eng_label, self.sink_label = (
             self._status_row(el, key) for key in ("Hardware mixer", "Routes", "Engine",
-                                                  "Playback sink"))
+                                                  "Desktop audio"))
         self.status_note = QLabel()
         self.status_note.setObjectName("note")
         self.status_note.setWordWrap(True)
@@ -374,6 +408,7 @@ class SettingsPanel(QWidget):
             self._build_hdspe(lay)
         else:
             self._build_digiface(lay)
+        self._build_pw_clock(self.clock_grid)
         self._control_room_at = lay.count()   # add_control_room() slots its section here
 
         self._build_ui_scale(lay, ui_scale)
@@ -384,9 +419,9 @@ class SettingsPanel(QWidget):
         eng.setToolTip(
             f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
             "has no added latency and the mix keeps running with the computer idle or the "
-            f"engine stopped.\n\nPlayback {dev.sink_channels} = the Openface Mixer Playback "
-            "sink. Other playback channels: send apps to the interface's own output channels "
-            "(Pro Audio profile) with qpwgraph/Helvum.")
+            "engine stopped.\n\nDesktop audio: the outputs and inputs apps play to and record "
+            "from. Right-click a playback channel to add a desktop output on it, or an input "
+            "channel to add a desktop input.")
         lay.addStretch()
 
     def add_control_room(self, section):
@@ -715,6 +750,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         ports = Section("OPTICAL PORTS")
@@ -735,6 +771,65 @@ class SettingsPanel(QWidget):
             self.port_widgets.append((fmt, led, rate, out))
         pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
+
+    def _build_pw_clock(self, grid):
+        """PipeWire's sample rate and buffer, at the end of the CLOCK box: clock.force-rate and
+        clock.force-quantum in its settings metadata, so for every program and device. Auto
+        is 0, PipeWire's own choice. The boxes show what PipeWire has, read when the window is
+        shown (read_pw_clock). PipeWire forgets a forced value when it restarts and the app
+        does not set it again: it is not the app's alone, and the app may not even run."""
+        tip = ("PipeWire's setting, for every program and every device, until PipeWire restarts. "
+               "Auto lets PipeWire choose.")
+        rate_tip = (" The card runs at its Internal rate while nothing plays, and at this rate "
+                    "while PipeWire plays." if self.dev.family == "hdspe" else
+                    " The interface follows it.") + (
+            " With an external clock, choose the rate the clock runs at.")
+        self.pw_rate, self.pw_quantum = QComboBox(), QComboBox()
+        self._pw_values = {}
+        r = grid.rowCount()
+        for i, (label, combo, key, text) in enumerate((
+                ("PipeWire rate", self.pw_rate, FORCE_RATE, tip + rate_tip),
+                ("Buffer", self.pw_quantum, FORCE_QUANTUM,
+                 "Frames per cycle: fewer means less latency and more work. " + tip))):
+            grid.addWidget(key_label(label), r + i, 0)
+            grid.addWidget(combo, r + i, 1)
+            combo.setToolTip(text)
+            combo.setEnabled(False)          # until PipeWire's values are read
+            combo.activated.connect(lambda _i, c=combo, k=key: self._set_pw_clock(k, c))
+        hint = QLabel("PipeWire's rate and buffer apply to every program and device.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        grid.addWidget(hint, r + 2, 0, 1, -1)
+
+    def read_pw_clock(self):
+        """Show PipeWire's rate and buffer. pw-metadata answers at once, or within run()'s
+        2 s limit, like the pactl the window polls."""
+        self._show_pw_clock(pw_clock())
+
+    def _show_pw_clock(self, values):
+        """values: hardware.pw_clock(), or None if PipeWire's settings can't be read."""
+        self._pw_values = values or {}
+        lo = self._pw_values.get("clock.min-quantum", PW_QUANTA[0])
+        hi = self._pw_values.get("clock.max-quantum", PW_QUANTA[-1])
+        for combo, key, choices, text in (
+                (self.pw_rate, FORCE_RATE, PW_RATES, lambda v: f"{v / 1000:g} kHz"),
+                (self.pw_quantum, FORCE_QUANTUM, [q for q in PW_QUANTA if lo <= q <= hi], str)):
+            if combo.view().isVisible():    # leave a list that is open alone
+                continue
+            value = self._pw_values.get(key, 0)
+            combo.clear()
+            combo.addItem("Auto", 0)
+            for v in sorted(set(choices) | ({value} if value else set())):
+                combo.addItem(text(v), v)
+            combo.setCurrentIndex(combo.findData(value) if values is not None else -1)
+            combo.setEnabled(values is not None)
+
+    def _set_pw_clock(self, key, combo):
+        value = combo.currentData()
+        if value == self._pw_values.get(key, 0):
+            return
+        self._report(set_pw_clock(key, value), "pw-metadata")
+        self.read_pw_clock()        # show what PipeWire has now
 
     @staticmethod
     def _status_row(grid, key):
@@ -805,6 +900,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         sync = Section("INPUT STATUS")
@@ -1118,6 +1214,7 @@ class SettingsPanel(QWidget):
             self.routes_label.setText("—")
             self.eng_label.setText(light(RED, "Stopped"))
             self.sink_label.setText("—")
+            self.sink_label.setToolTip("")
             self.show_status_note(html.escape(engine_error) if engine_error else
                                   "The hardware keeps its last mix. Start the engine to "
                                   "change it.")
@@ -1136,9 +1233,10 @@ class SettingsPanel(QWidget):
             self.routes_label.setText("—")
         self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
                                light(RED, "Not responding"))
-        self.sink_label.setText(
-            f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
-            light(RED, f"Not linked to the {self.dev.name.replace('RME ', '')}"))
+        value, tip = desktop_audio(
+            self.dev, self.st.get("sinks", sinks.default_list(self.dev)), status)
+        self.sink_label.setText(value)
+        self.sink_label.setToolTip(tip)
         self.show_status_note(note)
         self.eng_btn.setText("Restart engine")
 

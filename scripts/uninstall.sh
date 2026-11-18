@@ -17,6 +17,7 @@ rm -f "$PREFIX/bin/openface-mixer" "$PREFIX/bin/openface-mixer-engine" \
       "$PREFIX/share/icons/hicolor/scalable/apps/openface-mixer.svg" \
       "$UNIT_DIR/openface-mixer-engine.service" "$UNIT_DIR/openface-mixer-engine@.service" \
       "$UNIT_DIR"/pipewire.service.wants/openface-mixer-engine*.service \
+      "$UNIT_DIR"/default.target.wants/openface-mixer-engine*.service \
       "$CONFIG"/autostart/openface-mixer-*.desktop \
       /dev/shm/openface-mixer-*"$(id -u)"
 rm -rf "$PREFIX/share/openface-mixer"

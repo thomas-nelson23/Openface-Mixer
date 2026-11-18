@@ -33,6 +33,8 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - A tray icon for a mixer started at login without a window: click it to show or hide the window, right-click for Dim, Mute main out, the presets and Quit. *Tray icon* below *Start at login* can show it always or never.
 - The *Device* list marks the interfaces that are connected.
 - Commands for desktop shortcuts: `openface-mixer --dim`, `--mute-main`, `--recall 3` and `--show` act on the running mixer, so the desktop's keyboard settings can give them hotkeys (see the README).
+- Desktop outputs and inputs: right-click a playback strip → *Add desktop output…* for a sink on that pair ("Openface Music" on playback 3/4), or an input strip → *Add desktop input…* for a mono or stereo source. Rename or remove them from the same menu. The playback sink on playback 1/2 is there as before and can be renamed or removed too.
+- Clock: *PipeWire rate* (Auto, 44.1 to 192 kHz) and *Buffer* (Auto, 32 to 2048 frames) set PipeWire's sample rate and buffer for every program. Auto writes nothing, and the app does not force a value again after PipeWire restarts.
 
 ### Changed
 
@@ -55,9 +57,11 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 - Uninstall also removes the start-at-login entries.
 - Updating keeps only the three newest config backups.
 - With the window hidden or closed to the background, the app stops polling and the engine reads the interface's meters once a second instead of about a hundred times. Meters are live again the moment the window is shown, and peak readouts start fresh.
-- If PipeWire crashes or is restarted, the engine stops with a clear log line and systemd starts it again, so the playback sink comes back by itself.
 - The engine and the window share a new meter layout, so the app restarts an engine from before the update once, by itself.
 - A mixer started at login without a window that switches to an interface whose window is already open shows that window and keeps running hidden, instead of quitting.
+- The engine runs without PipeWire: the hardware mixer, meters and status work under JACK alone or before PipeWire starts. When PipeWire starts, crashes or is restarted, the engine connects again by itself without sending the mix again, and the sinks come back.
+- The engines start at login whether PipeWire runs or not. Updating moves existing engines over.
+- Status: "Playback sink" is now "Desktop audio". It says "PipeWire not running" when PipeWire is not there, and its tooltip lists the desktop outputs and inputs.
 
 ### Fixed
 
@@ -138,7 +142,10 @@ people who have one can try them. Please try the points for your interface and
 - Update with the Digiface unplugged: `systemctl --user is-enabled openface-mixer-engine` still says `enabled`.
 - An old mix sounds the same after the update, and a mono channel panned to the centre is 3 dB down on each side.
 - Hide the window to the background for a minute and show it again: the meters move at once.
-- Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the engine comes back by itself. Please report a click or dropout.
+- Restart PipeWire (`systemctl --user restart pipewire`) while monitoring an input: the mix keeps playing, the engine is not restarted (`systemctl --user status openface-mixer-engine` shows the same start time) and Openface Mixer Playback comes back. Please report a click or dropout.
+- Switch PipeWire off (`systemctl --user mask --now pipewire.socket pipewire`), log out and in: the engine runs, the mix is restored and Status says "PipeWire not running". Unmask both and start them again: the sink appears.
+- Add a desktop output on AD1 3/4 and a desktop input on AD1 1: they show in the sound settings as "Openface …" and play and record on those channels. At 96 kHz one on a channel the Digiface lacks there goes away and comes back at 48 kHz.
+- *PipeWire rate* 96 kHz: the Digiface switches to double speed and the mixer shows its 2x channels. Back to Auto: PipeWire chooses again.
 - After the update the engine restarts once by itself and the meters move. The RMS bar sits inside the peak bar and falls with it.
 - Cue the Phones output while listening on Main Out: you hear the Phones mix at the Main Out level, Dim and Talkback still work, and a second press brings Main Out's own mix back.
 - Mirror one output's mix onto another, switch a mute group on, and move a fader with Trim on: what you hear follows what the faders show.
@@ -155,3 +162,6 @@ people who have one can try them. Please try the points for your interface and
 - ARC USB: give a key another function under *Keys*: it does that function, its light follows it, and *Reset to default* brings back the printed layout. The Phones keys still behave as above.
 - Cue, Mirror, mute groups and Trim, as for the Digiface. HDSPe: a cued mix plays at the Main Out level, which the card adds into every send.
 - The *Device* list says “(connected)” next to the interface while it is connected, and no longer once it is unplugged or switched off.
+- A desktop output on a pair other than 1/2 and a desktop input play and record on the channels their strips show. On the RayDAT and the AIO the driver orders its channels differently from the mixer, so please try AES and S/PDIF as well as ADAT, and the AIO phones.
+- *PipeWire rate* and *Buffer* change the rate the interface runs at; on an HDSPe card with Clock mode Master the card follows the PipeWire rate while PipeWire plays.
+- After an update, `systemctl --user list-dependencies default.target` lists the engine and `pipewire.service.wants` no longer does.

@@ -35,9 +35,9 @@ class SharedMemoryTest(unittest.TestCase):
         self.assertEqual((engine.OFF_GAIN, engine.OFF_OUT_GAIN, engine.OFF_PEAK_SRC,
                           engine.OFF_PEAK_OUT, engine.OFF_DEV_CONFIG, engine.OFF_DEV_CMD,
                           engine.OFF_RMS_SRC, engine.OFF_RMS_OUT, engine.OFF_OVER_SRC,
-                          engine.OFF_OVER_OUT, engine.SHM_SIZE),
+                          engine.OFF_OVER_OUT, engine.OFF_PW, engine.SHM_SIZE),
                          (64, 10432, 10576, 10864, 11008, 11012, 27396, 27684, 27828, 28116,
-                          28260))
+                          28260, 28276))
         # the meter extras, in this order after the command slots
         self.assertEqual(re.findall(r"^\tfloat (\w+)\[", LAYOUT, re.M)[-4:],
                          ["rms_src", "rms_out", "over_src", "over_out"])
@@ -64,6 +64,23 @@ class SharedMemoryTest(unittest.TestCase):
         # nothing else in the header is the GUI's to write
         self.assertEqual(e.header()[:engine.HDR_GUI_HEARTBEAT],
                          (engine.SHM_MAGIC, engine.SHM_VERSION) + (0,) * 11)
+
+    def test_pipewire_block(self):
+        """The engine's PipeWire status, and the GUI's word that has it read sinks.conf."""
+        e = self.segment()
+        self.assertTrue(e.attach())
+        struct.pack_into("<3I", e.m, engine.OFF_PW + 4, 1, 3, 2)
+        with mock.patch.object(e, "pid_alive", return_value=True):
+            s = e.status()
+        self.assertEqual((s["pipewire"], s["pw_nodes"], s["pw_linked"]), (True, 3, 2))
+        e.reload_sinks()
+        e.reload_sinks()
+        self.assertEqual(struct.unpack_from("<4I", e.m, engine.OFF_PW), (2, 1, 3, 2))
+        e.read_peaks()                  # zeroes the meters up to the block, not the block
+        self.assertEqual(struct.unpack_from("<4I", e.m, engine.OFF_PW), (2, 1, 3, 2))
+        struct.pack_into("<I", e.m, engine.OFF_PW, 0xFFFFFFFF)
+        e.reload_sinks()
+        self.assertEqual(struct.unpack_from("<I", e.m, engine.OFF_PW), (0,))
 
     def test_an_engine_from_another_version(self):
         """During an update one side is older for a moment: the window shows the engine as

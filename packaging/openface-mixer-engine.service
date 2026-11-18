@@ -1,8 +1,10 @@
 # Installed by scripts/install.sh, which fills in the full path of the command.
 [Unit]
 Description=Openface Mixer engine (drives the RME Digiface USB hardware mixer)
+# The mix needs no PipeWire: the engine restores it without, and makes the desktop's sinks
+# and sources whenever PipeWire runs, also after PipeWire restarts. No Wants= either, so that
+# a setup that keeps PipeWire off (JACK alone) does not get it started at login.
 After=pipewire.service wireplumber.service
-Requires=pipewire.service
 
 [Service]
 ExecStart="@BINDIR@/openface-mixer-engine"
@@ -12,4 +14,4 @@ RestartSec=2
 RestartPreventExitStatus=3
 
 [Install]
-WantedBy=pipewire.service
+WantedBy=default.target

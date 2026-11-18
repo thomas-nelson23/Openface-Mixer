@@ -12,9 +12,10 @@ FILE_FORMAT = "openface-mixer-mix"
 VERSION = 2     # of presets.json and of mix files. 2: constant-power pan (convert_pan_law)
 WORKSPACE_FORMAT = "openface-mixer-workspace"
 WORKSPACE_VERSION = 1   # the parts inside have their own (state, presets)
-# never in a workspace: solo, which never survives a restart either, and the OSC remote's
-# settings, which belong to this computer's network (a file must not open a port)
-NOT_IN_WORKSPACE = ("solo", "remote")
+# never in a workspace: solo, which never survives a restart either, the OSC remote's
+# settings, which belong to this computer's network (a file must not open a port), and the
+# desktop sinks and sources, which this computer's programs play to and record from
+NOT_IN_WORKSPACE = ("solo", "remote", "sinks")
 
 
 def read_mix(mix, data):
@@ -129,7 +130,7 @@ def import_workspace(path, dev):
     arc.assignment), and converted from older versions as those are. Raises ValueError, with
     a sentence to show, for a file that is not a workspace, is for another interface or has a
     damaged mix or preset; OSError for one that can't be read. Nothing is changed. The state
-    has no solo and no OSC remote settings (NOT_IN_WORKSPACE)."""
+    has no solo, no OSC remote settings and no desktop sinks and sources (NOT_IN_WORKSPACE)."""
     try:
         data = json.loads(Path(path).read_text())
     except (ValueError, RecursionError):
@@ -146,6 +147,7 @@ def import_workspace(path, dev):
     except ValueError:
         raise ValueError("The mix in this workspace is damaged.") from None
     st.pop("remote", None)
+    st.pop("sinks", None)
     slots, damaged = read_slots(data.get("presets"))
     if damaged:
         raise ValueError("The presets in this workspace are damaged.")

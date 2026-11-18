@@ -22,7 +22,7 @@
 #define OFM_SHM_MAGIC   0x584d464fu /* "OFMX" in little-endian byte order */
 #define OFM_N_DEV_CMD 4096                  /* device setting command slots (802/UCX II effects) */
 
-#define OFM_SHM_VERSION 8
+#define OFM_SHM_VERSION 9
 
 /* Header is exactly 64 bytes; all fields but gui_heartbeat are written by the engine. */
 struct ofm_shm {
@@ -36,7 +36,7 @@ struct ofm_shm {
 	uint32_t hw_state;       /* DFU_STATE_* (digiface_usb.h) */
 	uint32_t hw_nodes;       /* hardware mixer nodes in use */
 	uint32_t hw_levels;      /* 1 while the meters come from the hardware */
-	uint32_t sink_linked;    /* 1 while the playback sink is linked to playback 1/2 */
+	uint32_t sink_linked;    /* 1 while every desktop sink and source (pw_nodes) is linked */
 	uint32_t dev_status;     /* device status word (Fireface 802: sync status register;
 	                          * Fireface 800: first status quadlet) */
 	uint32_t dev_status2;    /* Fireface 800: second status quadlet */
@@ -71,6 +71,15 @@ struct ofm_shm {
 	float rms_out[OFM_N_OUT];
 	float over_src[OFM_N_SRC];
 	float over_out[OFM_N_OUT];
+
+	/* PipeWire (version 9): the desktop sinks and sources the engine makes, from sinks.conf in
+	 * the device's config directory. The GUI counts pw_reload up after it writes that file, and
+	 * the engine then reads it again. The rest the engine writes. */
+	uint32_t pw_reload;
+	uint32_t pw_connected;   /* 1 while the engine is connected to PipeWire */
+	uint32_t pw_nodes;       /* sinks and sources made (those on channels the interface has
+	                          * at its current speed) */
+	uint32_t pw_linked;      /* those of them linked to the interface */
 };
 
 #endif

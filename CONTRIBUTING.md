@@ -38,7 +38,9 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   tray_icon.py          the system tray icon (QSystemTrayIcon) built from tray.py
   channel_settings.py   per-channel settings popup (phase, 48V, Inst, level, gain, jacks)
   engine.py             shared-memory client + starting/stopping the engine
-  hardware.py           Digiface and HDSPe ALSA controls via amixer, PipeWire card profile via pactl
+  hardware.py           Digiface and HDSPe ALSA controls via amixer, PipeWire card profile via pactl,
+                        PipeWire's rate and buffer via pw-metadata
+  sinks.py              the desktop sinks and sources: checking the list, PCM channels, sinks.conf (no Qt)
   widgets.py            custom-painted Meter, Fader, Knob, channel Strip, Row
   wheel.py              mouse wheel and touchpad steps for faders, knobs and matrix cells (no Qt)
   matrix_view.py        the routing grid
@@ -107,7 +109,8 @@ checkouts that have seen it. If a release is wrong, tag a fixed patch version.
 ## Testing without hardware
 
 The unit tests need no audio device. Without the interface the engine still runs and reports
-`no-device`; `--no-autolink` keeps it from linking the playback sink. `make run-engine DEVICE=ff802`
+`no-device`, and it runs without PipeWire too; `--no-autolink` keeps it from linking the desktop
+sinks and sources, `--no-sink` from making them. `make run-engine DEVICE=ff802`
 runs the Fireface 802 engine, and `python3 -m openface_mixer --device ff802` its GUI (`ff802usb`
 for the 802 over USB, `ff800` for the Fireface 800, `raydat` for the HDSPe RayDAT).
 

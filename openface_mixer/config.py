@@ -11,7 +11,7 @@ import struct
 from pathlib import Path
 
 from . import APP_ID
-from . import control_room
+from . import control_room, sinks
 from .devices import DEFAULT, DEVICES
 from .model import (
     clear_sends_outside, compute_matrix, compute_out_gains, is_index, is_num, upgrade_state,
@@ -53,6 +53,10 @@ def state_file(dev=DEFAULT):
 
 def matrix_file(dev=DEFAULT):
     return device_dir(dev) / "matrix.bin"         # gains, read by the engine at startup
+
+
+def sinks_file(dev=DEFAULT):
+    return device_dir(dev) / "sinks.conf"         # desktop sinks and sources, read by the engine
 
 
 def presets_file(dev=DEFAULT):
@@ -123,6 +127,7 @@ def ready_state(st, dev=DEFAULT):
     settings checked, and no sends on channels the device doesn't have."""
     control_room.load(st, dev.phones_pair(1))
     dev.upgrade_settings(st)
+    st["sinks"] = sinks.checked(st.get("sinks"), dev)
     clear_sends_outside(st, dev.all_channels)
     return st
 
@@ -157,6 +162,20 @@ def save_state(st, dev=DEFAULT):
     atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}),
                  keep_backup=True)
     atomic_write(matrix_file(dev), matrix_file_bytes(st, dev))
+
+
+def save_sinks(st, dev=DEFAULT):
+    """Write sinks.conf for the engine if the list changed. Returns True if it was written
+    (the engine is then told to read it, Engine.reload_sinks)."""
+    text = sinks.file_text(st["sinks"], dev)
+    path = sinks_file(dev)
+    try:
+        if path.read_text() == text:
+            return False
+    except (OSError, ValueError):
+        pass
+    atomic_write(path, text)
+    return True
 
 
 def load_ui():

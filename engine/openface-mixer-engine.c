@@ -11,17 +11,20 @@
  * in Class Compliant mode (fireface_usb.c), or an HDSPe RayDAT, AIO, AIO Pro or AES PCIe card
  * through its kernel driver (hdspe.c).
  *
- * The engine also creates the "Openface Mixer Playback" stereo sink and links it to the
- * interface's playback channels 1/2, re-linking on hotplug or profile changes. It runs headless
- * (systemd user service), one engine per device (a lock on the shared memory file), and the
- * interface keeps mixing with the last mix when it exits. It exits with 1 when PipeWire goes
- * away, so that systemd starts it again, and with 3 when another engine has the device.
+ * The engine also makes the desktop's sinks and sources on the interface's channels (sinks.conf,
+ * written by the GUI; without one the "Openface Mixer Playback" sink on playback 1/2) and links
+ * them to the interface's PipeWire nodes, re-linking on hotplug or profile changes. The hardware
+ * mixer does not need PipeWire: without it the engine runs all the same and connects once it
+ * is there, and after PipeWire restarts it connects again in place, so the interface is not
+ * sent the mix again. It runs headless (systemd user service), one engine per device (a lock
+ * on the shared memory file), and the interface keeps mixing with the last mix when it exits.
+ * It exits with 3 when another engine has the device.
  *
  * Options:
  *   --device KEY    digiface (default), ff802, ff802usb, ucx2, ff800, ff400, raydat, aio,
  *                   aiopro or aes
- *   --no-sink       don't create the "Openface Mixer Playback" virtual sink
- *   --no-autolink   don't link the sink to the interface (useful for testing with pw-link)
+ *   --no-sink       don't create the desktop sinks and sources
+ *   --no-autolink   don't link them to the interface (useful for testing with pw-link)
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -51,6 +54,8 @@
 #define N_OUT   OFM_N_OUT
 
 #define SINK_NAME       "openface_mixer_playback"  /* other devices than the Digiface: _<key> added */
+#define NODES_FILE      "sinks.conf"   /* the desktop sinks and sources, see nodes_parse() */
+#define MAX_NODES       32
 
 #define HW_TICK_MS       20  /* how often GUI changes are sent to the hardware mixer */
 #define HW_STATUS_TICKS  25  /* read device status every 500 ms */
@@ -75,6 +80,24 @@ struct obj {
 	uint32_t out_port, in_port; /* links */
 };
 
+/* A desktop sink or source: a loopback with one end the desktop sees (node.name, an Audio/Sink
+ * or Audio/Source) and one the engine links to the interface's own PipeWire node, on these of
+ * its PCM channels (playback_AUXn for a sink, capture_AUXn for a source). */
+struct pw_node_cfg {
+	bool source;
+	char name[64];
+	char desc[96];          /* node.description: what the desktop's sound settings show */
+	int8_t chan[3][2];      /* left and right PCM channel at 1x, 2x and 4x speed; -1: none
+	                         * (right of a mono source; both where the interface lacks it) */
+};
+
+struct pw_node {
+	struct pw_node_cfg cfg;
+	struct pw_impl_module *module;   /* the loopback, while it is there */
+	struct spa_hook module_listener;
+	bool linked;
+};
+
 struct link_req {
 	struct spa_list link;
 	struct pw_proxy *proxy;
@@ -83,15 +106,33 @@ struct link_req {
 	struct data *d;
 };
 
+struct data;
+
+/* What the engine asks of PipeWire: connect and disconnect, make and remove a sink or source.
+ * tests/test_engine_loop.c puts stand-ins here. */
+struct pw_ops {
+	int (*up)(struct data *d);
+	void (*down)(struct data *d);
+	void (*load)(struct data *d, struct pw_node *n);
+	void (*unload)(struct data *d, struct pw_node *n);
+};
+
 struct data {
 	struct pw_main_loop *loop;
 	struct pw_context *context;
-	struct pw_core *core;
+	const struct pw_ops *pw;
+	struct pw_core *core;   /* NULL while not connected to PipeWire */
 	struct spa_hook core_listener;
-	bool pw_lost;         /* the connection to PipeWire is gone */
+	bool pw_lost;         /* the connection to PipeWire is gone: dropped at the next tick */
+	bool pw_said;         /* that PipeWire is not there was logged */
+	unsigned int pw_tried;  /* hw_ticks at the last try to connect */
 	struct pw_registry *registry;
 	struct spa_hook registry_listener;
-	struct pw_impl_module *loopback;
+	struct pw_node *nodes[MAX_NODES];
+	int n_nodes;
+	int speed;            /* 0, 1, 2: single, double or quad speed, as last reported */
+	uint32_t pw_reload;   /* the GUI's pw_reload as last seen */
+	bool no_sink;
 
 	struct ofm_shm *shm;
 
@@ -116,7 +157,6 @@ struct data {
 	bool watched;
 
 	int no_autolink;
-	char sink_out_name[96];
 	struct obj objs[MAX_OBJ];
 	int n_objs;
 	bool objs_full;       /* said once */
@@ -131,16 +171,16 @@ static bool is_digiface(const struct data *d)
 }
 
 /* The Digiface's files sit in the config directory itself, other devices' in a subdirectory. */
-static void matrix_path(const struct data *d, char *buf, size_t len)
+static void config_path(const struct data *d, const char *file, char *buf, size_t len)
 {
 	const char *xdg = getenv("XDG_CONFIG_HOME");
 	const char *sub = is_digiface(d) ? "" : d->be->key;
 	const char *sep = is_digiface(d) ? "" : "/";
 	if (xdg && *xdg)
-		snprintf(buf, len, "%s/openface-mixer/%s%smatrix.bin", xdg, sub, sep);
+		snprintf(buf, len, "%s/openface-mixer/%s%s%s", xdg, sub, sep, file);
 	else
-		snprintf(buf, len, "%s/.config/openface-mixer/%s%smatrix.bin",
-			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep);
+		snprintf(buf, len, "%s/.config/openface-mixer/%s%s%s",
+			 getenv("HOME") ? getenv("HOME") : "/tmp", sub, sep, file);
 }
 
 /* Returns 0, -EBUSY if another engine runs for the device, or another error < 0. */
@@ -189,7 +229,7 @@ static int shm_setup(struct data *d)
 	if (s->magic != OFM_SHM_MAGIC || s->version != OFM_SHM_VERSION) {
 		memset(s, 0, sizeof(*s));
 		char path[512];
-		matrix_path(d, path, sizeof(path));
+		config_path(d, "matrix.bin", path, sizeof(path));
 		int r = ofm_matrix_load(s, path);
 		if (r < 0)
 			ofm_matrix_default(s);
@@ -232,11 +272,12 @@ static struct obj *node_by_prefix(struct data *d, const char *prefix, int exact)
 	return NULL;
 }
 
-static struct obj *node_by_card(struct data *d, const char *prefix)
+/* kind: "alsa_output." for the interface's playback node, "alsa_input." for its capture node */
+static struct obj *node_by_card(struct data *d, const char *kind, const char *prefix)
 {
 	for (int i = 0; i < d->n_objs; i++) {
 		struct obj *o = &d->objs[i];
-		if (o->type == 1 && strncmp(o->name, "alsa_output.", 12) == 0 &&
+		if (o->type == 1 && strncmp(o->name, kind, strlen(kind)) == 0 &&
 		    ofm_card_match(o->card, prefix))
 			return o;
 	}
@@ -323,32 +364,97 @@ static void make_link(struct data *d, struct obj *op, struct obj *ip)
 	pw_proxy_add_listener(proxy, &r->listener, &link_proxy_events, r);
 }
 
-/* The playback sink feeds the interface's playback channels 1/2 directly. */
-static void relink(struct data *d)
+/* The interface's playback node (source false) or capture node (source true), if PipeWire has
+ * it: found by the node name's prefix ("alsa_output.usb-RME_Digiface_USB", capture
+ * "alsa_input.usb-RME_Digiface_USB") or by ALSA card name. */
+static struct obj *device_node(struct data *d, bool source)
 {
-	struct obj *sink = node_by_prefix(d, d->sink_out_name, 1);
 	const char *prefix = d->be->out_node ? d->be->out_node(d->hw) : d->be->out_node_prefix;
 	const char *card = d->be->out_node_card;
-	struct obj *dout = card ? node_by_card(d, prefix ? prefix : card) :
-			   prefix ? node_by_prefix(d, prefix, 0) : NULL;
-	struct obj *fl = NULL, *fr = NULL, *a0 = NULL, *a1 = NULL;
+	const char *kind = source ? "alsa_input." : "alsa_output.";
+	char in_prefix[160];
 
-	if (sink && dout) {
-		fl = port_find(d, sink->id, "output_FL", 1);
-		fr = port_find(d, sink->id, "output_FR", 1);
-		a0 = port_find(d, dout->id, "playback_AUX0", 0);
-		a1 = port_find(d, dout->id, "playback_AUX1", 0);
-		if (a0 == NULL || a1 == NULL) {   /* a stereo profile instead of Pro Audio */
-			a0 = port_find(d, dout->id, "playback_FL", 0);
-			a1 = port_find(d, dout->id, "playback_FR", 0);
-		}
+	if (card)
+		return node_by_card(d, kind, prefix ? prefix : card);
+	if (prefix == NULL)
+		return NULL;
+	if (source && strncmp(prefix, "alsa_output.", 12) == 0) {
+		snprintf(in_prefix, sizeof(in_prefix), "alsa_input.%s", prefix + 12);
+		prefix = in_prefix;
 	}
-	if (!d->no_autolink) {
-		make_link(d, fl, a0);
-		make_link(d, fr, a1);
+	return node_by_prefix(d, prefix, 0);
+}
+
+/* The interface's port for PCM channel ch: playback_AUXn, which a sink feeds, or capture_AUXn,
+ * which a source records. In a stereo profile instead of Pro Audio, channels 1 and 2 are only
+ * there as FL and FR (stereo true). */
+static struct obj *device_port(struct data *d, struct obj *dev, bool source, int ch, bool stereo)
+{
+	char name[32];
+	if (stereo)
+		snprintf(name, sizeof(name), "%s_%s", source ? "capture" : "playback",
+			 ch ? "FR" : "FL");
+	else
+		snprintf(name, sizeof(name), "%s_AUX%d", source ? "capture" : "playback", ch);
+	return port_find(d, dev->id, name, source);
+}
+
+/* The ports a sink or source is linked through, per channel: from[i] (an output port) to
+ * to[i]. Returns its channel count at the current speed, or 0 while a node or port is missing. */
+static int node_ports(struct data *d, const struct pw_node *n, struct obj *from[2],
+		      struct obj *to[2])
+{
+	static const char *const pos[2][2] = { { "MONO", NULL }, { "FL", "FR" } };
+	const struct pw_node_cfg *c = &n->cfg;
+	const int8_t *chan = c->chan[d->speed];
+	int chans = chan[1] < 0 ? 1 : 2;
+	struct obj *dp[2];
+	char name[80];
+
+	snprintf(name, sizeof(name), "%s.%s", c->name, c->source ? "in" : "out");
+	struct obj *loop = node_by_prefix(d, name, 1), *dev = device_node(d, c->source);
+	if (loop == NULL || dev == NULL || chan[0] < 0)
+		return 0;
+	for (int i = 0; i < chans; i++)
+		dp[i] = device_port(d, dev, c->source, chan[i], false);
+	if (chan[0] < 2 && chan[chans - 1] < 2 && (dp[0] == NULL || dp[chans - 1] == NULL))
+		for (int i = 0; i < chans; i++)
+			dp[i] = device_port(d, dev, c->source, chan[i], true);
+	for (int i = 0; i < chans; i++) {
+		char lp_name[16];
+		snprintf(lp_name, sizeof(lp_name), "%s_%s", c->source ? "input" : "output",
+			 pos[chans - 1][i]);
+		struct obj *lp = port_find(d, loop->id, lp_name, !c->source);
+		if (lp == NULL || dp[i] == NULL)
+			return 0;
+		from[i] = c->source ? dp[i] : lp;
+		to[i] = c->source ? lp : dp[i];
 	}
-	d->shm->sink_linked = fl && fr && a0 && a1 && link_exists(d, fl->id, a0->id) &&
-			      link_exists(d, fr->id, a1->id);
+	return chans;
+}
+
+/* Every sink and source feeds (or records) the interface's channels directly. */
+static void relink(struct data *d)
+{
+	int made = 0, linked = 0;
+
+	for (int i = 0; i < d->n_nodes; i++) {
+		struct pw_node *n = d->nodes[i];
+		struct obj *from[2], *to[2];
+		if (n->module == NULL)
+			continue;
+		made++;
+		int chans = node_ports(d, n, from, to);
+		for (int c = 0; c < chans && !d->no_autolink && d->core; c++)
+			make_link(d, from[c], to[c]);
+		n->linked = chans > 0;
+		for (int c = 0; c < chans; c++)
+			n->linked = n->linked && link_exists(d, from[c]->id, to[c]->id);
+		linked += n->linked;
+	}
+	d->shm->pw_nodes = (uint32_t)made;
+	d->shm->pw_linked = (uint32_t)linked;
+	d->shm->sink_linked = made > 0 && linked == made;
 }
 
 static void registry_global(void *data, uint32_t id, uint32_t permissions,
@@ -418,6 +524,227 @@ static const struct pw_registry_events registry_events = {
 	.global = registry_global,
 	.global_remove = registry_global_remove,
 };
+
+/* ---------- desktop sinks and sources ---------- */
+
+static bool node_name_ok(const char *s)
+{
+	for (; *s; s++)
+		if (!isalnum((unsigned char)*s) && *s != '_' && *s != '.' && *s != '-')
+			return false;
+	return true;
+}
+
+/* Text that can go between the quotes of the module's arguments: no quote, backslash or
+ * control character. */
+static bool node_desc_ok(const char *s)
+{
+	if (*s == '\0')
+		return false;
+	for (; *s; s++)
+		if ((unsigned char)*s < 0x20 || *s == 0x7f || *s == '"' || *s == '\\')
+			return false;
+	return true;
+}
+
+/* sinks.conf, which the GUI writes: one line per sink or source,
+ *	sink|source NAME L1 R1 L2 R2 L4 R4 DESCRIPTION
+ * NAME the node name, Ln and Rn the left and right PCM channel at speed n (see pw_node_cfg),
+ * DESCRIPTION the rest of the line. Empty lines and lines starting with # are skipped. Returns
+ * how many there are, or -1 if the text is not such a file. */
+static int nodes_parse(char *text, struct pw_node_cfg *cfg, int max)
+{
+	int n = 0;
+	char *save = NULL;
+
+	memset(cfg, 0, sizeof(*cfg) * max);
+	for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+		char kind[8], *desc;
+		int ch[6], off = -1;
+		size_t len;
+
+		if (line[0] == '#' || line[strspn(line, " \t\r")] == '\0')
+			continue;
+		if (n == max)
+			return -1;
+		struct pw_node_cfg *c = &cfg[n++];
+		if (sscanf(line, "%7s %63s %d %d %d %d %d %d %n", kind, c->name, &ch[0], &ch[1],
+			   &ch[2], &ch[3], &ch[4], &ch[5], &off) != 8 || off < 0)
+			return -1;
+		desc = line + off;
+		len = strlen(desc);
+		while (len && (desc[len - 1] == '\r' || desc[len - 1] == ' '))
+			desc[--len] = '\0';
+		c->source = strcmp(kind, "source") == 0;
+		if ((!c->source && strcmp(kind, "sink") != 0) || !node_name_ok(c->name) ||
+		    !node_desc_ok(desc) || len >= sizeof(c->desc))
+			return -1;
+		memcpy(c->desc, desc, len + 1);
+		for (int m = 0; m < 3; m++) {
+			int l = ch[2 * m], r = ch[2 * m + 1];
+			if (l < -1 || l > 63 || r < -1 || r > 63 || (l < 0 && r >= 0) ||
+			    (!c->source && (l < 0) != (r < 0)))
+				return -1;
+			c->chan[m][0] = (int8_t)l;
+			c->chan[m][1] = (int8_t)r;
+		}
+	}
+	return n;
+}
+
+/* Without a sinks.conf (the GUI has not written one yet), or with one that is damaged: the
+ * playback sink on PCM channels 1/2, as before the list. */
+static int nodes_default(const struct data *d, struct pw_node_cfg *cfg)
+{
+	memset(cfg, 0, sizeof(*cfg));
+	if (is_digiface(d)) {
+		snprintf(cfg->name, sizeof(cfg->name), "%s", SINK_NAME);
+		snprintf(cfg->desc, sizeof(cfg->desc), "Openface Mixer Playback");
+	} else {
+		snprintf(cfg->name, sizeof(cfg->name), "%s_%s", SINK_NAME, d->be->key);
+		snprintf(cfg->desc, sizeof(cfg->desc), "Openface Mixer Playback (%s)", d->be->name);
+	}
+	for (int m = 0; m < 3; m++)
+		cfg->chan[m][0] = 0, cfg->chan[m][1] = 1;
+	return 1;
+}
+
+/* What the sinks and sources should be now: sinks.conf, or the default. */
+static int nodes_read(const struct data *d, struct pw_node_cfg *cfg)
+{
+	char path[512], text[16384];
+	config_path(d, NODES_FILE, path, sizeof(path));
+	FILE *f = fopen(path, "r");
+	if (f == NULL) {
+		if (errno != ENOENT)
+			fprintf(stderr, "openface-mixer: cannot read %s: %m\n", path);
+		return nodes_default(d, cfg);
+	}
+	size_t len = fread(text, 1, sizeof(text), f);
+	bool whole = feof(f) && !ferror(f);
+	fclose(f);
+	int n = -1;
+	if (whole && len < sizeof(text)) {
+		text[len] = '\0';
+		n = nodes_parse(text, cfg, MAX_NODES);
+	}
+	if (n < 0) {
+		fprintf(stderr, "openface-mixer: %s is damaged; ignoring it and making the playback "
+			"sink only\n", path);
+		return nodes_default(d, cfg);
+	}
+	return n;
+}
+
+static bool node_wanted(const struct data *d, const struct pw_node *n)
+{
+	return d->core && !d->pw_lost && !d->no_sink && n->cfg.chan[d->speed][0] >= 0;
+}
+
+/* Makes the sinks and sources that should be there (connected to PipeWire, on channels the
+ * interface has at this speed) and removes the others. */
+static void nodes_apply(struct data *d)
+{
+	for (int i = 0; i < d->n_nodes; i++) {
+		struct pw_node *n = d->nodes[i];
+		if (node_wanted(d, n) && n->module == NULL)
+			d->pw->load(d, n);
+		else if (!node_wanted(d, n) && n->module)
+			d->pw->unload(d, n);
+	}
+}
+
+/* Reads the list again (the GUI changed it). Sinks and sources that are still the same keep
+ * their loopback, so the programs playing to them carry on. */
+static void nodes_load(struct data *d)
+{
+	struct pw_node_cfg cfg[MAX_NODES];
+	struct pw_node *now[MAX_NODES] = { NULL };
+	int n = nodes_read(d, cfg);
+
+	for (int i = 0; i < n; i++) {
+		for (int j = 0; j < d->n_nodes && now[i] == NULL; j++)
+			if (d->nodes[j] && memcmp(&d->nodes[j]->cfg, &cfg[i], sizeof(cfg[i])) == 0)
+				now[i] = d->nodes[j], d->nodes[j] = NULL;
+		if (now[i] == NULL && (now[i] = calloc(1, sizeof(*now[i]))) != NULL)
+			now[i]->cfg = cfg[i];
+	}
+	for (int j = 0; j < d->n_nodes; j++) {
+		if (d->nodes[j] && d->nodes[j]->module)
+			d->pw->unload(d, d->nodes[j]);
+		free(d->nodes[j]);
+	}
+	d->n_nodes = 0;
+	for (int i = 0; i < n; i++)
+		if (now[i])
+			d->nodes[d->n_nodes++] = now[i];
+}
+
+static void nodes_free(struct data *d)
+{
+	for (int i = 0; i < d->n_nodes; i++)
+		free(d->nodes[i]);
+	d->n_nodes = 0;
+}
+
+static void node_destroyed(void *data)
+{
+	struct pw_node *n = data;
+	spa_hook_remove(&n->module_listener);
+	n->module = NULL;
+	n->linked = false;
+}
+
+static const struct pw_impl_module_events node_module_events = {
+	PW_VERSION_IMPL_MODULE_EVENTS,
+	.destroy = node_destroyed,
+};
+
+/* The loopback's arguments. The first sink in the list gets the priorities the playback sink
+ * always had, so the session manager picks it as the default output; the others don't. */
+static void node_args(const struct data *d, const struct pw_node *n, char *args, size_t len)
+{
+	const struct pw_node_cfg *c = &n->cfg;
+	const char *pos = c->chan[d->speed][1] < 0 ? "MONO" : "FL FR";
+	bool first = true;
+
+	for (int i = 0; i < d->n_nodes && d->nodes[i] != n; i++)
+		first = first && d->nodes[i]->cfg.source;
+	if (c->source)
+		snprintf(args, len,
+			"{ node.description = \"%s\""
+			"  capture.props = { node.name = \"%s.in\" node.autoconnect = false"
+			"                    node.dont-reconnect = true audio.position = [ %s ] }"
+			"  playback.props = { node.name = \"%s\" media.class = Audio/Source"
+			"                     audio.position = [ %s ] } }",
+			c->desc, c->name, pos, c->name, pos);
+	else
+		snprintf(args, len,
+			"{ node.description = \"%s\""
+			"  capture.props = { node.name = \"%s\" media.class = Audio/Sink"
+			"                    audio.position = [ FL FR ]%s }"
+			"  playback.props = { node.name = \"%s.out\" node.autoconnect = false"
+			"                     node.dont-reconnect = true audio.position = [ FL FR ] } }",
+			c->desc, c->name, first ? " priority.session = 100 priority.driver = 100" : "",
+			c->name);
+}
+
+static void node_load(struct data *d, struct pw_node *n)
+{
+	char args[1024];
+	node_args(d, n, args, sizeof(args));
+	n->module = pw_context_load_module(d->context, "libpipewire-module-loopback", args, NULL);
+	if (n->module == NULL) {
+		fprintf(stderr, "openface-mixer: could not create %s: %m\n", n->cfg.desc);
+		return;
+	}
+	pw_impl_module_add_listener(n->module, &n->module_listener, &node_module_events, n);
+}
+
+static void node_unload(struct data *d, struct pw_node *n)
+{
+	pw_impl_module_destroy(n->module);   /* node_destroyed() lets go of it */
+}
 
 /* ---------- hardware mixer ---------- */
 
@@ -542,6 +869,114 @@ static void hw_tick_locked(struct data *d)
 	s->hw_nodes = (uint32_t)be->routes(d->hw);
 }
 
+/* ---------- PipeWire ---------- */
+
+static int speed_index(uint32_t rate)
+{
+	return rate > 100000 ? 2 : rate > 50000 ? 1 : 0;   /* as the GUI's model.speed_mode() */
+}
+
+/* PipeWire went away (it crashed or was restarted): the sinks, sources and links went with it.
+ * The next tick lets go of the connection and connects again once PipeWire is back. The
+ * interface is not told anything and keeps mixing. */
+static void core_error(void *userdata, uint32_t id, int seq, int res, const char *message)
+{
+	struct data *d = userdata;
+	if (id != PW_ID_CORE || res != -EPIPE || d->pw_lost)
+		return;
+	fprintf(stderr, "openface-mixer: lost the connection to PipeWire; the hardware mixer "
+		"carries on, and the engine connects again when PipeWire is back\n");
+	d->pw_lost = true;
+}
+
+static const struct pw_core_events core_events = {
+	PW_VERSION_CORE_EVENTS,
+	.error = core_error,
+};
+
+static int pw_up(struct data *d)
+{
+	d->core = pw_context_connect(d->context, NULL, 0);
+	if (d->core == NULL)
+		return errno ? -errno : -EIO;
+	pw_core_add_listener(d->core, &d->core_listener, &core_events, d);
+	d->registry = pw_core_get_registry(d->core, PW_VERSION_REGISTRY, 0);
+	pw_registry_add_listener(d->registry, &d->registry_listener, &registry_events, d);
+	return 0;
+}
+
+static void pw_down(struct data *d)
+{
+	struct link_req *r, *t;
+	spa_list_for_each_safe(r, t, &d->links, link)
+		pw_proxy_destroy(r->proxy);
+	pw_proxy_destroy((struct pw_proxy *)d->registry);
+	pw_core_disconnect(d->core);
+	d->registry = NULL;
+	d->core = NULL;
+}
+
+static const struct pw_ops pw_real = {
+	.up = pw_up,
+	.down = pw_down,
+	.load = node_load,
+	.unload = node_unload,
+};
+
+/* Lets go of the connection, with every sink, source and link made through it. */
+static void pw_drop(struct data *d)
+{
+	d->pw_lost = true;
+	nodes_apply(d);
+	d->pw->down(d);
+	d->pw_lost = false;
+	d->n_objs = 0;
+	d->objs_full = false;
+	d->shm->pw_connected = 0;
+	relink(d);
+}
+
+static void pw_connect(struct data *d)
+{
+	d->pw_tried = d->hw_ticks;
+	if (d->pw->up(d) < 0) {
+		if (!d->pw_said)
+			fprintf(stderr, "openface-mixer: PipeWire is not running; the hardware mixer "
+				"runs without it, and the sinks and sources come once it starts\n");
+		d->pw_said = true;
+		return;
+	}
+	fprintf(stderr, "openface-mixer: connected to PipeWire\n");
+	d->pw_said = false;
+	d->shm->pw_connected = 1;
+	nodes_apply(d);
+	relink(d);
+}
+
+/* Runs after every hardware tick: connects to PipeWire while it isn't (once a second), and
+ * follows the GUI's list and the interface's speed. */
+static void pw_tick(struct data *d)
+{
+	struct ofm_shm *s = d->shm;
+
+	if (d->pw_lost) {
+		pw_drop(d);
+		d->pw_tried = d->hw_ticks;   /* the next try in a second: PipeWire takes a moment */
+	} else if (d->core == NULL && d->hw_ticks - d->pw_tried >= HW_RETRY_TICKS)
+		pw_connect(d);
+	if (s->pw_reload != d->pw_reload) {
+		d->pw_reload = s->pw_reload;
+		nodes_load(d);
+		nodes_apply(d);
+		relink(d);
+	}
+	if (s->rate && speed_index(s->rate) != d->speed) {
+		d->speed = speed_index(s->rate);
+		nodes_apply(d);
+		relink(d);
+	}
+}
+
 /* Runs on the main loop: USB transfers block. */
 static void hw_tick(void *userdata, uint64_t expirations)
 {
@@ -549,6 +984,7 @@ static void hw_tick(void *userdata, uint64_t expirations)
 	pthread_mutex_lock(&d->usb_lock);
 	hw_tick_locked(d);
 	pthread_mutex_unlock(&d->usb_lock);
+	pw_tick(d);
 }
 
 /* ---------- setup ---------- */
@@ -559,28 +995,9 @@ static void do_quit(void *userdata, int signal_number)
 	pw_main_loop_quit(d->loop);
 }
 
-/* PipeWire went away (it crashed or was restarted): the playback sink went with it and only a
- * new connection brings it back. The engine stops with an error, so systemd starts it again;
- * that start waits for PipeWire. The interface is not told anything and keeps mixing. */
-static void core_error(void *userdata, uint32_t id, int seq, int res, const char *message)
-{
-	struct data *d = userdata;
-	if (id != PW_ID_CORE || res != -EPIPE)
-		return;
-	fprintf(stderr, "openface-mixer: lost the connection to PipeWire, stopping\n");
-	d->pw_lost = true;
-	pw_main_loop_quit(d->loop);
-}
-
-static const struct pw_core_events core_events = {
-	PW_VERSION_CORE_EVENTS,
-	.error = core_error,
-};
-
 int main(int argc, char *argv[])
 {
 	struct data d = { 0 };
-	int no_sink = 0;
 
 	static const struct ofm_backend *const backends[] = {
 		&ofm_backend_digiface, &ofm_backend_ff802, &ofm_backend_ff802usb, &ofm_backend_ucx2,
@@ -595,7 +1012,7 @@ int main(int argc, char *argv[])
 				if (strcmp(argv[i + 1], backends[b]->key) == 0)
 					be = backends[b];
 		if (strcmp(argv[i], "--no-sink") == 0)
-			no_sink = 1;
+			d.no_sink = true;
 		else if (strcmp(argv[i], "--no-autolink") == 0)
 			d.no_autolink = 1;
 		else if (be != NULL)
@@ -609,6 +1026,7 @@ int main(int argc, char *argv[])
 
 	pw_init(&argc, &argv);
 	spa_list_init(&d.links);
+	d.pw = &pw_real;
 
 	int shm = shm_setup(&d);
 	if (shm < 0)
@@ -628,51 +1046,26 @@ int main(int argc, char *argv[])
 	if (d.be->attach)
 		d.be->attach(d.hw, d.shm);
 	d.gui_heartbeat = d.shm->gui_heartbeat;   /* where a GUI that has gone left it */
+	d.pw_reload = d.shm->pw_reload;
+	d.speed = speed_index(d.shm->rate);
+	d.shm->pw_connected = 0;
 	pthread_mutex_init(&d.usb_lock, NULL);
 	pthread_condattr_t monotonic;
 	pthread_condattr_init(&monotonic);
 	pthread_condattr_setclock(&monotonic, CLOCK_MONOTONIC);
 	pthread_cond_init(&d.meter_wake, &monotonic);
 
+	/* The hardware mixer comes first and needs no PipeWire: the sinks and sources follow
+	 * whenever PipeWire is there (pw_tick) */
 	d.context = pw_context_new(pw_main_loop_get_loop(d.loop), NULL, 0);
-	d.core = pw_context_connect(d.context, NULL, 0);
-	if (d.core == NULL) {
-		fprintf(stderr, "openface-mixer: cannot connect to PipeWire: %m\n");
-		return 1;
-	}
-	pw_core_add_listener(d.core, &d.core_listener, &core_events, &d);
-
-	/* one sink per device, so several devices' engines can run side by side */
-	char sink_name[80], sink_desc[96], args[1024];
-	if (is_digiface(&d)) {
-		snprintf(sink_name, sizeof(sink_name), "%s", SINK_NAME);
-		snprintf(sink_desc, sizeof(sink_desc), "Openface Mixer Playback");
-	} else {
-		snprintf(sink_name, sizeof(sink_name), "%s_%s", SINK_NAME, d.be->key);
-		snprintf(sink_desc, sizeof(sink_desc), "Openface Mixer Playback (%s)", d.be->name);
-	}
-	snprintf(d.sink_out_name, sizeof(d.sink_out_name), "%s.out", sink_name);
-
-	if (!no_sink) {
-		snprintf(args, sizeof(args),
-			"{ node.description = \"%s\""
-			"  capture.props = { node.name = \"%s\" media.class = Audio/Sink"
-			"                    audio.position = [ FL FR ] priority.session = 100 priority.driver = 100 }"
-			"  playback.props = { node.name = \"%s\" node.autoconnect = false"
-			"                     node.dont-reconnect = true audio.position = [ FL FR ] } }",
-			sink_desc, sink_name, d.sink_out_name);
-		d.loopback = pw_context_load_module(d.context, "libpipewire-module-loopback", args, NULL);
-		if (d.loopback == NULL)
-			fprintf(stderr, "openface-mixer: could not create playback sink: %m\n");
-	}
+	nodes_load(&d);
+	relink(&d);
+	pw_connect(&d);
 
 	struct timespec interval = { 0, HW_TICK_MS * 1000000L };
 	d.hw_timer = pw_loop_add_timer(pw_main_loop_get_loop(d.loop), hw_tick, &d);
 	pw_loop_update_timer(pw_main_loop_get_loop(d.loop), d.hw_timer, &interval, &interval, false);
 	d.meter_thread_started = pthread_create(&d.meter_thread, NULL, meter_thread, &d) == 0;
-
-	d.registry = pw_core_get_registry(d.core, PW_VERSION_REGISTRY, 0);
-	pw_registry_add_listener(d.registry, &d.registry_listener, &registry_events, &d);
 
 	fprintf(stderr, "openface-mixer: engine running for the %s\n", d.be->name);
 	pw_main_loop_run(d.loop);
@@ -690,16 +1083,10 @@ int main(int argc, char *argv[])
 	d.shm->hw_levels = 0;
 	d.shm->hw_state = DFU_STATE_NO_DEVICE;
 	d.shm->engine_pid = 0;
-	if (d.pw_lost)
-		return 1;   /* nothing to hand back: the sink and the links went with PipeWire */
 
-	struct link_req *r, *t;
-	spa_list_for_each_safe(r, t, &d.links, link)
-		pw_proxy_destroy(r->proxy);
-	if (d.loopback)
-		pw_impl_module_destroy(d.loopback);
-	pw_proxy_destroy((struct pw_proxy *)d.registry);
-	pw_core_disconnect(d.core);
+	if (d.core)
+		pw_drop(&d);
+	nodes_free(&d);
 	pw_context_destroy(d.context);
 	pw_main_loop_destroy(d.loop);
 	munmap(d.shm, sizeof(struct ofm_shm));
