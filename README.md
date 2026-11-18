@@ -24,7 +24,8 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   presets, control room, device and effect settings, and the meter and ARC key options.
   *Load workspace* checks the whole file before it changes anything, keeps the mix it replaces
   for *Restore previous mix* and reopens the window. A workspace for another interface is
-  refused. Solo and the network remote's settings are not part of a workspace.
+  refused. Solo, the network remote's settings and the desktop outputs and inputs are not part
+  of a workspace.
 - **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.

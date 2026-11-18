@@ -1581,6 +1581,7 @@ class MainWindow(QMainWindow):
             st["hw"] = self.st["hw"]        # which card and its driver answer: this computer's
         if "remote" in self.st:
             st["remote"] = self.st["remote"]    # so is the OSC remote (never in a workspace)
+        st["sinks"] = self.st["sinks"]      # and the desktop sinks and sources
         try:
             export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
         except OSError:
