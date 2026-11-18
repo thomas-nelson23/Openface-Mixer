@@ -10,11 +10,54 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import hdspe, updater
+from . import hdspe, theme, updater
 from .config import UI_SCALES, load_update_prefs, save_ui
 from .devices import DEVICES, group_title
 from .hardware import Hardware, set_card_profile
 from .theme import SANS, Section, caption_html, font, key_label, px
+
+# Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
+# the bottom of the sidebar shows them, and README.md has the same list under "Keyboard
+# shortcuts" (tests/test_layout.py holds the two together). The Effects groups are for devices
+# with TotalMix FX.
+SHORTCUTS = (
+    ("Window", (
+        ("Ctrl+,", "Show or hide settings"),
+        ("Ctrl+1, Ctrl+2", "Mixer, Matrix"),
+        ("Tab, Shift+Tab", "Next, previous control"),
+        ("Esc", "Cancel Store or typing"),
+        ("Ctrl+Q", "Quit"),
+    )),
+    ("Row title", (
+        ("Space, Enter", "Fold or unfold the row"),
+    )),
+    ("Fader", (
+        ("Up, Down", "1 dB (Ctrl: 0.5 dB)"),
+        ("Page Up / Down", "6 dB"),
+        ("Home", "0 dB"),
+        ("End", "Off (-∞)"),
+        ("Enter", "Type a level"),
+    )),
+    ("Pan knob", (
+        ("Left, Right", "Pan"),
+        ("Home", "Centre"),
+    )),
+    ("Matrix", (
+        ("Arrow keys", "Move the selection"),
+        ("Enter", "Type a level"),
+        ("Delete", "Clear the cell"),
+    )),
+    ("Effects", (
+        ("Ctrl+E", "Reverb and Echo"),
+        ("Esc, Ctrl+W", "Close a panel"),
+    )),
+    ("Effects knob", (
+        ("Arrow keys", "Turn (Shift: fine)"),
+        ("Page Up / Down", "Ten steps"),
+        ("Home", "Default value"),
+        ("Enter", "Type a value"),
+    )),
+)
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules", "ff400": "70-rme-fireface.rules"}
@@ -36,45 +79,52 @@ def udev_rule_hint(dev):
             "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
 
 
-CYAN, AMBER, RED, OFF = "#2ad4ff", "#ffb020", "#ff2a4f", "#6f8a94"
+# a status light is cyan when on (active, locked, linked), red when something needs attention
+# and grey when off or not known yet
+CYAN, RED, OFF = theme.CYAN.name(), theme.RED.name(), theme.MUTED
 
 
-def light(color, text, on=True):
-    """A status value: a light, filled when things are fine or busy and an empty ring when
-    not, then the words (the state never depends on telling the colours apart)."""
-    return f"<span style='color:{color}'>{'●' if on else '○'}</span>&nbsp;{text}"
+def light(color, text=""):
+    """A status value: a dot in the state's colour, then the words (the state never depends
+    on telling the colours apart)."""
+    return f"<span style='color:{color}'>●</span>" + (text and f"&nbsp;{text}")
+
+
+def hw_color(state):
+    """The light of an engine hardware state (engine.HW_STATES), here and in the top bar."""
+    return {"active": CYAN, "starting": OFF}.get(state, RED)
 
 
 def hw_state(dev, state):
     """(short value for the Hardware mixer row, what to do about it or "")."""
     short = dev.name.replace("RME ", "")
     hint = dev.missing_hint() if state == "no-device" else ""
-    return {
-        "starting": (light(AMBER, "Connecting…"), ""),
-        "no-device": (light(RED, "Not found", False), f"{short} not found on {dev.bus}."
+    text, note = {
+        "starting": ("Connecting…", ""),
+        "no-device": ("Not found", f"{short} not found on {dev.bus}."
                       + (hint and f"<br>{hint}")),
-        "no-access": (light(RED, "No permission", False),
+        "no-access": ("No permission",
                       f"No permission to open the {short}.<br>" + udev_rule_hint(dev)),
-        "busy": (light(RED, "In use", False),
+        "busy": ("In use",
                  f"The {short} driver refuses mixer changes while playback and recording are "
                  "open in two different programs. Let one program (PipeWire or JACK) use both."
                  if dev.bus == "PCIe" else
                  f"The {short} mixer interface is in use by another program."),
-        "active": (light(CYAN, "Active"), ""),
-        "no-nodes": (light(AMBER, "Active, routes full"),
+        "active": ("Active", ""),
+        "no-nodes": ("Active, routes full",
                      f"This mix needs more than {dev.max_routes} routes; some sends are "
                      "missing."),
-        "error": (light(RED, f"{dev.bus} error", False),
-                  f"{dev.bus} error talking to the {short}; retrying."),
-        "wrong-driver": (light(AMBER, "Check driver", False),
+        "error": (f"{dev.bus} error", f"{dev.bus} error talking to the {short}; retrying."),
+        "wrong-driver": ("Check driver",
                          f"This {short} looks like a card from 2022 on. Those need the snd-hdspe "
                          "driver, and this one runs on snd-hdspm, so the mixer is left alone. "
                          "Install snd-hdspe and blacklist snd-hdspm (see the README), or choose "
                          "Use anyway if the card works for you as it is."),
-        "no-reply": (light(AMBER, "Connected, no reply from the DSP"),
+        "no-reply": ("Connected, no reply from the DSP",
                      f"The {short} is connected but has not answered, so changes may not "
                      "reach it."),
     }.get(state, (state, ""))
+    return light(hw_color(state), text), note
 
 
 def read_failure(hw, short):
@@ -113,21 +163,17 @@ def ask(parent, title, text, action):
 
 
 class Led(QLabel):
-    """Lock state: a filled light when locked or in sync, an empty ring when not, so it reads
-    without telling the colours apart."""
-    COLORS = {"No Lock": "#6f8a94", "Lock": "#ffb020", "Sync": "#2ad4ff"}
+    """Lock state: lit when locked or in sync, grey when not; the word says which."""
 
     def set_state(self, s):
-        c = self.COLORS.get(s, "#6f8a94")
-        dot = "●" if s in ("Lock", "Sync") else "○"
-        self.setText(f"<span style='color:{c}'>{dot}</span> {s or '—'}")
+        self.setText(light(CYAN if s in ("Lock", "Sync") else OFF, s or "—"))
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
-    from the chosen source, dark while it does not (or the state is unknown). The tooltip
+    from the chosen source, grey while it does not (or the state is unknown). The tooltip
     names the current source; item is the combo's entry for it where the two differ."""
-    ON, OFF = "#56e39f", "#6f8a94"
+    ON = "#56e39f"
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
@@ -143,9 +189,7 @@ class SyncLight(QLabel):
 
     def refresh(self):
         on = self.current not in (None, "—") and self.item == self.combo.currentText()
-        # filled and green while in use, an empty ring otherwise (shape, not only colour)
-        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>{'●' if on else '○'}"
-                     "</span>")
+        self.setText(light(self.ON if on else OFF))
         self.setToolTip(("Running from this source" if on else
                          f"Running from: {self.current}") if self.current else
                         "Current source unknown")
@@ -184,6 +228,9 @@ class Sidebar(QFrame):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         lay.addWidget(scroll, 1)
+        # the shortcut list opens at the very bottom: scroll down to it once it is laid out
+        panel.keys_btn.clicked.connect(lambda: QTimer.singleShot(
+            0, lambda: scroll.ensureWidgetVisible(panel.keys_list, 0, px(8))))
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -293,6 +340,7 @@ class SettingsPanel(QWidget):
         self._build_ui_scale(lay, ui_scale)
         self._build_mix(lay)
         self._build_updates(lay)
+        self._build_shortcuts(lay)
 
         eng.setToolTip(
             f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
@@ -425,6 +473,37 @@ class SettingsPanel(QWidget):
         save_ui(update_channel=self.channel.itemData(i))
         self._show_pending(None, [], quiet=True)
         self._run_update_step("check")      # what this channel has
+
+    def _build_shortcuts(self, lay):
+        """The keyboard shortcuts in one place. The list is long, so it is closed until asked
+        for."""
+        box = Section("KEYBOARD SHORTCUTS")
+        bl = QVBoxLayout(box)
+        self.keys_btn = QPushButton("Show")
+        self.keys_btn.setAccessibleName("Show keyboard shortcuts")
+        self.keys_btn.clicked.connect(self._toggle_shortcuts)
+        bl.addWidget(self.keys_btn)
+        rows = ""
+        for where, keys in SHORTCUTS:
+            if where.startswith("Effects") and self.dev.fx is None:
+                continue
+            rows += (f"<tr><td colspan='2' style='padding-top:{px(6)}px;"
+                     f"color:{theme.DIM.name()}'>{where}</td></tr>")
+            for key, what in keys:
+                rows += (f"<tr><td style='padding-right:{px(8)}px;white-space:nowrap'>"
+                         f"{html.escape(key)}</td>"
+                         f"<td style='color:{theme.MUTED}'>{html.escape(what)}</td></tr>")
+        self.keys_list = QLabel(f"<table cellspacing='0' cellpadding='{px(1)}'>{rows}</table>")
+        self.keys_list.setWordWrap(True)
+        bl.addWidget(self.keys_list)
+        self.keys_list.hide()
+        lay.addWidget(box)
+
+    def _toggle_shortcuts(self):
+        show = self.keys_list.isHidden()
+        self.keys_list.setVisible(show)
+        self.keys_btn.setText("Hide" if show else "Show")
+        self.keys_btn.setAccessibleName(f"{self.keys_btn.text()} keyboard shortcuts")
 
     def _update_clicked(self):
         release, changes = self._pending
@@ -824,7 +903,7 @@ class SettingsPanel(QWidget):
             self._show_fw_status(None, read_failure(self.hw, "Card"))
             return
         if not usable:
-            self.rd_info.setText(f"<span style='color:{AMBER}'>Settings are off: see the driver "
+            self.rd_info.setText(f"<span style='color:{RED}'>Settings are off: see the driver "
                                  "note under Status.</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
@@ -905,7 +984,7 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             self.routes_label.setText("—")
-            self.eng_label.setText(light(RED, "Stopped", False))
+            self.eng_label.setText(light(RED, "Stopped"))
             self.sink_label.setText("—")
             self.show_status_note(html.escape(engine_error) if engine_error else
                                   "The hardware keeps its last mix. Start the engine to "
@@ -924,21 +1003,21 @@ class SettingsPanel(QWidget):
         else:
             self.routes_label.setText("—")
         self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
-                               light(AMBER, "Not responding"))
+                               light(RED, "Not responding"))
         self.sink_label.setText(
             f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
-            light(AMBER, f"Not linked to the {self.dev.name.replace('RME ', '')}", False))
+            light(RED, f"Not linked to the {self.dev.name.replace('RME ', '')}"))
         self.show_status_note(note)
         self.eng_btn.setText("Restart engine")
 
     def update_profile(self, name, profile, has_in):
         self._card_name = name
         if not name:
-            self.profile.setText(light(OFF, "Not in PipeWire", False))
+            self.profile.setText(light(OFF, "Not in PipeWire"))
             self.recording.setText("—")
             self.pro_btn.setVisible(False)
             return
         self.profile.setText(html.escape(profile or "—"))
         self.recording.setText(light(CYAN, "All inputs") if has_in else
-                               light(AMBER, "No inputs (monitoring still works)", False))
+                               light(OFF, "No inputs (monitoring still works)"))
         self.pro_btn.setVisible(not has_in)

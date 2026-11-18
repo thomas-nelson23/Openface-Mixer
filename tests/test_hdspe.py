@@ -526,7 +526,7 @@ class PanelTest(unittest.TestCase):
 
     @staticmethod
     def lit(light):
-        return "●" in light.text()
+        return light.ON in light.text()
 
     def test_clock_light_in_autosync(self):
         p = self.panel()

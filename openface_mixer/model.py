@@ -147,6 +147,7 @@ def default_state(selected=N_PAIRS - 1):
         "custom_names": True,             # show custom names (else the standard ones)
         "hidden": [],                     # channel groups not shown ("AD3", "AES", see devices)
         "hidden_strips": [],              # single strips hidden with right-click > Hide channel
+        "folded": [],                     # rows folded to names and meters: "in", "play", "out"
     }
     # transparent default: playback n -> output n, like the hardware with the mixer off
     for c in range(N_PLAY):
@@ -283,7 +284,8 @@ def upgrade_state(st, selected=N_PAIRS - 1, strict=False):
     for k in ("names", "colors", "icons"):
         st[k] = {key: v for key, v in st[k].items() if valid_key(key) and isinstance(v, str)
                  } if isinstance(st[k], dict) else {}
-    for k, ok in (("hidden", lambda v: isinstance(v, str)), ("hidden_strips", valid_key)):
+    for k, ok in (("hidden", lambda v: isinstance(v, str)), ("hidden_strips", valid_key),
+                  ("folded", lambda v: v in ("in", "play", "out"))):
         st[k] = [v for v in st[k] if ok(v)] if isinstance(st[k], list) else []
     if not is_index(st["selected"], N_PAIRS):
         st["selected"] = selected

@@ -130,7 +130,7 @@ class EngineStartTest(WindowCase):
         status = {"processing": True, "rate": 48000, "sink_linked": True, "hw": "starting",
                   "hw_nodes": 0, "hw_levels": False, "dev_status": 0, "dev_status2": 0}
         w.poll_engine()
-        self.assertIn("ENGINE STOPPED", w.status.text())
+        self.assertIn("Engine stopped", w.status.text())
         w.status.setText("as it was")
         with mock.patch.object(app.time, "monotonic", return_value=100.0) as clock, \
                 mock.patch.object(w.engine, "status", return_value=None) as engine_status, \
@@ -150,7 +150,7 @@ class EngineStartTest(WindowCase):
             w.start_engine()
             clock.return_value = 103.0
             w.poll_engine()
-            self.assertIn("ENGINE STOPPED", w.status.text())
+            self.assertIn("Engine stopped", w.status.text())
             self.assertEqual(intervals(w)[1], 500)
 
     def test_a_window_that_starts_its_engine_looks_for_it_often(self):
@@ -188,7 +188,7 @@ class EngineStartTest(WindowCase):
         self.assertEqual(w.status.text(), "as it was")
         w._start_timer.timeout.emit()
         w.poll_engine()
-        self.assertIn("ENGINE STOPPED", w.status.text())
+        self.assertIn("Engine stopped", w.status.text())
         self.assertEqual(w.engine_error, "openface-mixer-engine not found")
 
     def test_a_running_engine_is_left_alone(self):

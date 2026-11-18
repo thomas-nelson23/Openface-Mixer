@@ -31,6 +31,10 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   instrument, studio and device icons on the tag (all saved per device). *Custom channel
   names* in the Display section of the settings switches between your names and the standard
   ones.
+- **Fold a row:** click the title of the Hardware Inputs, Playback or Hardware Outputs row to
+  fold it to a slim strip of channel names over their meters; the other rows take the height.
+  A folded row still shows which channels are soloed, muted or have clipped. Click the title
+  again to unfold it. Which rows are folded is remembered per device.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
   channels keep their routing; hiding one switches its solo off.
@@ -50,11 +54,13 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **TotalMix FX effects (Fireface 802 and UCX II):** the **EQ** and **D** buttons on every
   hardware input and output strip open TotalMix's EQ panel (Low Cut and a 3-band parametric EQ
   with its response curve) and Dynamics panel (compressor, expander and Auto Level); they light
-  while an effect is on. **FX** in the top bar (Ctrl+E) opens Reverb and Echo, fed by the **FX
-  Send** in each input and playback channel's settings and heard through each output's **FX
-  Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
+  while an effect is on. A panel opens inside the row, right of its strip: the strips after it
+  move right and the row scrolls, and several strips can have their panels open at once. A
+  second click on the button closes it. **FX** in the top bar (Ctrl+E) opens Reverb and Echo at
+  the end of the outputs row, fed by the **FX Send** in each input and playback channel's
+  settings and heard through each output's **FX Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
   a stereo pair uses its left channel's effects on both sides. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
-  bands) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
+  bands, in a window of its own) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
   to reuse settings.
 
   ![EQ, Dynamics, Reverb and Echo panels beside a UCX II input strip](docs/screenshots/effects.png)
@@ -181,11 +187,42 @@ still need a tester with the hardware.
 | Take back a recall, import or reset | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
+| Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
 | Matrix | Click an empty cell for 0 dB, drag up or down to set its level, double-click or Delete to clear it. Scrolling moves the grid; Ctrl + scroll changes a level. Arrow keys move the selection, Enter types a level |
 | Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
-| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
+| Effects (802, UCX II) | **EQ** / **D** on a strip open its panel in the row, and close it again; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
 | Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
+
+### Keyboard shortcuts
+
+The same list is in the app: **Keyboard shortcuts** at the bottom of the settings, then
+**Show**. The effects are on the Fireface 802 and UCX II.
+
+| Where | Keys | What they do |
+| --- | --- | --- |
+| Window | Ctrl+, | Show or hide settings |
+| Window | Ctrl+1, Ctrl+2 | Mixer, Matrix |
+| Window | Tab, Shift+Tab | Next, previous control |
+| Window | Esc | Cancel Store or typing |
+| Window | Ctrl+Q | Quit |
+| Row title | Space, Enter | Fold or unfold the row |
+| Fader | Up, Down | 1 dB (Ctrl: 0.5 dB) |
+| Fader | Page Up / Down | 6 dB |
+| Fader | Home | 0 dB |
+| Fader | End | Off (-∞) |
+| Fader | Enter | Type a level |
+| Pan knob | Left, Right | Pan |
+| Pan knob | Home | Centre |
+| Matrix | Arrow keys | Move the selection |
+| Matrix | Enter | Type a level |
+| Matrix | Delete | Clear the cell |
+| Effects | Ctrl+E | Reverb and Echo |
+| Effects | Esc, Ctrl+W | Close a panel |
+| Effects knob | Arrow keys | Turn (Shift: fine) |
+| Effects knob | Page Up / Down | Ten steps |
+| Effects knob | Home | Default value |
+| Effects knob | Enter | Type a value |
 
 ### Control room and ARC USB
 

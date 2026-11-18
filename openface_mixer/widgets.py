@@ -1,24 +1,27 @@
 """Custom-painted mixer controls: meter, fader, pan knob, channel strip and strip row.
 
 All sizes go through theme.px(), so the strips are laid out at the chosen UI scale."""
+import html
 import math
 import time
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractButton, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from .model import FADER_MIN_DB, NEG_INF, db2pos, fader_db, fmt_db, lin2db, parse_db, pos2db
 from .theme import (
-    CYAN, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, caption_html,
-    font, icon_pixmap, px,
+    CYAN, DIM, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, TEXT,
+    caption_html, font, icon_pixmap, px,
 )
 from .wheel import Wheel
 from PySide6.QtGui import QIcon
 from PySide6.QtGui import QFont
+
+QWIDGETSIZE_MAX = 16777215      # Qt's "no maximum size"
 
 
 class Meter(QWidget):
@@ -33,9 +36,23 @@ class Meter(QWidget):
         self.max_peak = 0.0
         self._shown_peak = None
         self.bar = px(4)                      # bar width; one pixel gap between bars
-        self.setFixedWidth((self.bar + 1) * channels + 1)
-        self.setMinimumHeight(px(60))
+        self.horizontal = None
+        self.set_horizontal(False)
         self.setToolTip("Click to reset peak / clip")
+
+    def set_horizontal(self, on):
+        """Upright beside the fader, or on its side under the name of a folded strip."""
+        if on == self.horizontal:
+            return
+        self.horizontal = on
+        across = (self.bar + 1) * len(self.levels) + 1
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
+        if on:
+            self.setFixedHeight(across)
+        else:
+            self.setFixedWidth(across)
+            self.setMinimumHeight(px(60))
 
     def push(self, peaks, dt):
         now = time.monotonic()
@@ -78,9 +95,14 @@ class Meter(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        width, height = self.width(), self.height()
+        if self.horizontal:     # drawn upright and turned: the clip lights are at the right end
+            p.translate(width, 0)
+            p.rotate(90)
+            width, height = height, width
         b = self.bar
         clip_h = px(3)
-        top, h = clip_h + px(2), self.height() - clip_h - px(4)
+        top, h = clip_h + px(2), height - clip_h - px(4)
         grad = QLinearGradient(0, top, 0, top + h)
         grad.setColorAt(0.0, QColor("#ff2a4f"))
         grad.setColorAt(0.06, QColor("#ffb020"))
@@ -100,7 +122,7 @@ class Meter(QWidget):
         p.setPen(QPen(QColor(1, 7, 11, 110), 1))
         step = px(3)
         for y in range(top + h - step, top, -step):
-            p.drawLine(0, y, self.width(), y)
+            p.drawLine(0, y, width, y)
 
 
 class LevelEdit(QLineEdit):
@@ -421,10 +443,13 @@ def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
     return b
 
 
-def fx_button_style(on):
+def fx_button_style(on, opened=False):
     """EQ / D: quiet when the effect is off, lit when it is on (they are not toggles: a click
-    opens the panel)."""
+    opens the panel, another closes it). opened: the panel is showing, so the button has a
+    white edge."""
     lit = "background:#2ad4ff;color:#021012;border-color:#2ad4ff;" if on else ""
+    if opened:
+        lit += "border-color:#f5f8fa;" + ("" if on else "color:#f5f8fa;background:#12293a;")
     return (f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid "
             f"rgba(255,255,255,0.09);border-radius:{px(3)}px;{lit}}}"
             "QToolButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
@@ -435,7 +460,7 @@ def fx_button(text, tip):
     b = QToolButton()
     b.setText(text)
     b.setFixedSize(QSize(px(26), px(18)))
-    b.setToolTip(f"{tip} — click to open (lit while on)")
+    b.setToolTip(f"{tip} — click to open or close (lit while on)")
     b.setCursor(Qt.PointingHandCursor)
     b.setFont(font(SANS, 9, QFont.DemiBold))
     return b
@@ -488,7 +513,9 @@ class Strip(QFrame):
     key identifies the strip in the model ("in:0", "play:2", "out:16"); see model.strip_key().
     """
     WIDTH = 62
+    FOLDED = 42                          # height of a folded strip: its name tag over its meter
     clicked = Signal()
+    flags_changed = Signal()             # folded: its solo, mute or clip mark changed
     rename_requested = Signal()
     context_requested = Signal(object)   # global QPoint, for the right-click menu
     settings_requested = Signal(object)  # global QPoint below the settings button
@@ -509,6 +536,9 @@ class Strip(QFrame):
         self.icon = icon                                # icon name (theme.CHANNEL_ICONS) or None
         self._with_settings = show_settings
         self._selected = False
+        self.folded = False
+        self.clipped = False                 # the peak readout is red (until the meter is clicked)
+        self._flags = None                   # (solo, mute, clipped) as a folded strip shows them
         self.width_px = px(self.WIDTH)
         self.setFixedWidth(self.width_px)
         self.setObjectName("strip")
@@ -593,7 +623,7 @@ class Strip(QFrame):
             self.dyn_btn.hide()
         self.set_fx_active(False, False)
 
-        mid = QHBoxLayout()
+        self._mid = mid = QHBoxLayout()
         mid.setSpacing(1)
         mid.setContentsMargins(0, 0, 0, 0)
         self.fader = Fader()
@@ -618,19 +648,23 @@ class Strip(QFrame):
         self.fader.changed.connect(lambda db: self.value.setText(fmt_db(db)))
         self.fader.type_requested.connect(self.type_level)
         self.meter.peak_changed.connect(self._show_peak)
-        self._set_title(show_settings)
+        self.solo.toggled.connect(lambda _on: self.show_flags())
+        self.mute.toggled.connect(lambda _on: self.show_flags())
+        self._set_title()
         self.set_selected(False)
 
-    def _set_title(self, with_settings):
+    def _set_title(self):
         """Shorten a long (custom) name to fit the tag beside its icon; the tooltip has it in
         full."""
+        with_settings = self._with_settings and not self.folded
         width = self.width_px - px(10) - (px(15) if with_settings else 0)
         if self.icon:
             width -= px(16)
         self.title.setText(QFontMetrics(self.title.font()).elidedText(self.name, Qt.ElideRight,
                                                                       width))
         name = self.name if self.name == self.standard else f"{self.name} ({self.standard})"
-        action = ("Click to edit this output's submix · " if self.kind == "out" else "")
+        action = ("Click to edit this output's submix · " if self.kind == "out" else
+                  "Click to unfold the row · " if self.folded else "")
         self.title.setToolTip(f"{name}\n{action}Double-click to rename · right-click for more")
         # names for screen readers (Orca reads these through AT-SPI)
         self.title.setAccessibleName(self.name)
@@ -647,6 +681,44 @@ class Strip(QFrame):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")
         hot = db != NEG_INF and db >= -0.05
         self.peak.setStyleSheet(lcd_style("#ff2a4f", "white") if hot else lcd_style())
+        if hot != self.clipped:
+            self.clipped = hot
+            self.show_flags()
+
+    def set_folded(self, on):
+        """Folded (see Row), the strip is its name tag over its meter laid on its side; the
+        controls are put away."""
+        if on == self.folded:
+            return
+        self.folded = on
+        if on:
+            for edit in self.findChildren(LevelEdit):   # a level being typed: left as it was
+                edit._end()
+            self._put_away = [w for w in (
+                self.settings_btn, self.pan, self.pan_text, self.solo, self.mute, self.stereo,
+                self.eq_btn, self.dyn_btn, self.fader, self.value, self.peak) if not w.isHidden()]
+        for w in self._put_away:
+            w.setVisible(not on)
+        self.meter.set_horizontal(on)
+        self._mid.setStretchFactor(self.meter, int(on))
+        self.setMinimumHeight(px(self.FOLDED) if on else 0)
+        self.setMaximumHeight(px(self.FOLDED) if on else QWIDGETSIZE_MAX)
+        self.title.setCursor(Qt.PointingHandCursor if on or self.kind == "out"
+                             else Qt.ArrowCursor)
+        self._set_title()
+        self._flags = None
+        self.show_flags()
+        if not on:
+            self.set_selected(self._selected)
+
+    def show_flags(self):
+        """A folded strip shows what its buttons and readouts would: an amber edge while it is
+        soloed, a red one once it clipped, a dimmed name while it is muted."""
+        flags = (self.solo.isChecked(), self.mute.isChecked(), self.clipped)
+        if self.folded and flags != self._flags:
+            self._flags = flags
+            self.set_selected(self._selected)
+            self.flags_changed.emit()
 
     def set_settings_active(self, on):
         """Light the settings button while a channel setting (phase, 48V, ...) is on."""
@@ -656,10 +728,12 @@ class Strip(QFrame):
             f"color:{RED.name() if on else '#7d9299'}}}"
             "QToolButton:hover{background:#12293a;color:white}")
 
-    def set_fx_active(self, eq, dyn):
-        for b, on in ((self.eq_btn, eq), (self.dyn_btn, dyn)):
+    def set_fx_active(self, eq, dyn, opened=()):
+        """Light EQ and D while their effect is on. opened: those of "eq" and "dyn" whose panel
+        is showing."""
+        for which, b, on in (("eq", self.eq_btn, eq), ("dyn", self.dyn_btn, dyn)):
             b.setProperty("on", on)
-            b.setStyleSheet(fx_button_style(on))
+            b.setStyleSheet(fx_button_style(on, which in opened))
 
     def set_fader(self, db):
         self.fader.set_db(db)
@@ -674,7 +748,8 @@ class Strip(QFrame):
             self.value.setToolTip(why or LEVEL_TIP)
 
     def mouseDoubleClickEvent(self, e):
-        if e.button() == Qt.LeftButton and self.value.geometry().contains(e.position().toPoint()):
+        if (e.button() == Qt.LeftButton and self.value.isVisible()
+                and self.value.geometry().contains(e.position().toPoint())):
             self.type_level()
         else:
             super().mouseDoubleClickEvent(e)
@@ -707,7 +782,7 @@ class Strip(QFrame):
     def set_icon(self, icon):
         """icon: a name from theme.CHANNEL_ICONS, or None."""
         self.icon = icon
-        self._set_title(self._with_settings)
+        self._set_title()
         self.set_selected(self._selected)
 
     def _apply_icon(self, sel):
@@ -727,6 +802,11 @@ class Strip(QFrame):
         top_border = (f"border-top:{px(2)}px solid {GROUP_COLOR[self.group].name()};"
                       if self.group else "")
         tag = label_style(col, sel)
+        if self.folded:
+            if self.clipped or self.solo.isChecked():
+                border = (RED if self.clipped else SOLO).name()
+            if self.mute.isChecked() and not sel:
+                tag += f"color:{MUTED};"
         self._apply_icon(sel)
         self.setStyleSheet(
             f"QFrame#strip{{background:qlineargradient(y1:0,y2:1,stop:0 rgba(4,12,18,0.62),"
@@ -735,22 +815,82 @@ class Strip(QFrame):
             f"QPushButton{{{tag}}}")
 
 
+class RowTitle(QAbstractButton):
+    """A row's title, and the button that folds the row (checked) or unfolds it: a mark that
+    points down while the row is open and right while it is folded, a short bar in the row's
+    colour and the title in tracked caps. Space and Enter work as a click."""
+
+    def __init__(self, title, color, parent=None):
+        super().__init__(parent)
+        self.color = color
+        self.setText(title.upper())
+        f = font(SANS, 9, QFont.DemiBold)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, px(2.4))
+        self.setFont(f)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover)          # repaint when the pointer comes and goes
+        self.setAccessibleName(title)
+        self.setToolTip("Fold or unfold this row (Space or Enter)")
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def sizeHint(self):
+        return QSize(px(28) + self.fontMetrics().horizontalAdvance(self.text()), px(16))
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.click()
+        else:
+            super().keyPressEvent(e)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        y = self.height() / 2
+        p.setPen(QPen(QColor("white") if self.underMouse() else DIM, max(1.0, px(1.5)),
+                      Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        x, a, b = px(6), px(3), px(1.5)         # the mark's centre, half its span and depth
+        p.drawPolyline(
+            [QPointF(x - b, y - a), QPointF(x + b, y), QPointF(x - b, y + a)] if self.isChecked()
+            else [QPointF(x - a, y - b), QPointF(x, y + b), QPointF(x + a, y - b)])
+        p.setPen(Qt.NoPen)
+        p.setBrush(self.color)
+        p.drawRoundedRect(QRectF(px(14), y - px(5), px(3), px(10)), px(1), px(1))
+        p.setPen(DIM)
+        p.drawText(QRectF(px(25), 0, self.width(), self.height()), Qt.AlignVCenter, self.text())
+        if self.hasFocus():
+            p.setPen(QPen(QColor(42, 212, 255, 200), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), px(3), px(3))
+
+
 class Row(QWidget):
-    def __init__(self, title, subtitle, color, parent=None):
+    """One row of strips under its title. A click on the title folds the row to its strips'
+    names and meters, so the other rows get its height; another click unfolds it.
+
+    An effects panel can be docked in the row, right of its strip: the strips after it move
+    right and the row scrolls. A panel is a widget with a closed signal that deletes itself
+    when it is closed (fx_panels.FxPanel)."""
+    fold_changed = Signal()
+
+    def __init__(self, kind, title, subtitle, color, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(px(4))
+        self.kind = kind
         self.title = title
+        self.folded = False
         head = QHBoxLayout()
-        head.setContentsMargins(px(2), 0, 0, 0)
+        head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(px(8))
-        bar = QFrame()                        # a short bar in the row's colour
-        bar.setFixedSize(px(3), px(10))
-        bar.setStyleSheet(f"background:{color.name()};border-radius:{px(1)}px")
-        head.addWidget(bar)
-        self.head = QLabel()
+        self.fold_btn = RowTitle(title, color)
+        self.fold_btn.toggled.connect(self.set_folded)
+        head.addWidget(self.fold_btn)
+        self.head = QLabel()                  # the hint beside the title
         self.head.setTextFormat(Qt.RichText)
+        # cut off at the row's end when it is long: names never widen the window
+        self.head.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.set_subtitle(subtitle)
         head.addWidget(self.head, 1)
         lay.addLayout(head)
@@ -760,19 +900,110 @@ class Row(QWidget):
         self.scroll.setFrameShape(QFrame.NoFrame)
         lay.addWidget(self.scroll, 1)
         self.strips = []
+        self.docks = {}             # docked panel -> key of the strip it is right of, or None
+        self._stretch()
 
     def set_subtitle(self, text):
-        # the title in tracked caps, then the hint
-        self.head.setText(
-            f"{caption_html(self.title)}&nbsp;&nbsp;&nbsp;"
-            f"<span style='color:{MUTED};font-size:{px(10)}px'>{text}</span>")
+        self._subtitle = text
+        self._show_head()
+
+    def _show_head(self):
+        """The hint beside the title. A folded row names the strips in it that are soloed or
+        have clipped, which may be scrolled out of view."""
+        text = self._subtitle
+        if self.folded:
+            if self.kind != "out":
+                text = "folded · click a name to unfold" if self.strips else "folded"
+            for word, color, strips in (
+                    ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
+                    ("Clip", RED, [s for s in self.strips if s.clipped])):
+                if strips:
+                    names = ", ".join(html.escape(s.title.text()) for s in strips[:3])
+                    more = f" +{len(strips) - 3}" if len(strips) > 3 else ""
+                    text += (f"{'&nbsp;' * 5}{caption_html('■ ' + word, color)}&nbsp;"
+                             f"<span style='color:{TEXT.name()}'>{names}{more}</span>")
+        self.head.setText(f"<span style='color:{MUTED};font-size:{px(10)}px'>{text}</span>")
+
+    def set_folded(self, on):
+        if on == self.folded:
+            return
+        self.folded = on
+        self.fold_btn.setChecked(on)
+        for panel in list(self.docks):      # a folded row has no room for a panel
+            panel.close()
+        for s in self.strips:
+            s.set_folded(on)
+        self._stretch()
+        self._fit()
+        self._show_head()
+        self.fold_changed.emit()
+
+    def _stretch(self):
+        """Open rows share the height that folded ones leave."""
+        policy = QSizePolicy(QSizePolicy.Preferred,
+                             QSizePolicy.Fixed if self.folded else QSizePolicy.Preferred)
+        policy.setVerticalStretch(0 if self.folded else 1)
+        self.setSizePolicy(policy)
+
+    def _fit(self):
+        """A folded row is as high as its folded strips, plus the scroll bar when they don't
+        all fit."""
+        if not self.folded:
+            self.scroll.setMinimumHeight(0)
+            self.scroll.setMaximumHeight(QWIDGETSIZE_MAX)
+            return
+        bar = self.scroll.horizontalScrollBar().sizeHint().height()
+        inner = self.scroll.widget()
+        wide = inner is not None and inner.sizeHint().width() > self.scroll.width()
+        self.scroll.setFixedHeight(px(Strip.FOLDED) + (bar if wide else 0))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def dock(self, panel, key=None, first=False):
+        """Put a panel in the row: right of the strip with that key, after the panels that are
+        there (first: before them), or at the end of the row without a key. The row scrolls
+        to show the panel and its strip."""
+        # kept in the order they stand in, for set_strips() to put them back
+        self.docks = {panel: key, **self.docks} if first else {**self.docks, panel: key}
+        panel.closed.connect(lambda: self.docks.pop(panel, None))
+        self._place(panel, first)
+        panel.show()
+        QTimer.singleShot(0, lambda: self.reveal(panel))    # once the row is laid out again
+
+    def _place(self, panel, first=False):
+        lay = self.scroll.widget().layout()
+        strip = next((s for s in self.strips if s.key == self.docks[panel]), None)
+        if strip is None:
+            at = lay.count() - 1                            # before the stretch
+        else:
+            at = lay.indexOf(strip) + 1
+            while not first and self.docks.get(lay.itemAt(at).widget()) == strip.key:
+                at += 1
+        lay.insertWidget(at, panel)
+
+    def reveal(self, panel):
+        """Scroll sideways as far as it takes to show the panel and, before all, its strip (a
+        panel without one: its left end)."""
+        if panel in self.docks:
+            first = next((s for s in self.strips if s.key == self.docks[panel]), panel)
+            bar = self.scroll.horizontalScrollBar()
+            end = panel.x() + panel.width() + px(4) - self.scroll.viewport().width()
+            bar.setValue(min(first.x() - px(4), max(bar.value(), end)))
 
     def set_strips(self, strips):
+        for panel in self.docks:            # the panels outlive the strips' container
+            panel.setParent(self)
         inner = QWidget()
         hl = QHBoxLayout(inner)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(px(4))
         for s in strips:
+            s.set_folded(self.folded)
+            s.flags_changed.connect(self._show_head)
+            if self.kind != "out":          # (an output's name selects its submix)
+                s.clicked.connect(lambda: self.set_folded(False))
             hl.addWidget(s)
         if not strips:      # every channel of the row is hidden: say how to get them back
             empty = QLabel(f"No {self.title.lower()} shown. Right-click here to show hidden "
@@ -782,8 +1013,20 @@ class Row(QWidget):
             hl.addSpacing(px(14))
             hl.addWidget(empty)
         hl.addStretch()
+        at = self.scroll.horizontalScrollBar().value()
         old = self.scroll.takeWidget()
         if old:
             old.deleteLater()
         self.scroll.setWidget(inner)
         self.strips = strips
+        keys = {s.key for s in strips} | {None}
+        for panel, key in list(self.docks.items()):
+            if key in keys:
+                self._place(panel)
+                panel.show()
+            else:                           # its strip is gone
+                panel.close()
+        inner.adjustSize()                  # so the row can go back to where it was scrolled to
+        self.scroll.horizontalScrollBar().setValue(at)
+        self._fit()
+        self._show_head()

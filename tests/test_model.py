@@ -532,22 +532,25 @@ class DamagedStateTest(unittest.TestCase):
             with self.subTest(value=value):
                 st = m.default_state()
                 for key in ("tab", "active_slot", "names", "colors", "icons", "custom_names",
-                            "hidden", "hidden_strips"):
+                            "hidden", "hidden_strips", "folded"):
                     st[key] = copy.deepcopy(value)
                 st = self.usable(m.upgrade_state(st, strict=True))
                 self.assertEqual((st["tab"], st["names"], st["colors"], st["icons"],
-                                  st["custom_names"], st["hidden"], st["hidden_strips"]),
-                                 (0, {}, {}, {}, True, [], []))
+                                  st["custom_names"], st["hidden"], st["hidden_strips"],
+                                  st["folded"]),
+                                 (0, {}, {}, {}, True, [], [], []))
                 self.assertEqual(st["active_slot"], 7 if value == 7 else None)
 
     def test_good_display_settings_are_kept(self):
         st = m.default_state()
         st.update(tab=1, active_slot=7, custom_names=False, hidden=["AD3", 5],
                   hidden_strips=["in:4", "zzz", 3], names={"in:0": "Vocal", "in:1": 5, "x": "y"},
-                  colors={"out:16": "#ff0000", "out:99": "#00ff00"}, icons={"play:2": "mic"})
+                  colors={"out:16": "#ff0000", "out:99": "#00ff00"}, icons={"play:2": "mic"},
+                  folded=["play", "matrix", 3, ["in"], None, "out"])
         st = m.upgrade_state(st, strict=True)
         self.assertEqual((st["tab"], st["active_slot"], st["custom_names"]), (1, 7, False))
         self.assertEqual((st["hidden"], st["hidden_strips"]), (["AD3"], ["in:4"]))
+        self.assertEqual(st["folded"], ["play", "out"])
         self.assertEqual((st["names"], st["colors"], st["icons"]),
                          ({"in:0": "Vocal"}, {"out:16": "#ff0000"}, {"play:2": "mic"}))
 

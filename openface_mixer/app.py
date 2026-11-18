@@ -36,7 +36,7 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, import_mix
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
-from .settings_panel import SettingsPanel, Sidebar, ask
+from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, light
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, WARN, apply_theme,
     compact_boxes, icon_pixmap, px,
@@ -114,12 +114,15 @@ class MainWindow(QMainWindow):
         rows = QVBoxLayout(mixer_page)
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(px(10))
-        self.row_in = Row("Hardware Inputs", "", KIND_COLOR["in"])
-        self.row_play = Row("Playback", "", KIND_COLOR["play"])
-        self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix",
-                           KIND_COLOR["out"])
+        self.row_in = Row("in", "Hardware Inputs", "", KIND_COLOR["in"])
+        self.row_play = Row("play", "Playback", "", KIND_COLOR["play"])
+        self.row_out = Row("out", "Hardware Outputs",
+                           "master level · click a name tag to edit its submix", KIND_COLOR["out"])
         for r in (self.row_in, self.row_play, self.row_out):
-            rows.addWidget(r, 1)
+            rows.addWidget(r)
+            r.set_folded(r.kind in self.st["folded"])
+            r.fold_changed.connect(self.rows_folded)
+        rows.addStretch()           # takes the height when every row is folded
         self.matrix = MatrixView(self)
         self.tabs = QStackedWidget()
         self.tabs.addWidget(mixer_page)
@@ -317,12 +320,20 @@ class MainWindow(QMainWindow):
             ("Ctrl+E", lambda: self.dev.fx is not None and self.fx_btn.toggle()),
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
-            ("Escape", lambda: self.store_btn.setChecked(False)),
+            ("Escape", self.escape),
+            ("Ctrl+W", self.close_fx_panel),
             ("Ctrl+Q", self.quit_app),          # also quits when closing only hides (--background)
         )
         for key, slot in keys:
             sc = QShortcut(QKeySequence(key), self)
             sc.activated.connect(slot)
+
+    def escape(self):
+        """Esc un-arms Store; with nothing to un-arm it closes an effects panel."""
+        if self.store_btn.isChecked():
+            self.store_btn.setChecked(False)
+        else:
+            self.close_fx_panel()
 
     def tab_focus_only(self):
         """Buttons take the keyboard focus from Tab, not from a click, so the focus ring only
@@ -530,6 +541,12 @@ class MainWindow(QMainWindow):
         menu.exec(pos)
         menu.deleteLater()
 
+    def rows_folded(self):
+        """A row was folded or unfolded: remembered with the device's state."""
+        self.st["folded"] = [r.kind for r in (self.row_in, self.row_play, self.row_out)
+                             if r.folded]
+        self.schedule_save()
+
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
                 if c % 2 == 0 and (all_pairs or self.shown("out", c))]
@@ -580,8 +597,8 @@ class MainWindow(QMainWindow):
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
-            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
-            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
+            s.eq_requested.connect(lambda st=s: self.toggle_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.toggle_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
@@ -629,8 +646,8 @@ class MainWindow(QMainWindow):
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
-            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
-            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
+            s.eq_requested.connect(lambda st=s: self.toggle_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.toggle_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
@@ -745,70 +762,106 @@ class MainWindow(QMainWindow):
                 on = on or any(values[c] is not None for c in own) or (
                     s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
                 s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in own),
-                                any(fx.dyn_active(f, s.kind, c) for c in own))
+                                any(fx.dyn_active(f, s.kind, c) for c in own),
+                                [which for which in ("eq", "dyn")
+                                 if (which, s.key) in self.fx_panels])
             s.set_settings_active(on)
 
     # ------------------------------------------------------------------ TotalMix FX effects
     def open_fx_panel(self, strip, which):
-        """The strip's EQ, Dynamics or (UCX II outputs) Room EQ panel; one per strip, raised
-        if it is already open."""
+        """The strip's EQ or Dynamics panel, in the row right of the strip (EQ before Dynamics),
+        or the Room EQ of a UCX II output in a window of its own. One per strip and kind."""
         key = (which, strip.key)
         panel = self.fx_panels.get(key)
-        if panel is not None and panel.channels == strip.channels:
+        if panel is None:
+            f, model = self.st["hw"]["fx"], self.dev.fx
+            if which == "room":
+                panel = RoomEqPanel(strip.name, f, model, strip.channels, self)
+                panel.adjustSize()
+                # beside the strip, kept on the screen
+                pos = strip.mapToGlobal(strip.rect().topRight())
+                screen = strip.screen().availableGeometry()
+                x = min(pos.x() + px(4), screen.right() - panel.width())
+                y = min(max(screen.top(), pos.y()), screen.bottom() - panel.height())
+                panel.move(max(screen.left(), x), y)
+            else:
+                cls = EqPanel if which == "eq" else DynamicsPanel
+                panel = cls(strip.name, f, model, strip.kind, strip.channels)
+                panel.set_tag(strip.name, strip.tag_color())
+                self.row_of(strip).dock(panel, strip.key, first=which == "eq")
+            self.add_fx_panel(key, panel)
+        if which == "room":
             panel.show()
             panel.raise_()
             panel.activateWindow()
-            return
-        if panel is not None:
-            panel.close()
-        f, model = self.st["hw"]["fx"], self.dev.fx
-        if which == "room":
-            panel = RoomEqPanel(strip.name, f, model, strip.channels, self)
         else:
-            cls = EqPanel if which == "eq" else DynamicsPanel
-            panel = cls(strip.name, f, model, strip.kind, strip.channels, self)
+            self.row_of(strip).reveal(panel)
+        panel.setFocus()                    # Esc and Ctrl+W close it
+
+    def toggle_fx_panel(self, strip, which):
+        """The strip's EQ and D buttons open the panel and close it again."""
+        panel = self.fx_panels.get((which, strip.key))
+        if panel is None:
+            self.open_fx_panel(strip, which)
+        else:
+            panel.close()
+
+    def row_of(self, strip):
+        return {"in": self.row_in, "play": self.row_play, "out": self.row_out}[strip.kind]
+
+    def add_fx_panel(self, key, panel):
         panel.setAttribute(Qt.WA_DeleteOnClose)
         panel.changed.connect(self.fx_changed)
-        panel.destroyed.connect(lambda _=None, k=key, p=panel: self.fx_panels.get(k) is p and
-                                self.fx_panels.pop(k))
+        panel.closed.connect(lambda: self.fx_panel_closed(key, panel))
         self.fx_panels[key] = panel
-        panel.adjustSize()
-        # beside the strip, kept on the screen
-        pos = strip.mapToGlobal(strip.rect().topRight())
-        screen = strip.screen().availableGeometry()
-        x = min(pos.x() + px(4), screen.right() - panel.width())
-        y = min(max(screen.top(), pos.y()), screen.bottom() - panel.height())
-        panel.move(max(screen.left(), x), y)
-        panel.show()
+        self.refresh_settings_buttons()
+
+    def fx_panel_closed(self, key, panel):
+        if self.fx_panels.get(key) is panel:
+            del self.fx_panels[key]
+        which, strip, focus = key[0], self.strips.get(key[1]), self.focusWidget()
+        if which == "unit":
+            self.fx_btn.setChecked(False)
+        elif strip is not None and focus is not None and (
+                focus is panel or panel.isAncestorOf(focus)):
+            (strip.eq_btn if which == "eq" else strip.dyn_btn).setFocus()   # back where it began
+        self.refresh_settings_buttons()
+
+    def close_fx_panel(self):
+        """Esc and Ctrl+W with the keyboard outside a panel: close the one opened last."""
+        shown = [p for p in self.fx_panels.values() if p.isVisible()]
+        if shown:
+            shown[-1].close()
 
     def close_stale_fx_panels(self):
-        """After a rebuild (stereo link, speed change): close panels whose strip is gone or now
-        covers other channels."""
+        """After a rebuild (stereo link, speed change, a new name): close panels whose strip is
+        gone or now covers other channels, and show the strip's name and colour on the others."""
         for (which, key), panel in list(self.fx_panels.items()):
             if which == "unit":
                 continue
             strip = self.strips.get(key)
             if strip is None or strip.channels != panel.channels:
                 panel.close()
+            elif which != "room":
+                panel.set_tag(strip.name, strip.tag_color())
 
     def show_fx_unit(self, on):
+        """Reverb and Echo, at the end of the outputs row (the FX button)."""
         panel = self.fx_panels.get(("unit", ""))
-        if not on:
+        if panel is not None and self.tabs.currentIndex() == 1:
+            self.tabs.setCurrentIndex(0)    # it is open behind the Matrix: show it
+            self.fx_btn.setChecked(True)
+            self.row_out.reveal(panel)
+        elif not on:
             if panel is not None:
                 panel.close()
-            return
-        if panel is None:
-            panel = FxUnitPanel(self.st["hw"]["fx"], self.dev.fx, self)
-            panel.setAttribute(Qt.WA_DeleteOnClose)
-            panel.changed.connect(self.fx_changed)
-            panel.closed.connect(lambda: (self.fx_panels.pop(("unit", ""), None),
-                                          self.fx_btn.setChecked(False)))
-            self.fx_panels[("unit", "")] = panel
-            panel.adjustSize()
-            g = self.geometry()
-            panel.move(g.right() - panel.width() - px(40), g.top() + px(80))
-        panel.show()
-        panel.raise_()
+        elif panel is None:
+            self.tabs.setCurrentIndex(0)
+            self.row_out.set_folded(False)
+            panel = FxUnitPanel(self.st["hw"]["fx"], self.dev.fx)
+            self.row_out.dock(panel)
+            self.add_fx_panel(("unit", ""), panel)
+            panel.setFocus()
 
     def fx_changed(self):
         self.push_matrix()
@@ -945,8 +998,9 @@ class MainWindow(QMainWindow):
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         if self.dev.fx is not None and strip.kind in ("in", "out"):
             menu.addSeparator()
-            menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
-            menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
+            if not strip.folded:        # the panels open beside the strip's controls
+                menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
+                menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
             menu.addAction("Copy effects", lambda: self.copy_effects(strip))
             paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
             paste.setEnabled(self.fx_clipboard is not None)
@@ -976,6 +1030,7 @@ class MainWindow(QMainWindow):
     def set_color(self, strip, color):
         set_strip_color(self.st, strip.key, color)
         strip.set_color(color)
+        self.close_stale_fx_panels()        # the panels' name tags show the colour too
         self.matrix.rebuild()
         self.schedule_save()
 
@@ -1307,6 +1362,7 @@ class MainWindow(QMainWindow):
             s.mute.blockSignals(True)
             s.mute.setChecked(mute)
             s.mute.blockSignals(False)
+            s.show_flags()
 
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
@@ -1322,18 +1378,14 @@ class MainWindow(QMainWindow):
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff2a4f'>○</span>&nbsp; ENGINE STOPPED"
+            txt = light(RED) + "&nbsp; Engine stopped"
             self.status.setToolTip("The engine is not running · click for details")
         else:
-            hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting", "no-reply", "wrong-driver")
-                      else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
                       else "no reply" if s["hw"] == "no-reply" else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting", "no-reply") else "○"
-            txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
+            txt = (light(hw_color(s["hw"])) + "&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:

@@ -200,6 +200,7 @@ class StateFileTest(unittest.TestCase):
                            ("control_room", "x"), ("control_room", [1]), ("control_room", None),
                            ("control_room", {"main": 99, "phones": "x", "talkback_dests": 5}),
                            ("tab", "x"), ("names", [1]), ("hidden", 7), ("remote", "x"),
+                           ("folded", "in"), ("folded", {"in": True}), ("folded", [[], 7]),
                            ("hw", "x")):
             with self.subTest(key=key, value=value):
                 self.bak.write_text(saved(m.default_state()))

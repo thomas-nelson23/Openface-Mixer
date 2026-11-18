@@ -48,6 +48,11 @@ def exercise(app, w, check):
         w.settings_btn.click()
         pump(app)
         check(w.sidebar.is_open() == want_open, f"sidebar open is not {want_open}")
+    w.settings.keys_btn.click()                     # the shortcut list at its bottom
+    pump(app)
+    check(w.settings.keys_list.isVisible(), "the shortcut list did not open")
+    w.settings.keys_btn.click()
+    pump(app)
     # a hidden window stops polling for itself and starts again when it is shown
     polls = (w._meter_timer, w._hw_timer, w._profile_timer)
     check(all(t.isActive() for t in polls), "a poll does not run while the window is shown")
@@ -92,6 +97,13 @@ def exercise(app, w, check):
         pump(app)
         want = {("eq", s.key) for s in strips} | {("dyn", s.key) for s in strips} | {("unit", "")}
         check(set(w.fx_panels) == want, f"effects panels open: {sorted(w.fx_panels)}")
+        check(all(p.window() is w and p.isVisible() for p in w.fx_panels.values()),
+              "an effects panel is not in its row")
+        strips[0].eq_btn.click()                    # the button closes its panel again
+        pump(app)
+        check(("eq", strips[0].key) not in w.fx_panels, "EQ did not close its panel")
+        strips[0].eq_btn.click()
+        pump(app)
     for strip in strips:                            # the channel settings popup, where there is one
         if strip.settings_btn.isHidden():
             continue
@@ -115,11 +127,35 @@ def exercise(app, w, check):
     pump(app)
     check(not w.fx_panels, f"effects panels left open: {sorted(w.fx_panels)}")
     check(not w.fx_btn.isChecked(), "the FX button stayed lit")
+    fold_rows(app, w, check)
     for rate in (96000, 192000):                    # the double and quad speed channel layouts
         w.engine.rate = rate
         w.poll_engine()
         pump(app)
         check(w.rate == rate and w.row_in.strips and w.row_out.strips, f"no strips at {rate} Hz")
+        fold_rows(app, w, check)
+
+
+def fold_rows(app, w, check):
+    """Fold each row to names and meters and unfold it again, then all three at once."""
+    rows = (w.row_in, w.row_play, w.row_out)
+    for folding in (*((r,) for r in rows), rows):
+        shown = [s.fader.isVisible() for r in rows for s in r.strips]
+        for row in folding:
+            row.fold_btn.click()
+        pump(app)
+        w.update_meters()
+        for row in folding:
+            check(row.folded and row.scroll.height() < row.strips[0].width_px * 2
+                  and all(s.meter.isVisible() and not s.fader.isVisible() for s in row.strips),
+                  f"{row.title} did not fold at {w.rate} Hz")
+        for row in folding:
+            row.fold_btn.click()
+        pump(app)
+        check(not any(r.folded for r in rows)
+              and shown == [s.fader.isVisible() for r in rows for s in r.strips],
+              f"{[r.title for r in folding]} did not unfold at {w.rate} Hz")
+    check(w.st["folded"] == [], f"folded rows left in the state: {w.st['folded']}")
 
 
 def drive(home):
