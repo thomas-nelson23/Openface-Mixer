@@ -224,6 +224,23 @@ The same list is in the app: **Keyboard shortcuts** at the bottom of the setting
 | Effects knob | Home | Default value |
 | Effects knob | Enter | Type a value |
 
+### Desktop shortcuts
+
+A running mixer takes commands, so the desktop's own keyboard shortcut settings can give it
+global hotkeys. On KDE Plasma: *System Settings → Keyboard → Shortcuts → Add New → Command or
+Script*. On GNOME: *Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts*.
+
+| Command | What it does |
+| --- | --- |
+| `openface-mixer --dim` | Dim on or off |
+| `openface-mixer --mute-main` | Main Out mute on or off |
+| `openface-mixer --recall 3` | Recall preset 3 (1 to 8) |
+| `openface-mixer --show` | Show the window, starting the mixer if needed |
+
+With two interfaces, add `--device <key>` (for example `--device ff802`). If that mixer is not
+running, a command other than `--show` does nothing, so a hotkey never opens a window by
+surprise: it prints why and exits with status 1.
+
 ### Control room and ARC USB
 
 The **Control Room** box in the settings panel has TotalMix's monitoring switches. They act on

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fx, hdspe, osc_remote
+from . import arc, commands, control_room, fx, hdspe, osc_remote
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
@@ -888,6 +888,27 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.quit()
 
+    def show_window(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def command(self, name, slot=None):
+        """A command from a desktop shortcut (commands.py): the same as the button."""
+        if name == "show":
+            self.show_window()
+        elif name == "dim":
+            control_room.toggle(self.st, "dim")
+            self.push_matrix()
+        elif name == "mute-main":
+            main = control_room.control_room(self.st)["main"]
+            self.set_out_mute(main, not self.st["out"][main]["mute"])
+            self.sync_strips()
+        elif name == "recall" and self.presets.slots[slot]:
+            self.recall_slot(slot)
+
     def switch_device(self, key):
         if key == self.dev.key:
             return
@@ -1472,13 +1493,13 @@ def socket_name(dev):
     return f"{APP_ID}-{os.getuid()}-{dev.key}"
 
 
-def tell_running(dev, line="show"):
-    """Send a line to dev's running window. False if none is running."""
+def tell_running(dev, lines=("show",)):
+    """Send lines (commands.py) to dev's running window. False if none is running."""
     sock = QLocalSocket()
     sock.connectToServer(socket_name(dev))
     if not sock.waitForConnected(300):
         return False
-    sock.write(line.encode() + b"\n")
+    sock.write("".join(line + "\n" for line in lines).encode())
     sock.waitForBytesWritten(300)
     sock.disconnectFromServer()
     return True
@@ -1495,6 +1516,27 @@ def listen(app, dev):
     return server
 
 
+def serve(server, handle):
+    """Call handle(command, slot) for each command line (commands.parse) that a later start
+    sends to server; anything else is dropped. Reads as the lines come, never waiting."""
+    def accept():
+        while server.hasPendingConnections():
+            sock = server.nextPendingConnection()
+            buf = bytearray()
+
+            def read(sock=sock, buf=buf):
+                buf.extend(sock.readAll().data())
+                *lines, rest = bytes(buf).split(b"\n")
+                buf[:] = rest if len(rest) <= commands.MAX_LINE else b""
+                for line in lines:
+                    cmd = commands.parse(line)
+                    if cmd is not None:
+                        handle(*cmd)
+            sock.readyRead.connect(read)
+            sock.disconnected.connect(sock.deleteLater)
+    server.newConnection.connect(accept)
+
+
 def run(app, dev, background, show):
     """Run dev's window until the app quits; returns the exit code. background: closing only
     hides the window (started with --background). A device switch or a new UI scale opens the
@@ -1502,20 +1544,12 @@ def run(app, dev, background, show):
     keep running, now for the device it was switched to."""
     current = {}
 
-    def show_window():
-        w = current.get("window")
-        if w is not None:
-            w.show()
-            w.raise_()
-            w.activateWindow()
-
     def claim(dev):
         """This process becomes dev's window, or hands over to the one already running."""
         if tell_running(dev):
             return None
         server = listen(app, dev)
-        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
-                                              show_window()))
+        serve(server, lambda cmd, slot: current["window"].command(cmd, slot))
         return server
 
     server = claim(dev)
@@ -1561,5 +1595,14 @@ def main():
             sys.exit(f"--device: one of {', '.join(DEVICES)}")
     else:
         dev = detect(load_device_choice())
+    try:
+        lines = commands.from_args(args)
+    except ValueError as e:
+        sys.exit(f"openface-mixer: {e}")
+    if lines:
+        if tell_running(dev, lines):
+            sys.exit(0)
+        if lines != ["show"]:       # a shortcut pressed with the mixer off opens no window
+            sys.exit(f"openface-mixer: the {dev.name} mixer is not running")
     background = "--background" in args
-    sys.exit(run(app, dev, background, not background or "--show" in args))
+    sys.exit(run(app, dev, background, not background or "show" in lines))
