@@ -39,7 +39,8 @@ from .model import (
 )
 from .presets import PresetBank, export_mix, export_workspace, import_mix, import_workspace
 from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
-from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, hw_words, light
+from .settings_panel import FAULT, SettingsPanel, Sidebar, ask, hw_color, hw_words, light
+from . import theme as T
 from .theme import (
     ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, SOLO, WARN,
     apply_theme, compact_boxes, icon_pixmap, px,
@@ -221,9 +222,10 @@ class MainWindow(QMainWindow):
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(px(8))
         wordmark = QLabel(
-            f"<span style='font-family:Michroma;font-size:{px(14)}px;letter-spacing:{px(1.5)}px;"
-            "color:white'>OPENFACE</span><span style='font-family:Michroma;"
-            f"font-size:{px(14)}px;letter-spacing:{px(1.5)}px;color:#ff2a4f'>MIXER</span>")
+            f"<span style='font-family:{T.DISPLAY};font-size:{px(14)}px;"
+            f"letter-spacing:{px(1.5)}px;color:{T.BRIGHT.name()}'>OPENFACE</span>"
+            f"<span style='font-family:{T.DISPLAY};font-size:{px(14)}px;"
+            f"letter-spacing:{px(1.5)}px;color:{T.ALERT.name()}'>MIXER</span>")
         wordmark.setMinimumWidth(wordmark.sizeHint().width())   # never clipped
         top.addWidget(wordmark)
         top.addSpacing(px(8))
@@ -320,14 +322,15 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(px(3))
-        self.trim_btn = small_button("Trim", "#ffffff", "#0b0f1c", width=40,
+        self.trim_btn = small_button("Trim", T.BRIGHT.name(), T.ON_LIGHT.name(), width=40,
                                      tip="Trim: a channel's fader moves all of its sends by the "
                                          "same amount, in every submix")
         self.trim_btn.setChecked(self.st["trim"])
         self.trim_btn.toggled.connect(self.set_trim)
         lay.addWidget(self.trim_btn)
         self.group_btns = {}
-        for kind, color, ink in (("mute", "#2ad4ff", "#021012"), ("solo", SOLO.name(), "#0b0f1c")):
+        for kind, color, ink in (("mute", ACCENT.name(), T.ON_ACCENT.name()),
+                                 ("solo", SOLO.name(), T.ON_LIGHT.name())):
             lay.addSpacing(px(8))
             lay.addWidget(self._caption(kind.upper()))
             for g in range(1, N_GROUPS + 1):
@@ -344,7 +347,7 @@ class MainWindow(QMainWindow):
         """The gear button, with a dot while the Updates section has an update to install."""
         gear = QIcon()
         size = px(14)
-        for color, state in (("#d9eef2", QIcon.Off), ("#2ad4ff", QIcon.On)):
+        for color, state in ((T.TEXT, QIcon.Off), (ACCENT, QIcon.On)):
             pm = icon_pixmap("settings", color, size)
             if pm and waiting:
                 pm = QPixmap(pm)
@@ -1110,7 +1113,7 @@ class MainWindow(QMainWindow):
         for section, entries in CHANNEL_ICONS:
             sub = icons.addMenu(section)
             for name, label in entries:
-                pm = icon_pixmap(name, "#d9eef2", px(16))
+                pm = icon_pixmap(name, T.TEXT, px(16))
                 a = sub.addAction(QIcon(pm) if pm else QIcon(), label)
                 a.setCheckable(True)
                 a.setChecked(cur_icon == name)
@@ -1830,9 +1833,9 @@ class MainWindow(QMainWindow):
         self.engine_status, self.hw_text = s, hw_words(self.dev, s["hw"])[0] if s else ""
         self.refresh_tray()
         self.settings.update_hw_mixer(s, self.engine_error)
-        sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
+        sep = f"<span style='color:{T.FAINT.name()}'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = light(RED) + "&nbsp; Engine stopped"
+            txt = light(FAULT) + "&nbsp; Engine stopped"
             self.status.setToolTip("The engine is not running · click for details")
         else:
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"

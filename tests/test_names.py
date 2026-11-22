@@ -36,7 +36,8 @@ class CustomNamesTest(unittest.TestCase):
         pkg = Path(__file__).resolve().parent.parent / "openface_mixer"
         tree = ast.parse((pkg / "theme.py").read_text())
         icons = next(ast.literal_eval(node.value) for node in tree.body
-                     if isinstance(node, ast.Assign) and node.targets[0].id == "CHANNEL_ICONS")
+                     if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                     and node.targets[0].id == "CHANNEL_ICONS")
         names = [name for _section, entries in icons for name, _label in entries]
         self.assertGreater(len(names), 40)
         self.assertEqual(len(names), len(set(names)))

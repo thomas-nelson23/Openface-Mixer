@@ -1,0 +1,62 @@
+# Openface Mixer theme: Graphite, a neutral grey look with an orange accent.
+#
+# An example of a theme of your own: it lists only the colours it changes, everything else
+# (fonts, sizes, fader group and channel colours) comes from Deep Ocean (deep-ocean.toml says
+# what every value is for). Settings > Display > Theme > New... makes an editable copy.
+
+name = "Graphite"
+
+[colors]
+background = "#1b1d21"
+panel = "#24272c"
+ink = "#2a2d33"
+sidebar = "#202328"
+field = "#17191c"
+well = "#111214"
+
+accent = "#ff9f43"
+alert = "#ff4d4d"
+warn = "#ffd43b"
+ok = "#69db7c"
+
+text = "#dfe3e8"
+soft = "#b8bec7"
+dim = "#8b929c"
+muted = "#7a818b"
+faint = "#454b54"
+on_accent = "#1b1d21"
+
+button = "#2b2f36"
+button_hover = "#353a42"
+button_pressed = "#40464f"
+button_text = "#a3a9b3"
+button_lit_pressed = "#dfe3e8"
+button_selected = "#ffffff"
+
+label = "#eceff3"
+label_selected = "#ffffff"
+scale_zero = "#eceff3"
+
+fader_cap_top = "#4a4f57"
+fader_cap_middle = "#33373e"
+fader_cap_bottom = "#3e434a"
+fader_cap_disabled_top = "#2a2d33"
+fader_cap_disabled_bottom = "#24272c"
+knob = "#3a3e45"
+
+matrix_cell = "#1c1e22"
+matrix_cell_alt = "#202227"
+matrix_cell_hover = "#2b2f36"
+
+[colors.meter]
+over = "#ff4d4d"
+hot = "#ffd43b"
+high = "#ffc078"
+mid = "#ff9f43"
+low = "#8a5523"
+clip_off = "#2a2d33"
+
+[colors.rows]
+input = "#6cb6ff"
+playback = "#b48cff"
+output = "#ff6b6b"

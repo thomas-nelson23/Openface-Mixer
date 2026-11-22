@@ -3,10 +3,10 @@ mixer status."""
 import html
 import threading
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMessageBox,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -85,7 +85,7 @@ def udev_rule_hint(dev):
 
 # a status light is cyan when on (active, locked, linked), red when something needs attention
 # and grey when off or not known yet
-CYAN, RED, OFF = theme.CYAN.name(), theme.RED.name(), theme.MUTED
+ON, FAULT, OFF = theme.ACCENT.name(), theme.ALERT.name(), theme.MUTED
 
 
 def light(color, text=""):
@@ -96,7 +96,7 @@ def light(color, text=""):
 
 def hw_color(state):
     """The light of an engine hardware state (engine.HW_STATES), here and in the top bar."""
-    return {"active": CYAN, "starting": OFF}.get(state, RED)
+    return {"active": ON, "starting": OFF}.get(state, FAULT)
 
 
 def hw_state(dev, state):
@@ -173,7 +173,7 @@ def desktop_audio(dev, lst, status):
     if made and linked == made:
         return (f"Linked to {where(here[0])}" if made == 1 else f"{made} linked"), tip
     short = dev.name.replace("RME ", "")
-    return light(RED, f"Not linked to the {short}" if not linked else
+    return light(FAULT, f"Not linked to the {short}" if not linked else
                  f"{linked} of {made} linked"), tip
 
 
@@ -206,14 +206,14 @@ class Led(QLabel):
     """Lock state: lit when locked or in sync, grey when not; the word says which."""
 
     def set_state(self, s):
-        self.setText(light(CYAN if s in ("Lock", "Sync") else OFF, s or "—"))
+        self.setText(light(ON if s in ("Lock", "Sync") else OFF, s or "—"))
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
     from the chosen source, grey while it does not (or the state is unknown). The tooltip
     names the current source; item is the combo's entry for it where the two differ."""
-    ON = "#56e39f"
+    ON = theme.OK.name()
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
@@ -239,7 +239,7 @@ class Sidebar(QFrame):
     """The settings panel docked to the window's right edge: one dark column with the sections
     stacked and divided by hairlines, slid in and out by the Settings button."""
     closed = Signal()
-    WIDTH = 268
+    WIDTH = theme.SIZES["sidebar_width"]
 
     def __init__(self, panel, parent=None):
         super().__init__(parent)
@@ -251,7 +251,7 @@ class Sidebar(QFrame):
         lay.setSpacing(0)
         head = QHBoxLayout()
         head.setContentsMargins(px(14), px(12), px(8), px(10))
-        title = QLabel(caption_html("Settings", QColor("white")))
+        title = QLabel(caption_html("Settings", theme.BRIGHT))
         head.addWidget(title, 1)
         close = QToolButton()
         close.setText("×")
@@ -353,7 +353,7 @@ class SettingsPanel(QWidget):
         self.hw = hw
         self.dev = dev
         self.st = st
-        self.setFixedWidth(px(268))
+        self.setFixedWidth(px(theme.SIZES["sidebar_width"]))
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -452,9 +452,10 @@ class SettingsPanel(QWidget):
         self.names_box.setToolTip("Show the names given with right-click > Rename, or the "
                                   "standard channel names.")
         self.names_box.toggled.connect(self.names_changed.emit)
-        dl.addWidget(self.names_box, 1, 0, 1, 2)
+        self._build_theme(dl, 1)
+        dl.addWidget(self.names_box, 3, 0, 1, 2)
         # SHOW: hide whole channel groups (an unused ADAT port, ...) from the mixer and matrix
-        dl.addWidget(key_label("Show"), 2, 0, 1, 2)
+        dl.addWidget(key_label("Show"), 4, 0, 1, 2)
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
@@ -464,9 +465,9 @@ class SettingsPanel(QWidget):
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
-        dl.addLayout(show, 3, 0, 1, 2)
+        dl.addLayout(show, 5, 0, 1, 2)
         # TotalMix's layout presets: which channels and rows are shown, never the mix
-        dl.addWidget(key_label("Layouts"), 4, 0)
+        dl.addWidget(key_label("Layouts"), 6, 0)
         slots = QHBoxLayout()
         slots.setSpacing(px(3))
         self.layout_btns = []
@@ -478,17 +479,17 @@ class SettingsPanel(QWidget):
             slots.addWidget(b)
             self.layout_btns.append(b)
         slots.addStretch()
-        dl.addLayout(slots, 5, 0, 1, 2)
+        dl.addLayout(slots, 7, 0, 1, 2)
         self.layout_store = QPushButton("Store")
         self.layout_store.setObjectName("store")
         self.layout_store.setCheckable(True)
         self.layout_store.setToolTip("Click, then click a number to save which channels and rows "
                                      "are shown. An empty number saves with one click.")
-        dl.addWidget(self.layout_store, 4, 1, Qt.AlignRight)
+        dl.addWidget(self.layout_store, 6, 1, Qt.AlignRight)
         self.refresh_layouts()
         # meter options, for this computer (ui.json), as in TotalMix's preferences
         self.meter_prefs = prefs = load_meter_prefs()
-        row = 6
+        row = 8
         self.rms_box = None         # a device that reports no RMS: peak only, nothing to choose
         if self.dev.meter_rms:
             self.rms_box = QCheckBox("Show RMS level")
@@ -508,6 +509,93 @@ class SettingsPanel(QWidget):
                 "clip light", range(1, 11), prefs["over_samples"],
                 lambda v: "1 sample" if v == 1 else f"{v} samples", "over_samples")
         lay.addWidget(disp)
+
+    def _build_theme(self, grid, row):
+        """Theme: the look, from a theme file (theme.py); picking one restarts the app. New
+        copies the theme in use to the user's themes folder and opens it to edit; Edit opens the
+        one in use (a user's), Reload restarts to show what was changed in it."""
+        grid.addWidget(key_label("Theme"), row, 0)
+        self.theme_combo = QComboBox()
+        files = theme.theme_files()
+        for key, path in files.items():
+            self.theme_combo.addItem(theme.theme_name(path), key)
+        if theme.THEME_KEY not in files:        # OPENFACE_THEME=<file>, or a theme gone
+            self.theme_combo.addItem(theme.THEME_NAME, theme.THEME_KEY)
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData(theme.THEME_KEY))
+        self.theme_combo.activated.connect(self._theme_activated)
+        tip = (f"Colours, fonts and sizes, from a theme file. Your own themes are in "
+               f"{html.escape(str(theme.user_dir()))}. Restarts the app to apply.")
+        if theme.THEME_FROM_ENV:
+            self.theme_combo.setEnabled(False)
+            tip = "Set by OPENFACE_THEME for this run"
+        self.theme_combo.setToolTip(tip)
+        grid.addWidget(self.theme_combo, row, 1)
+        btns = QHBoxLayout()
+        btns.setSpacing(px(4))
+        self.theme_new = QPushButton("New…")
+        self.theme_new.setToolTip("Make your own theme: a copy of this one, opened to edit")
+        self.theme_new.clicked.connect(self._new_theme)
+        self.theme_edit = QPushButton("Edit")
+        self.theme_edit.setEnabled(theme.THEME_FILE is not None
+                                   and theme.BUILTIN_DIR not in theme.THEME_FILE.parents)
+        self.theme_edit.setToolTip("Open this theme's file in your text editor" if
+                                   self.theme_edit.isEnabled() else
+                                   "Themes that come with the app can't be changed: make your "
+                                   "own with New…")
+        self.theme_edit.clicked.connect(lambda: self._open_file(theme.THEME_FILE))
+        self.theme_reload = QPushButton("Reload")
+        self.theme_reload.setToolTip("Restart the app to show the changes made to the theme file")
+        self.theme_reload.clicked.connect(self.restart_requested.emit)
+        btns.addStretch()
+        for b in (self.theme_new, self.theme_edit, self.theme_reload):
+            btns.addWidget(b)
+        grid.addLayout(btns, row + 1, 0, 1, 2)
+        if theme.THEME_PROBLEMS:
+            self.theme_combo.setToolTip(
+                "Not used from this theme (the default's values are used instead):\n"
+                + "\n".join(theme.THEME_PROBLEMS[:12]))
+            self.theme_combo.setStyleSheet(f"QComboBox{{border-color:{FAULT}}}")
+
+    def _theme_activated(self, i):
+        key = self.theme_combo.itemData(i)
+        if key == theme.THEME_KEY:
+            return
+        try:
+            save_ui(theme=key)
+        except OSError as e:
+            QMessageBox.warning(self, "Theme", f"Could not save the choice: {e.strerror or e}")
+            return
+        self.restart_requested.emit()
+
+    def _new_theme(self):
+        name, ok = QInputDialog.getText(self, "New theme", "Name of your theme:",
+                                        text=f"My {theme.THEME_NAME}")
+        name = name.strip()
+        if not ok or not name:
+            return
+        try:
+            path = theme.new_theme(name)
+        except FileExistsError:
+            QMessageBox.warning(self, "New theme", f"There is a theme file called "
+                                f"{theme.slug(name)}.toml already. Pick another name.")
+            return
+        except OSError as e:
+            QMessageBox.warning(self, "New theme", f"Could not write the theme: {e.strerror or e}")
+            return
+        self.theme_combo.addItem(name, path.stem)
+        self._open_file(path)
+        try:
+            save_ui(theme=path.stem)
+        except OSError:
+            pass
+        QMessageBox.information(
+            self, "New theme", f"Your theme is in {path} and opened in your text editor. Change "
+            "the colours and sizes there, save, then click Reload to see them.")
+        self.restart_requested.emit()
+
+    def _open_file(self, path):
+        if path is not None:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _meter_combo(self, grid, row, label, tip, values, current, text, key):
         grid.addWidget(key_label(label), row, 0)
@@ -925,7 +1013,7 @@ class SettingsPanel(QWidget):
         if st is None:
             text, tip = why or (f"{self.dev.name.replace('RME ', '')} not connected", "")
             self.cur_src.set_current(None)
-            self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+            self.rate.setText(f"<span style='color:{FAULT}'>{text}</span>")
             self.rate.setToolTip(tip)
             for led, rate in self.sync_widgets:
                 led.set_state(None)
@@ -1131,7 +1219,7 @@ class SettingsPanel(QWidget):
             self._show_fw_status(None, read_failure(self.hw, "Card"))
             return
         if not usable:
-            self.rd_info.setText(f"<span style='color:{RED}'>Settings are off: see the driver "
+            self.rd_info.setText(f"<span style='color:{FAULT}'>Settings are off: see the driver "
                                  "note under Status.</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
@@ -1173,7 +1261,7 @@ class SettingsPanel(QWidget):
         try:
             if ctrls is None:
                 text, tip = read_failure(self.hw, "Digiface")
-                self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+                self.rate.setText(f"<span style='color:{FAULT}'>{text}</span>")
                 self.rate.setToolTip(tip)
                 return
             self.rate.setToolTip("")
@@ -1212,7 +1300,7 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             self.routes_label.setText("—")
-            self.eng_label.setText(light(RED, "Stopped"))
+            self.eng_label.setText(light(FAULT, "Stopped"))
             self.sink_label.setText("—")
             self.sink_label.setToolTip("")
             self.show_status_note(html.escape(engine_error) if engine_error else
@@ -1231,8 +1319,8 @@ class SettingsPanel(QWidget):
                                      else "")
         else:
             self.routes_label.setText("—")
-        self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
-                               light(RED, "Not responding"))
+        self.eng_label.setText(light(ON, "Running") if status["processing"] else
+                               light(FAULT, "Not responding"))
         value, tip = desktop_audio(
             self.dev, self.st.get("sinks", sinks.default_list(self.dev)), status)
         self.sink_label.setText(value)
@@ -1248,6 +1336,6 @@ class SettingsPanel(QWidget):
             self.pro_btn.setVisible(False)
             return
         self.profile.setText(html.escape(profile or "—"))
-        self.recording.setText(light(CYAN, "All inputs") if has_in else
+        self.recording.setText(light(ON, "All inputs") if has_in else
                                light(OFF, "No inputs (monitoring still works)"))
         self.pro_btn.setVisible(not has_in)

@@ -5,6 +5,15 @@ installed from **Updates** in the settings (see the [README](README.md#updates))
 
 ## Unreleased
 
+### New
+
+- Themes: every colour, the fonts and the main sizes now come from a theme file, so the look can
+  be changed without touching the code. Pick a theme under Settings > Display > Theme, or make
+  your own with New… (a copy of the one in use, opened in your text editor; Reload shows your
+  changes). A theme only lists what it changes. Deep Ocean stays the default and looks exactly
+  as before; Graphite, a grey theme with an orange accent, comes with the app as an example.
+  See the README's Themes section.
+
 ## 0.4.0 (2026-11-18)
 
 ### New

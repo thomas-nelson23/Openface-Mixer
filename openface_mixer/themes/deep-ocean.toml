@@ -1,0 +1,115 @@
+# Openface Mixer theme: Deep Ocean, the default look.
+#
+# Every colour, font and the main sizes of the window come from a theme file like this one.
+# To make your own: Settings > Display > Theme > New theme... (or copy this file into
+# ~/.config/openface-mixer/themes/ under a new name), change the values, then pick it under
+# Settings > Display > Theme. A theme only has to list what it changes: anything left out is
+# taken from this file, so a three-line theme that sets a new accent colour works.
+#
+# Colours are "#rrggbb" (or any name Qt knows, such as "white"). Where a colour is drawn see-
+# through (hover edges, hairlines, the strip background), the theme gives the colour and the
+# app picks how see-through, so those follow the colour you set.
+
+name = "Deep Ocean"
+
+[colors]
+background = "#021d2e"      # the window behind the strips
+panel = "#040e16"           # tooltips, menus, the effects and channel settings windows
+ink = "#040c12"             # the strips and panels laid over the background (see-through)
+sidebar = "#040c13"         # the settings sidebar
+field = "#030a10"           # text fields and lists
+well = "#01070b"            # meter wells, fader grooves, name tags and readouts
+line = "#ffffff"            # hairline edges and dividers (drawn faint)
+shadow = "#000000"          # the fader cap's shadow
+
+accent = "#2ad4ff"          # signal, selection, focus, the edited submix, mute, status "on"
+alert = "#ff2a4f"           # clip, "needs attention", the store button, the MIXER wordmark
+warn = "#ffb020"            # solo and cue
+ok = "#56e39f"              # the clock source light while it runs from the chosen source
+
+text = "#d9eef2"            # normal text
+bright = "#ffffff"          # hovered text, headings, the OPENFACE wordmark
+soft = "#9cc7cf"            # readouts and menu items
+dim = "#7d9299"             # labels and captions
+muted = "#6f8a94"           # hints, scale marks, disabled text, status "off"
+faint = "#2a4552"           # separators and disabled strip buttons
+
+on_accent = "#021012"       # text on an accent-coloured fill
+on_light = "#0b0f1c"        # text on a white or warn-coloured fill
+
+# the small square strip buttons (S, M, ST, Cue, EQ, D, the channel settings wrench)
+button = "#0a1821"
+button_hover = "#12293a"
+button_pressed = "#1a3b4c"
+button_text = "#8aa3ab"
+button_lit_pressed = "#d9eef2"  # a lit button while it is held down
+button_selected = "#f5f8fa"     # the edge of EQ / D while their panel is open
+
+label = "#eef6f8"           # channel name text
+label_selected = "#f5f8fa"  # the selected output's name tag
+pointer = "#f5f5f7"         # fader index marks, knob pointers, the meter hold line
+scale_zero = "#e6f3f6"      # the 0 dB mark of the fader scale
+
+fader_cap_top = "#1a3b4c"
+fader_cap_middle = "#0b1d29"
+fader_cap_bottom = "#133243"
+fader_cap_disabled_top = "#0b1a24"
+fader_cap_disabled_bottom = "#08141c"
+knob = "#0f2838"            # the pan / effect knob body, top (fades to panel)
+
+matrix_cell = "#03101a"     # the routing matrix, chequered with matrix_cell_alt
+matrix_cell_alt = "#04121b"
+matrix_cell_hover = "#06202e"
+
+[colors.meter]
+over = "#ff2a4f"            # the top of the meter (0 dBFS)
+hot = "#ffb020"             # just below 0 dB
+high = "#7fe9ff"
+mid = "#2ad4ff"
+low = "#006b88"             # the bottom of the meter
+clip_off = "#0f2430"        # the clip light while it is off (on: colors.alert)
+
+[colors.rows]               # name tag underline of each row, unless a channel has its own colour
+input = "#2ad4ff"
+playback = "#a77bff"
+output = "#ff2a4f"
+
+[colors.groups]             # the top edge of a strip in fader group 1 to 4
+1 = "#ff2a4f"
+2 = "#ffb020"
+3 = "#2ad4ff"
+4 = "#ff7ad9"
+
+[colors.channels]           # the colours offered under right-click > Colour, in menu order
+Red = "#ff2a4f"
+Orange = "#ff7a2a"
+Amber = "#ffb020"
+Lime = "#b8e03a"
+Green = "#56e39f"
+Teal = "#2ad4ff"
+Blue = "#4d8dff"
+Violet = "#a77bff"
+Pink = "#ff7ad9"
+Grey = "#9cb0b8"
+
+[fonts]
+# Sora, JetBrains Mono and Michroma come with the app; any font installed on the system works
+ui = "Sora"                 # everything else
+mono = "JetBrains Mono"     # numbers: readouts, scales, the preset slots
+mono_fallback = "'Noto Sans Mono', 'DejaVu Sans Mono', monospace"
+display = "Michroma"        # the OPENFACE MIXER wordmark
+size = 12                   # the base text size in pixels at 100% UI scale
+
+[sizes]
+# in pixels at 100% UI scale (Settings > Display > UI scale multiplies them)
+strip_width = 62            # a channel strip
+folded_strip_height = 42    # a strip in a folded row
+strip_spacing = 4           # between strips
+strip_radius = 6            # strip corners
+strip_button_height = 20    # S / M / ST / Cue
+meter_bar = 4               # the width of one meter bar
+sidebar_width = 268         # the settings sidebar
+pill_radius = 11            # the top bar's round buttons and fields
+panel_radius = 8            # menus and popups
+field_radius = 6            # combo boxes, text fields, tooltips
+small_radius = 3            # strip buttons, name tags, readouts

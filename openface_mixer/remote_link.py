@@ -21,7 +21,7 @@ from . import APP_ID, APP_NAME
 from . import osc_remote, tray
 from .config import launcher, load_ui, save_ui
 from .osc_remote import remote_settings  # noqa: F401  (MainWindow imports it from here)
-from .settings_panel import CYAN, OFF, RED, WideList, light
+from .settings_panel import FAULT, OFF, ON, WideList, light
 from .theme import Section, key_label
 
 CLIENT_TIMEOUT_S = 60
@@ -339,14 +339,14 @@ class RemotePanel(Section):
 
     def set_status(self, s, target_error=None):
         if target_error:
-            self.status.setText(light(RED, "Unknown host"))
+            self.status.setText(light(FAULT, "Unknown host"))
             self.status.setToolTip(f"{s}; Send to host “{target_error}” could not be resolved")
         elif s.startswith("error"):
-            self.status.setText(light(RED, "Error"))
+            self.status.setText(light(FAULT, "Error"))
             self.status.setToolTip(s)
         elif s == "off":
             self.status.setText(light(OFF, "Off"))
             self.status.setToolTip("")
         else:
-            self.status.setText(light(CYAN, s.replace("listening on UDP ", "Listening · ", 1)))
+            self.status.setText(light(ON, s.replace("listening on UDP ", "Listening · ", 1)))
             self.status.setToolTip(s)
