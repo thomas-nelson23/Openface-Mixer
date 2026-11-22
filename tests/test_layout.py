@@ -38,7 +38,7 @@ class LightsTest(WindowCase):
 
     def test_hardware_states(self):
         from openface_mixer import engine, theme
-        cyan, red, grey = theme.CYAN.name(), theme.RED.name(), theme.MUTED
+        cyan, red, grey = theme.ACCENT.name(), theme.ALERT.name(), theme.MUTED
         want = dict.fromkeys(engine.HW_STATES, red)
         want.update(active=cyan, starting=grey)
         for state, color in want.items():
@@ -50,7 +50,7 @@ class LightsTest(WindowCase):
 
     def test_engine_and_sink(self):
         from openface_mixer import theme
-        cyan, red = theme.CYAN.name(), theme.RED.name()
+        cyan, red = theme.ACCENT.name(), theme.ALERT.name()
         panel = self.poll(hw="active")
         self.assertEqual(dot(panel.eng_label.text()), cyan)
         self.assertIsNone(dot(panel.sink_label.text()))             # linked: just the words
@@ -84,7 +84,7 @@ class LightsTest(WindowCase):
         for state in ("Sync", "Lock", "No Lock", None):
             led.set_state(state)
             seen.append(led.text())
-            self.assertEqual(dot(led.text()), theme.CYAN.name() if state in ("Sync", "Lock")
+            self.assertEqual(dot(led.text()), theme.ACCENT.name() if state in ("Sync", "Lock")
                              else theme.MUTED, state)
         for light in self.w.findChildren(SyncLight):
             light.set_current(None)
@@ -111,7 +111,7 @@ class LightsTest(WindowCase):
         self.assertEqual(dot(panel.recording.text()), theme.MUTED)
         self.assertIn("monitoring still works", panel.recording.text())
         panel.update_profile("card", "pro-audio", True)
-        self.assertEqual(dot(panel.recording.text()), theme.CYAN.name())
+        self.assertEqual(dot(panel.recording.text()), theme.ACCENT.name())
 
 
 class FoldTest(WindowCase):
@@ -187,12 +187,12 @@ class FoldTest(WindowCase):
         third.meter.push([1.0] * len(third.channels), 0.03)             # meters keep moving
         self.assertEqual(third.meter.levels[0], 1.0)
         self.assertTrue(third.meter.clip[0])
-        self.assertIn(theme.RED.name(), third.styleSheet())
+        self.assertIn(theme.ALERT.name(), third.styleSheet())
         self.assertIn("CLIP", row.head.text())
         self.assertIn(third.name, row.head.text())
         self.click(third.meter)                                         # resets peak and clip
         self.assertNotIn("CLIP", row.head.text())
-        self.assertNotIn(f"border:1px solid {theme.RED.name()}", third.styleSheet())
+        self.assertNotIn(f"border:1px solid {theme.ALERT.name()}", third.styleSheet())
         self.w.st["solo"]["in"][0] = False                              # as a remote would
         with mock.patch.object(guitar, "setStyleSheet") as restyled:
             self.w.sync_strips()

@@ -13,11 +13,11 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import tray
 from .config import load_ui
-from .theme import CYAN, RED
+from .theme import ACCENT, ALERT
 
 APP_ICON = Path(__file__).parent / "openface-mixer.svg"
 SIZES = (16, 22, 24, 32, 48, 64)          # panel icon sizes at 1x and 2x
-BADGE = {tray.ON: CYAN, tray.FAULT: RED}
+BADGE = {tray.ON: ACCENT, tray.FAULT: ALERT}
 RETRY_MS, RETRIES = 3000, 40              # at login the tray may come up after the app: look
                                           # again for two minutes, then run without an icon
 

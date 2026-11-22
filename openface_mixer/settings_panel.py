@@ -4,7 +4,6 @@ import html
 import threading
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -85,7 +84,7 @@ def udev_rule_hint(dev):
 
 # a status light is cyan when on (active, locked, linked), red when something needs attention
 # and grey when off or not known yet
-CYAN, RED, OFF = theme.CYAN.name(), theme.RED.name(), theme.MUTED
+ON, FAULT, OFF = theme.ACCENT.name(), theme.ALERT.name(), theme.MUTED
 
 
 def light(color, text=""):
@@ -96,7 +95,7 @@ def light(color, text=""):
 
 def hw_color(state):
     """The light of an engine hardware state (engine.HW_STATES), here and in the top bar."""
-    return {"active": CYAN, "starting": OFF}.get(state, RED)
+    return {"active": ON, "starting": OFF}.get(state, FAULT)
 
 
 def hw_state(dev, state):
@@ -173,7 +172,7 @@ def desktop_audio(dev, lst, status):
     if made and linked == made:
         return (f"Linked to {where(here[0])}" if made == 1 else f"{made} linked"), tip
     short = dev.name.replace("RME ", "")
-    return light(RED, f"Not linked to the {short}" if not linked else
+    return light(FAULT, f"Not linked to the {short}" if not linked else
                  f"{linked} of {made} linked"), tip
 
 
@@ -206,14 +205,14 @@ class Led(QLabel):
     """Lock state: lit when locked or in sync, grey when not; the word says which."""
 
     def set_state(self, s):
-        self.setText(light(CYAN if s in ("Lock", "Sync") else OFF, s or "—"))
+        self.setText(light(ON if s in ("Lock", "Sync") else OFF, s or "—"))
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
     from the chosen source, grey while it does not (or the state is unknown). The tooltip
     names the current source; item is the combo's entry for it where the two differ."""
-    ON = "#56e39f"
+    ON = theme.OK.name()
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
@@ -251,7 +250,7 @@ class Sidebar(QFrame):
         lay.setSpacing(0)
         head = QHBoxLayout()
         head.setContentsMargins(px(14), px(12), px(8), px(10))
-        title = QLabel(caption_html("Settings", QColor("white")))
+        title = QLabel(caption_html("Settings", theme.BRIGHT))
         head.addWidget(title, 1)
         close = QToolButton()
         close.setText("×")
@@ -925,7 +924,7 @@ class SettingsPanel(QWidget):
         if st is None:
             text, tip = why or (f"{self.dev.name.replace('RME ', '')} not connected", "")
             self.cur_src.set_current(None)
-            self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+            self.rate.setText(f"<span style='color:{FAULT}'>{text}</span>")
             self.rate.setToolTip(tip)
             for led, rate in self.sync_widgets:
                 led.set_state(None)
@@ -1131,7 +1130,7 @@ class SettingsPanel(QWidget):
             self._show_fw_status(None, read_failure(self.hw, "Card"))
             return
         if not usable:
-            self.rd_info.setText(f"<span style='color:{RED}'>Settings are off: see the driver "
+            self.rd_info.setText(f"<span style='color:{FAULT}'>Settings are off: see the driver "
                                  "note under Status.</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
@@ -1173,7 +1172,7 @@ class SettingsPanel(QWidget):
         try:
             if ctrls is None:
                 text, tip = read_failure(self.hw, "Digiface")
-                self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+                self.rate.setText(f"<span style='color:{FAULT}'>{text}</span>")
                 self.rate.setToolTip(tip)
                 return
             self.rate.setToolTip("")
@@ -1212,7 +1211,7 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             self.routes_label.setText("—")
-            self.eng_label.setText(light(RED, "Stopped"))
+            self.eng_label.setText(light(FAULT, "Stopped"))
             self.sink_label.setText("—")
             self.sink_label.setToolTip("")
             self.show_status_note(html.escape(engine_error) if engine_error else
@@ -1231,8 +1230,8 @@ class SettingsPanel(QWidget):
                                      else "")
         else:
             self.routes_label.setText("—")
-        self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
-                               light(RED, "Not responding"))
+        self.eng_label.setText(light(ON, "Running") if status["processing"] else
+                               light(FAULT, "Not responding"))
         value, tip = desktop_audio(
             self.dev, self.st.get("sinks", sinks.default_list(self.dev)), status)
         self.sink_label.setText(value)
@@ -1248,6 +1247,6 @@ class SettingsPanel(QWidget):
             self.pro_btn.setVisible(False)
             return
         self.profile.setText(html.escape(profile or "—"))
-        self.recording.setText(light(CYAN, "All inputs") if has_in else
+        self.recording.setText(light(ON, "All inputs") if has_in else
                                light(OFF, "No inputs (monitoring still works)"))
         self.pro_btn.setVisible(not has_in)

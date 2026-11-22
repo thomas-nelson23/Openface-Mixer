@@ -6,7 +6,8 @@ from PySide6.QtWidgets import QFrame, QScrollArea, QWidget
 from .model import (
     FADER_MAX_DB, NEG_INF, db2pos, fader_db, fmt_db, parse_db, pos2db, submix_of,
 )
-from .theme import ACCENT, DIM, KIND_COLOR, SANS, TEXT, font, px
+from . import theme as T
+from .theme import ACCENT, DIM, KIND_COLOR, SANS, TEXT, alpha, font, px
 from .wheel import Wheel
 from .widgets import LevelEdit
 
@@ -226,7 +227,7 @@ class MatrixView(QWidget):
             y = self.HH + ri * self.CH
             if pair == submix:
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(42, 212, 255, 30))
+                p.setBrush(alpha(ACCENT, 30))
                 p.drawRoundedRect(QRectF(ox, y + 1, self.LW - px(6), self.CH - 2), px(4), px(4))
             lit = self.hover and self.hover[1] == ri
             p.setPen(ACCENT if pair == submix else (txt if lit else (color or dim)))
@@ -235,7 +236,7 @@ class MatrixView(QWidget):
                        p.fontMetrics().elidedText(name, Qt.ElideRight, self.LW - px(8)))
         # the cells, cut off where they pass under the names
         p.setClipRect(QRectF(ox + self.LW, oy + self.HH, self.width(), self.height()))
-        ink = QColor("#021012")
+        ink = T.ON_ACCENT
         shown = QRectF(e.rect())
         for ri, (pair, name, color) in enumerate(self.rows):
             for ci in range(len(self.cols)):
@@ -246,9 +247,9 @@ class MatrixView(QWidget):
                 p.setPen(Qt.NoPen)
                 if g is None:
                     if pair == submix:
-                        p.setBrush(QColor("#06202e"))
+                        p.setBrush(T.MATRIX_CELL_HOVER)
                     else:
-                        p.setBrush(QColor("#04121b") if (ci + ri) % 2 else QColor("#03101a"))
+                        p.setBrush(T.MATRIX_CELL_ALT if (ci + ri) % 2 else T.MATRIX_CELL)
                     p.drawRoundedRect(r, px(3), px(3))
                 else:
                     k = 0.45 + 0.55 * min(1.0, db2pos(g) / db2pos(0.0))

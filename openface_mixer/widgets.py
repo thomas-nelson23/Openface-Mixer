@@ -13,9 +13,10 @@ from PySide6.QtWidgets import (
 )
 
 from .model import FADER_MIN_DB, NEG_INF, db2pos, fader_db, fmt_db, lin2db, parse_db, pos2db
+from . import theme as T
 from .theme import (
-    CYAN, DIM, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, RED, SANS, SOLO, TEXT,
-    caption_html, font, icon_pixmap, px,
+    ACCENT, DIM, GROUP_COLOR, HAIR, KIND_COLOR, MONO, MONO_STACK, MUTED, ALERT, SANS, SIZES, SOLO,
+    TEXT, alpha, caption_html, font, icon_pixmap, px,
 )
 from .wheel import Wheel
 from PySide6.QtGui import QIcon
@@ -43,7 +44,7 @@ class Meter(QWidget):
         self.clip = [False] * channels
         self.max_peak = 0.0
         self._shown_peak = None
-        self.bar = px(4)                      # bar width; one pixel gap between bars
+        self.bar = px(SIZES["meter_bar"])      # bar width; one pixel gap between bars
         self.horizontal = None
         self.set_horizontal(False)
         self.setToolTip("Click to reset peak / clip")
@@ -126,15 +127,12 @@ class Meter(QWidget):
         clip_h = px(3)
         top, h = clip_h + px(2), height - clip_h - px(4)
         grad = QLinearGradient(0, top, 0, top + h)
-        grad.setColorAt(0.0, QColor("#ff2a4f"))
-        grad.setColorAt(0.06, QColor("#ffb020"))
-        grad.setColorAt(0.2, QColor("#7fe9ff"))
-        grad.setColorAt(0.45, QColor("#2ad4ff"))
-        grad.setColorAt(1.0, QColor("#006b88"))
+        for at, part in ((0.0, "over"), (0.06, "hot"), (0.2, "high"), (0.45, "mid"), (1.0, "low")):
+            grad.setColorAt(at, T.METER[part])
         rms = self.rms if self.show_rms else None
         for i, lv in enumerate(self.levels):
             x = 1 + i * (b + 1)
-            p.fillRect(QRectF(x, top, b, h), QColor("#01070b"))
+            p.fillRect(QRectF(x, top, b, h), T.WELL)
             fh = self._frac(lv) * h
             if rms:                 # lit up to the RMS level, dimmed above it to the peak
                 p.setOpacity(0.4)
@@ -144,10 +142,10 @@ class Meter(QWidget):
             p.fillRect(QRectF(x, top + h - fh, b, fh), grad)
             hf = self._frac(self.holds[i][0]) * h
             if hf > 0:
-                p.fillRect(QRectF(x, top + h - hf, b, max(1.0, px(1.5))), QColor("#f5f5f7"))
-            p.fillRect(QRectF(x, 0, b, clip_h), QColor("#ff2a4f") if self.clip[i] else QColor("#0f2430"))
+                p.fillRect(QRectF(x, top + h - hf, b, max(1.0, px(1.5))), T.POINTER)
+            p.fillRect(QRectF(x, 0, b, clip_h), ALERT if self.clip[i] else T.METER["clip_off"])
         # faint segment lines for a hardware feel
-        p.setPen(QPen(QColor(1, 7, 11, 110), 1))
+        p.setPen(QPen(alpha(T.WELL, 110), 1))
         step = px(3)
         for y in range(top + h - step, top, -step):
             p.drawLine(0, y, width, y)
@@ -164,8 +162,8 @@ class LevelEdit(QLineEdit):
         self.on_enter, self.owner = on_enter, owner or parent
         self.setAlignment(Qt.AlignCenter)
         self.setContextMenuPolicy(Qt.PreventContextMenu)   # a right-click that opens it stops here
-        self.setStyleSheet(f"background:#01070b;color:#eef6f8;border:1px solid "
-                           f"rgba(42,212,255,0.8);border-radius:{px(3)}px;padding:0;"
+        self.setStyleSheet(f"background:{T.WELL.name()};color:{T.LABEL.name()};border:1px solid "
+                           f"{T.rgba(ACCENT, 0.8)};border-radius:{px(SIZES['small_radius'])}px;padding:0;"
                            f"font-family:{MONO_STACK};font-size:{px(9)}px")
         self.setGeometry(rect)
         self.selectAll()
@@ -311,41 +309,41 @@ class Fader(QWidget):
             if last is not None and y - last < px(10) and db != 0:
                 continue   # short fader: drop marks that would overlap
             last = y
-            p.setPen(QColor("#e6f3f6") if db == 0 else QColor(MUTED))
+            p.setPen(T.SCALE_ZERO if db == 0 else QColor(MUTED))
             p.drawText(QRectF(tx + px(9), y - px(6), px(15), px(12)), Qt.AlignRight | Qt.AlignVCenter,
                        str(abs(db)))
         # groove
         gw = px(3)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#01070b"))
+        p.setBrush(T.WELL)
         p.drawRoundedRect(QRectF(tx - gw / 2, top - px(4), gw, bot - top + px(8)), gw / 2, gw / 2)
         y = bot - self.pos * (bot - top)
         if self.pos > 0:
-            p.setBrush(QColor(42, 212, 255, 70))
+            p.setBrush(alpha(ACCENT, 70))
             p.drawRoundedRect(QRectF(tx - gw / 2, y, gw, bot - y + px(4)), gw / 2, gw / 2)
         # cap: flat, dark, with a cyan index line
         cw, ch = px(16), px(24)
         cap = QRectF(tx - cw / 2, y - ch / 2, cw, ch)
-        p.setBrush(QColor(0, 0, 0, 90))
+        p.setBrush(alpha(T.SHADOW, 90))
         p.drawRoundedRect(cap.translated(0, px(2)), px(3), px(3))
         g = QLinearGradient(cap.topLeft(), cap.bottomLeft())
         if self.isEnabled():
-            g.setColorAt(0.0, QColor("#1a3b4c"))
-            g.setColorAt(0.5, QColor("#0b1d29"))
-            g.setColorAt(1.0, QColor("#133243"))
+            g.setColorAt(0.0, T.FADER_CAP_TOP)
+            g.setColorAt(0.5, T.FADER_CAP_MIDDLE)
+            g.setColorAt(1.0, T.FADER_CAP_BOTTOM)
         else:
-            g.setColorAt(0.0, QColor("#0b1a24"))
-            g.setColorAt(1.0, QColor("#08141c"))
+            g.setColorAt(0.0, T.FADER_CAP_DISABLED_TOP)
+            g.setColorAt(1.0, T.FADER_CAP_DISABLED_BOTTOM)
         p.setBrush(g)
-        p.setPen(QPen(QColor(255, 255, 255, 36), 1))
+        p.setPen(QPen(alpha(T.LINE, 36), 1))
         p.drawRoundedRect(cap, px(3), px(3))
-        p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+        p.setPen(QPen(alpha(T.LINE, 18), 1))
         for dy in (-px(7), -px(4), px(4), px(7)):
             p.drawLine(QPointF(cap.left() + px(4), y + dy), QPointF(cap.right() - px(4), y + dy))
-        p.setPen(QPen(CYAN, max(1.0, px(1.5))))
+        p.setPen(QPen(ACCENT, max(1.0, px(1.5))))
         p.drawLine(QPointF(cap.left() + px(2), y), QPointF(cap.right() - px(2), y))
         if self.hasFocus():       # the keys act on this fader
-            p.setPen(QPen(QColor(42, 212, 255, 200), 1))
+            p.setPen(QPen(alpha(ACCENT, 200), 1))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(cap.adjusted(-px(2), -px(2), px(2), px(2)), px(4), px(4))
 
@@ -435,44 +433,45 @@ class Knob(QWidget):
         c = QPointF(self.width() / 2, self.height() / 2)
         r = px(11)
         ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
-        p.setPen(QPen(QColor("#01070b"), px(2), Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(T.WELL, px(2), Qt.SolidLine, Qt.RoundCap))
         p.drawArc(ring, 225 * 16, -270 * 16)
         if self.value:
-            p.setPen(QPen(CYAN, px(2), Qt.SolidLine, Qt.RoundCap))
+            p.setPen(QPen(ACCENT, px(2), Qt.SolidLine, Qt.RoundCap))
             p.drawArc(ring, 90 * 16, int(-self.value * 135 * 16))
         br = px(8)
         body = QRectF(c.x() - br, c.y() - br, 2 * br, 2 * br)
         g = QLinearGradient(body.topLeft(), body.bottomLeft())
-        g.setColorAt(0, QColor("#0f2838"))
-        g.setColorAt(1, QColor("#040e16"))
+        g.setColorAt(0, T.KNOB)
+        g.setColorAt(1, T.PANEL)
         p.setBrush(g)
-        p.setPen(QPen(QColor(42, 212, 255, 200) if self.hasFocus() else QColor(255, 255, 255, 40),
-                      1))
+        p.setPen(QPen(alpha(ACCENT, 200) if self.hasFocus() else alpha(T.LINE, 40), 1))
         p.drawEllipse(body)
         a = math.radians(90 - self.value * 135)
-        p.setPen(QPen(QColor("#f5f5f7"), px(2), Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(T.POINTER, px(2), Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(c.x() + px(3) * math.cos(a), c.y() - px(3) * math.sin(a)),
                    QPointF(c.x() + px(7) * math.cos(a), c.y() - px(7) * math.sin(a)))
 
 
-def small_button(text, color="#2ad4ff", fg="#021012", tip="", width=26):
+def small_button(text, color=None, fg=None, tip="", width=26):
     """The square strip buttons (S / M / ST): quiet when off, filled with their colour when on."""
+    color, fg = color or ACCENT.name(), fg or T.ON_ACCENT.name()
     b = QToolButton()
     b.setText(text)
     b.setCheckable(True)
-    b.setFixedSize(QSize(px(width), px(20)))
+    b.setFixedSize(QSize(px(width), px(SIZES["strip_button_height"])))
     b.setToolTip(tip)
     b.setCursor(Qt.PointingHandCursor)
     b.setFont(font(SANS, 9, QFont.DemiBold))
     b.setStyleSheet(
-        f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid rgba(255,255,255,0.09);"
-        f"border-radius:{px(3)}px}}"
-        "QToolButton:hover{background:#12293a;color:white;border-color:rgba(255,255,255,0.18)}"
-        "QToolButton:pressed{background:#1a3b4c}"
-        "QToolButton:focus{border-color:rgba(42,212,255,0.8)}"
+        f"QToolButton{{background:{T.BUTTON.name()};color:{T.BUTTON_TEXT.name()};"
+        f"border:1px solid {T.rgba(T.LINE, 0.09)};border-radius:{px(SIZES['small_radius'])}px}}"
+        f"QToolButton:hover{{background:{T.BUTTON_HOVER.name()};color:{T.BRIGHT.name()};"
+        f"border-color:{T.rgba(T.LINE, 0.18)}}}"
+        f"QToolButton:pressed{{background:{T.BUTTON_PRESSED.name()}}}"
+        f"QToolButton:focus{{border-color:{T.rgba(ACCENT, 0.8)}}}"
         f"QToolButton:checked{{background:{color};color:{fg};border-color:{color}}}"
-        "QToolButton:checked:pressed{background:#d9eef2}"
-        "QToolButton:disabled{color:#2a4552}")
+        f"QToolButton:checked:pressed{{background:{T.BUTTON_LIT_PRESSED.name()}}}"
+        f"QToolButton:disabled{{color:{T.FAINT.name()}}}")
     return b
 
 
@@ -480,13 +479,15 @@ def fx_button_style(on, opened=False):
     """EQ / D: quiet when the effect is off, lit when it is on (they are not toggles: a click
     opens the panel, another closes it). opened: the panel is showing, so the button has a
     white edge."""
-    lit = "background:#2ad4ff;color:#021012;border-color:#2ad4ff;" if on else ""
+    a, sel = ACCENT.name(), T.BUTTON_SELECTED.name()
+    lit = f"background:{a};color:{T.ON_ACCENT.name()};border-color:{a};" if on else ""
     if opened:
-        lit += "border-color:#f5f8fa;" + ("" if on else "color:#f5f8fa;background:#12293a;")
-    return (f"QToolButton{{background:#0a1821;color:#8aa3ab;border:1px solid "
-            f"rgba(255,255,255,0.09);border-radius:{px(3)}px;{lit}}}"
-            "QToolButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
-            "QToolButton:focus{border-color:rgba(42,212,255,0.8)}")
+        lit += f"border-color:{sel};" + ("" if on else
+                                         f"color:{sel};background:{T.BUTTON_HOVER.name()};")
+    return (f"QToolButton{{background:{T.BUTTON.name()};color:{T.BUTTON_TEXT.name()};border:1px "
+            f"solid {T.rgba(T.LINE, 0.09)};border-radius:{px(SIZES['small_radius'])}px;{lit}}}"
+            f"QToolButton:hover{{border-color:{T.rgba(T.LINE, 0.3)};color:{T.BRIGHT.name()}}}"
+            f"QToolButton:focus{{border-color:{T.rgba(ACCENT, 0.8)}}}")
 
 
 def fx_button(text, tip):
@@ -502,15 +503,17 @@ def fx_button(text, tip):
 def label_style(col, sel):
     """Channel name tag: dark tag, white text, a bar in the channel's colour underneath; the
     selected submix turns white."""
-    base = (f"border:none;border-radius:{px(3)}px;padding:0 {px(2)}px;"
+    base = (f"border:none;border-radius:{px(SIZES['small_radius'])}px;padding:0 {px(2)}px;"
             f"border-bottom:{px(2)}px solid {col.name()};")
     if sel:
-        return base + "background:#f5f8fa;color:#021012;"
-    return base + "background:#01070b;color:#eef6f8;"
+        return base + f"background:{T.LABEL_SELECTED.name()};color:{T.ON_ACCENT.name()};"
+    return base + f"background:{T.WELL.name()};color:{T.LABEL.name()};"
 
 
-def lcd_style(bg="rgba(1,7,11,0.7)", fg="#9cc7cf"):
-    return (f"background:{bg};color:{fg};border:1px solid {HAIR};border-radius:{px(3)}px;"
+def lcd_style(bg=None, fg=None):
+    bg, fg = bg or T.rgba(T.WELL, 0.7), fg or T.SOFT.name()
+    return (f"background:{bg};color:{fg};border:1px solid {HAIR};"
+            f"border-radius:{px(SIZES['small_radius'])}px;"
             f"font-family:{MONO_STACK};font-size:{px(8)}px;padding:0")
 
 
@@ -545,8 +548,8 @@ class Strip(QFrame):
 
     key identifies the strip in the model ("in:0", "play:2", "out:16"); see model.strip_key().
     """
-    WIDTH = 62
-    FOLDED = 42                          # height of a folded strip: its name tag over its meter
+    WIDTH = SIZES["strip_width"]
+    FOLDED = SIZES["folded_strip_height"]                         # height of a folded strip: its name tag over its meter
     clicked = Signal()
     flags_changed = Signal()             # folded: its solo, mute or clip mark changed
     rename_requested = Signal()
@@ -580,7 +583,7 @@ class Strip(QFrame):
         lay.setSpacing(px(3))
 
         self.title = NameTag()
-        self.title.setFixedHeight(px(20))
+        self.title.setFixedHeight(px(SIZES["strip_button_height"]))
         self.title.setMinimumWidth(0)
         self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.title.setFont(font(SANS, 10, QFont.DemiBold))
@@ -607,7 +610,7 @@ class Strip(QFrame):
         self.pan = Knob()
         self.pan_text = QLabel(self.pan.text())
         self.pan_text.setFont(font(MONO, 8))
-        self.pan_text.setStyleSheet("color:#7d9299")
+        self.pan_text.setStyleSheet(f"color:{DIM.name()}")
         self.pan.text_changed.connect(self.pan_text.setText)
         if show_pan:
             knob_row = QHBoxLayout()
@@ -625,21 +628,21 @@ class Strip(QFrame):
         btns.setSpacing(px(2))
         btns.addStretch()
         w = 17 if show_solo else 26   # three buttons have to fit the strip width
-        self.solo = small_button("S", SOLO.name(), "#0b0f1c", width=w,
+        self.solo = small_button("S", SOLO.name(), T.ON_LIGHT.name(), width=w,
                                  tip="Solo in the current submix (solo-in-place)")
         self.solo.setVisible(show_solo)
         btns.addWidget(self.solo)
-        self.mute = small_button("M", "#2ad4ff", tip="Mute", width=w)
+        self.mute = small_button("M", ACCENT.name(), tip="Mute", width=w)
         self._mute_style = self.mute.styleSheet()
         self._group_muted = 0
         btns.addWidget(self.mute)
         # an output's Cue: its submix plays on Main Out (TotalMix's Cue)
-        self.cue = small_button("Cue", SOLO.name(), "#0b0f1c", width=w,
+        self.cue = small_button("Cue", SOLO.name(), T.ON_LIGHT.name(), width=w,
                                 tip="Hear this output's submix on Main Out")
         self.cue.setVisible(show_cue)
         btns.addWidget(self.cue)
-        self.stereo = small_button("ST", "#ffffff", "#0b0f1c", tip="Stereo-link this channel pair",
-                                   width=w)
+        self.stereo = small_button("ST", T.BRIGHT.name(), T.ON_LIGHT.name(),
+                                   tip="Stereo-link this channel pair", width=w)
         self.stereo.setVisible(show_stereo)
         btns.addWidget(self.stereo)
         btns.addStretch()
@@ -722,7 +725,7 @@ class Strip(QFrame):
     def _show_peak(self, db):
         self.peak.setText(fmt_db(db) if db != NEG_INF else "-∞")
         hot = db != NEG_INF and db >= -0.05
-        self.peak.setStyleSheet(lcd_style("#ff2a4f", "white") if hot else lcd_style())
+        self.peak.setStyleSheet(lcd_style(ALERT.name(), T.BRIGHT.name()) if hot else lcd_style())
         if hot != self.clipped:
             self.clipped = hot
             self.show_flags()
@@ -771,17 +774,18 @@ class Strip(QFrame):
             return
         self._group_muted = group
         self.mute.setStyleSheet(self._mute_style + (
-            "QToolButton:!checked{border-color:#2ad4ff;color:#2ad4ff}" if group else ""))
+            f"QToolButton:!checked{{border-color:{ACCENT.name()};color:{ACCENT.name()}}}"
+            if group else ""))
         self.mute.setToolTip(f"Mute · muted in this submix by mute group {group}" if group
                              else "Mute")
 
     def set_settings_active(self, on):
         """Light the settings button while a channel setting (phase, 48V, ...) is on."""
         self.settings_btn.setStyleSheet(
-            f"QToolButton{{background:#0a1821;border:1px solid rgba(255,255,255,0.09);"
-            f"border-radius:{px(3)}px;font-size:{px(10)}px;"
-            f"color:{RED.name() if on else '#7d9299'}}}"
-            "QToolButton:hover{background:#12293a;color:white}")
+            f"QToolButton{{background:{T.BUTTON.name()};border:1px solid {T.rgba(T.LINE, 0.09)};"
+            f"border-radius:{px(SIZES['small_radius'])}px;font-size:{px(10)}px;"
+            f"color:{(ALERT if on else DIM).name()}}}"
+            f"QToolButton:hover{{background:{T.BUTTON_HOVER.name()};color:{T.BRIGHT.name()}}}")
 
     def set_fx_active(self, eq, dyn, opened=()):
         """Light EQ and D while their effect is on. opened: those of "eq" and "dyn" whose panel
@@ -807,7 +811,7 @@ class Strip(QFrame):
         the fader shows (why: the tooltip saying so, "" when it can)."""
         if why != self._limited:
             self._limited = why
-            self.value.setStyleSheet(lcd_style("#ff2a4f", "white") if why else lcd_style())
+            self.value.setStyleSheet(lcd_style(ALERT.name(), T.BRIGHT.name()) if why else lcd_style())
             self.value.setToolTip(why or LEVEL_TIP)
 
     def mouseDoubleClickEvent(self, e):
@@ -850,7 +854,7 @@ class Strip(QFrame):
 
     def _apply_icon(self, sel):
         size = px(13)
-        pm = icon_pixmap(self.icon, "#021012" if sel else "#eef6f8", size) if self.icon else None
+        pm = icon_pixmap(self.icon, T.ON_ACCENT if sel else T.LABEL, size) if self.icon else None
         self.title.setIcon(QIcon(pm) if pm else QIcon())
         self.title.setIconSize(QSize(size, size))
 
@@ -861,20 +865,20 @@ class Strip(QFrame):
         self._selected = sel
         col = self.tag_color()
         # ink panel with a hairline edge, as the dashboard's tiles; selected strip gets a cyan edge
-        border = "rgba(42,212,255,0.6)" if sel else HAIR
+        border = T.rgba(ACCENT, 0.6) if sel else HAIR
         top_border = (f"border-top:{px(2)}px solid {GROUP_COLOR[self.group].name()};"
                       if self.group else "")
         tag = label_style(col, sel)
         if self.folded:
             if self.clipped or self.solo.isChecked() or self.cue.isChecked():
-                border = (RED if self.clipped else SOLO).name()
+                border = (ALERT if self.clipped else SOLO).name()
             if self.mute.isChecked() and not sel:
                 tag += f"color:{MUTED};"
         self._apply_icon(sel)
         self.setStyleSheet(
-            f"QFrame#strip{{background:qlineargradient(y1:0,y2:1,stop:0 rgba(4,12,18,0.62),"
-            f"stop:0.7 rgba(4,12,18,0.93));border:1px solid {border};{top_border}"
-            f"border-radius:{px(6)}px}}"
+            f"QFrame#strip{{background:qlineargradient(y1:0,y2:1,stop:0 {T.INK},"
+            f"stop:0.7 {T.INK_DEEP});border:1px solid {border};{top_border}"
+            f"border-radius:{px(SIZES['strip_radius'])}px}}"
             f"QPushButton{{{tag}}}")
 
 
@@ -910,7 +914,7 @@ class RowTitle(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         y = self.height() / 2
-        p.setPen(QPen(QColor("white") if self.underMouse() else DIM, max(1.0, px(1.5)),
+        p.setPen(QPen(T.BRIGHT if self.underMouse() else DIM, max(1.0, px(1.5)),
                       Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         x, a, b = px(6), px(3), px(1.5)         # the mark's centre, half its span and depth
         p.drawPolyline(
@@ -922,7 +926,7 @@ class RowTitle(QAbstractButton):
         p.setPen(DIM)
         p.drawText(QRectF(px(25), 0, self.width(), self.height()), Qt.AlignVCenter, self.text())
         if self.hasFocus():
-            p.setPen(QPen(QColor(42, 212, 255, 200), 1))
+            p.setPen(QPen(alpha(ACCENT, 200), 1))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), px(3), px(3))
 
@@ -981,7 +985,7 @@ class Row(QWidget):
             for word, color, strips in (
                     ("Solo", SOLO, [s for s in self.strips if s.solo.isChecked()]),
                     ("Cue", SOLO, [s for s in self.strips if s.cue.isChecked()]),
-                    ("Clip", RED, [s for s in self.strips if s.clipped])):
+                    ("Clip", ALERT, [s for s in self.strips if s.clipped])):
                 if strips:
                     names = ", ".join(html.escape(s.title.text()) for s in strips[:3])
                     more = f" +{len(strips) - 3}" if len(strips) > 3 else ""
@@ -1063,7 +1067,7 @@ class Row(QWidget):
         inner = QWidget()
         hl = QHBoxLayout(inner)
         hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(px(4))
+        hl.setSpacing(px(SIZES["strip_spacing"]))
         for s in strips:
             s.set_folded(self.folded)
             s.flags_changed.connect(self._show_head)

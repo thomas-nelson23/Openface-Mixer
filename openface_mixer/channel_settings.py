@@ -27,6 +27,7 @@ from . import fireface802 as ff
 from . import fx
 from . import ucx2
 from .fx_panels import LevelKnob
+from . import theme as T
 from .theme import key_label, px
 
 
@@ -38,15 +39,15 @@ class ChannelSettings(QFrame):
         """settings: the device settings dict (st["hw"]), edited in place."""
         super().__init__(parent, Qt.Popup)
         self.setObjectName("chansettings")
-        self.setStyleSheet("QFrame#chansettings{background:#040e16;border:1px solid "
-                           f"rgba(255,255,255,0.16);border-radius:{px(8)}px}}")
+        self.setStyleSheet(f"QFrame#chansettings{{background:{T.PANEL.name()};border:1px solid "
+                           f"{T.HAIR_STRONG};border-radius:{px(T.SIZES['panel_radius'])}px}}")
         self.s = settings
         self.kind = kind
         self.channels = channels
         lay = QVBoxLayout(self)
         lay.setContentsMargins(px(12), px(10), px(12), px(12))
         lay.setSpacing(px(8))
-        lay.addWidget(QLabel(f"<b>{title}</b> <span style='color:#7d9299'>settings</span>"))
+        lay.addWidget(QLabel(f"<b>{title}</b> <span style='color:{T.DIM.name()}'>settings</span>"))
         grid = QGridLayout()
         grid.setHorizontalSpacing(px(10))
         grid.setVerticalSpacing(px(5))

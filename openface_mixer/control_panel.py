@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from . import arc
 from .control_room import MAX_PHONES, NO_PAIR, control_room, has_speaker_b
 from .model import FADER_MAX_DB, FADER_MIN_DB, NEG_INF, parse_db
+from . import theme as T
 from .theme import Section, key_label, px
 
 SWITCHES = (("dim", "Dim"), ("mono", "Mono"), ("speaker_b", "Speaker B"),
@@ -158,11 +159,13 @@ class ControlRoomPanel(Section):
     recall = Signal()
     arc_keys_changed = Signal(list)
     STATUS = {
-        "connected": "<span style='color:#2ad4ff'>●</span> ARC USB connected",
-        "absent": "<span style='color:#6f8a94'>●</span> ARC USB not connected",
-        "no-access": "<span style='color:#ff2a4f'>●</span> No permission to open the ARC USB "
+        "connected": f"<span style='color:{T.ACCENT.name()}'>●</span> ARC USB connected",
+        "absent": f"<span style='color:{T.MUTED}'>●</span> ARC USB not connected",
+        "no-access": f"<span style='color:{T.ALERT.name()}'>●</span> No permission to open the "
+                     "ARC USB "
                      "(add yourself to the <tt>audio</tt> group)",
-        "busy": "<span style='color:#ff2a4f'>●</span> ARC USB is in use by another program",
+        "busy": f"<span style='color:{T.ALERT.name()}'>●</span> ARC USB is in use by another "
+                "program",
     }
     # (key in the control room, label, kind of control), in the order they are shown
     ROWS = (("main", "Main Out", "one"), ("main_b", "Speaker B", "one"),

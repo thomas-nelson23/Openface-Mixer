@@ -18,31 +18,35 @@ from PySide6.QtWidgets import (
 
 from . import fx
 from .model import parse_db
-from .theme import CYAN, DIM, HAIR, MONO, SANS, TEXT, font, px
+from . import theme as T
+from .theme import ACCENT, DIM, HAIR, MONO, SANS, SIZES, TEXT, alpha, font, px, rgba
 from .wheel import Wheel
 from .widgets import LevelEdit, label_style
 
-BOX_STYLE = ("QFrame#fxbox{background:rgba(255,255,255,0.02);"
-             "border:1px solid rgba(255,255,255,0.08);border-radius:6px}")
-PANEL_STYLE = "QWidget#fxpanel{background:#040e16}" + BOX_STYLE      # a window of its own
+BOX_STYLE = (f"QFrame#fxbox{{background:{rgba(T.LINE, 0.02)};"
+             f"border:1px solid {rgba(T.LINE, 0.08)};border-radius:{SIZES['field_radius']}px}}")
+PANEL_STYLE = f"QWidget#fxpanel{{background:{T.PANEL.name()}}}" + BOX_STYLE   # a window of its own
 
 
 def docked_style():
     """In a row the panel is framed like the strips, and its sections' switches are square like
     the strips' buttons: quiet when off, cyan when on."""
     return (
-        "QWidget#fxpanel{background:qlineargradient(y1:0,y2:1,stop:0 rgba(4,12,18,0.62),"
-        f"stop:0.7 rgba(4,12,18,0.93));border:1px solid {HAIR};border-radius:{px(6)}px}}"
-        "QWidget#fxpanel:focus{border-color:rgba(42,212,255,0.6)}" + BOX_STYLE +
-        "QFrame#fxbox QPushButton{background:#0a1821;color:#8aa3ab;"
-        f"border:1px solid rgba(255,255,255,0.09);border-radius:{px(3)}px;"
+        f"QWidget#fxpanel{{background:qlineargradient(y1:0,y2:1,stop:0 {T.INK},"
+        f"stop:0.7 {T.INK_DEEP});border:1px solid {HAIR};"
+        f"border-radius:{px(SIZES['strip_radius'])}px}}"
+        f"QWidget#fxpanel:focus{{border-color:{rgba(ACCENT, 0.6)}}}" + BOX_STYLE +
+        f"QFrame#fxbox QPushButton{{background:{T.BUTTON.name()};color:{T.BUTTON_TEXT.name()};"
+        f"border:1px solid {rgba(T.LINE, 0.09)};border-radius:{px(SIZES['small_radius'])}px;"
         f"padding:{px(2)}px {px(9)}px;font-size:{px(10)}px;font-weight:600}}"
-        "QFrame#fxbox QPushButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
-        "QFrame#fxbox QPushButton:checked{background:#2ad4ff;color:#021012;border-color:#2ad4ff}"
-        "QFrame#fxbox QPushButton:focus{border-color:rgba(42,212,255,0.8)}"
+        f"QFrame#fxbox QPushButton:hover{{border-color:{rgba(T.LINE, 0.3)};"
+        f"color:{T.BRIGHT.name()}}}"
+        f"QFrame#fxbox QPushButton:checked{{background:{ACCENT.name()};"
+        f"color:{T.ON_ACCENT.name()};border-color:{ACCENT.name()}}}"
+        f"QFrame#fxbox QPushButton:focus{{border-color:{rgba(ACCENT, 0.8)}}}"
         f"QFrame#fxbox QComboBox{{font-size:{px(11)}px;padding:{px(2)}px {px(6)}px}}"
         f"QToolButton#fxclose{{border:none;color:{DIM.name()};font-size:{px(14)}px}}"
-        "QToolButton#fxclose:hover,QToolButton#fxclose:focus{color:white}")
+        f"QToolButton#fxclose:hover,QToolButton#fxclose:focus{{color:{T.BRIGHT.name()}}}")
 
 
 def fmt_hz(v):
@@ -204,26 +208,25 @@ class ValueKnob(QWidget):
         c = QPointF(w / 2, px(30))
         r = px(13)
         ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
-        p.setPen(QPen(QColor("#01070b"), px(3), Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(T.WELL, px(3), Qt.SolidLine, Qt.RoundCap))
         p.drawArc(ring, 225 * 16, -270 * 16)
         pos = self._pos(self.value)
         zero = self._pos(0.0) if self.lo < 0 < self.hi and not self.log else 0.0
-        arc_col = QColor(CYAN if on else DIM)
+        arc_col = QColor(ACCENT if on else DIM)
         p.setPen(QPen(arc_col, px(3), Qt.SolidLine, Qt.RoundCap))
         start = 225 - zero * 270
         p.drawArc(ring, int(start * 16), int(-(pos - zero) * 270 * 16))
         br = px(9)
-        p.setBrush(QColor("#0f2838"))
-        p.setPen(QPen(QColor(42, 212, 255, 200) if self.hasFocus() else QColor(255, 255, 255, 40),
-                      1))
+        p.setBrush(T.KNOB)
+        p.setPen(QPen(alpha(ACCENT, 200) if self.hasFocus() else alpha(T.LINE, 40), 1))
         p.drawEllipse(QRectF(c.x() - br, c.y() - br, 2 * br, 2 * br))
         a = math.radians(225 - pos * 270)
-        p.setPen(QPen(QColor("#f5f5f7") if on else QColor(DIM), px(2), Qt.SolidLine,
+        p.setPen(QPen(T.POINTER if on else QColor(DIM), px(2), Qt.SolidLine,
                       Qt.RoundCap))
         p.drawLine(QPointF(c.x() + px(3) * math.cos(a), c.y() - px(3) * math.sin(a)),
                    QPointF(c.x() + px(8) * math.cos(a), c.y() - px(8) * math.sin(a)))
         p.setFont(font(MONO, 9))
-        p.setPen(QColor("#9cc7cf") if on else QColor(DIM))
+        p.setPen(T.SOFT if on else QColor(DIM))
         p.drawText(QRectF(0, px(46), w, px(14)), Qt.AlignCenter, self.fmt(self.value))
 
 
@@ -249,18 +252,18 @@ class CurveView(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#01070b"))
+        p.fillRect(self.rect(), T.WELL)
         p.setFont(font(MONO, 7))
         for f in (50, 100, 200, 500, 1000, 2000, 5000, 10000):
             x = self._x(f)
-            p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+            p.setPen(QPen(alpha(T.LINE, 18), 1))
             p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
             p.setPen(QColor(DIM))
             p.drawText(QPointF(x + px(2), self.height() - px(3)),
                        f"{f // 1000}k" if f >= 1000 else str(f))
         for db in (-12, -6, 0, 6, 12):
             y = self._y(db)
-            p.setPen(QPen(QColor(255, 255, 255, 40 if db == 0 else 18), 1))
+            p.setPen(QPen(alpha(T.LINE, 40 if db == 0 else 18), 1))
             p.drawLine(QPointF(0, y), QPointF(self.width(), y))
             if db:
                 p.setPen(QColor(DIM))
@@ -270,7 +273,7 @@ class CurveView(QWidget):
         for i, (f, d) in enumerate(zip(self.FREQS, db)):
             pt = QPointF(self._x(f), self._y(d))
             path.moveTo(pt) if i == 0 else path.lineTo(pt)
-        p.setPen(QPen(CYAN, px(2)))
+        p.setPen(QPen(ACCENT, px(2)))
         p.drawPath(path)
 
 
@@ -289,16 +292,16 @@ class DynCurve(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w = h = min(self.width(), self.height())
         p.translate((self.width() - w) / 2, (self.height() - h) / 2)
-        p.fillRect(QRectF(0, 0, w, h), QColor("#01070b"))
+        p.fillRect(QRectF(0, 0, w, h), T.WELL)
 
         def pt(x, y):
             return QPointF((x - self.LO) / -self.LO * w, h - (y - self.LO) / -self.LO * h)
 
-        p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+        p.setPen(QPen(alpha(T.LINE, 18), 1))
         for v in (-60, -40, -20):
             p.drawLine(pt(v, self.LO), pt(v, 0))
             p.drawLine(pt(self.LO, v), pt(0, v))
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1, Qt.DashLine))
+        p.setPen(QPen(alpha(T.LINE, 40), 1, Qt.DashLine))
         p.drawLine(pt(self.LO, self.LO), pt(0, 0))
         ch = self.ch_fn()
         xs = [self.LO + i * -self.LO / 120 for i in range(121)]
@@ -308,7 +311,7 @@ class DynCurve(QWidget):
             q = pt(x, max(self.LO, min(12.0, y)))
             path.moveTo(q) if i == 0 else path.lineTo(q)
         p.setClipRect(QRectF(0, 0, w, h))
-        p.setPen(QPen(CYAN if ch["dyn"] else QColor(DIM), px(2)))
+        p.setPen(QPen(ACCENT if ch["dyn"] else QColor(DIM), px(2)))
         p.drawPath(path)
 
 
