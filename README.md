@@ -29,6 +29,9 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.
+- **Themes:** every colour, the fonts and the main sizes come from a theme file. Pick one under
+  **Settings > Display > Theme**, or make your own with **New…** (see [Themes](#themes)). Deep
+  Ocean is the default; Graphite, a grey look with an orange accent, comes with the app too.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
 - **Mute and solo groups like TotalMix:** 4 of each, switched with **MUTE 1–4** and **SOLO 1–4**
   at the end of the Hardware Inputs title. A mute group mutes its channels in the submix they
@@ -304,6 +307,38 @@ With two interfaces, add `--device <key>` (for example `--device ff802`). If tha
 running, a command other than `--show` does nothing, so a hotkey never opens a window by
 surprise: it prints why and exits with status 1.
 
+### Themes
+
+A theme is a small text file (TOML) in `~/.config/openface-mixer/themes/`. It only has to list
+what it changes; everything else comes from Deep Ocean, so this is a whole theme:
+
+```toml
+name = "Sunset"
+
+[colors]
+accent = "#ff8a3d"      # signal, selection, focus, mute
+background = "#1f1420"
+
+[sizes]
+strip_width = 70        # wider channel strips
+```
+
+- **New…** under **Settings > Display > Theme** copies the theme in use into the themes folder
+  under the name you give it and opens it in your text editor. Change values, save, and click
+  **Reload** to see them. **Edit** opens the theme in use again (themes that come with the app
+  can't be edited: make a copy with New…).
+- [`openface_mixer/themes/deep-ocean.toml`](openface_mixer/themes/deep-ocean.toml) lists every
+  value with what it is for: the colours (`[colors]`, plus the meter, the rows' name tags, the
+  fader groups and the channel colour menu), the fonts (`[fonts]`, any installed font works) and
+  sizes in pixels at 100% (`[sizes]`: strip width, spacing, corner radii, the settings panel).
+  [`graphite.toml`](openface_mixer/themes/graphite.toml) is an example of a theme that only
+  changes colours.
+- A value that can't be used (a misspelt name, something that isn't a colour) is left at the
+  default and listed in the Theme box's tooltip, which turns red. The app never fails to start
+  over a theme.
+- To try a theme file without picking it: `OPENFACE_THEME=~/my-theme.toml openface-mixer`.
+- Share a theme by sending its `.toml` file; whoever gets it drops it in their themes folder.
+
 ### Control room and ARC USB
 
 The **Control Room** box in the settings panel has TotalMix's monitoring switches. They act on
@@ -499,7 +534,8 @@ With two cards of the same model, the settings panel lets you pick which one to 
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options, the ARC USB keys and the Tray icon setting, shared by all devices |
+| `~/.config/openface-mixer/themes/` | Your own themes (`*.toml`, see [Themes](#themes)) |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the theme picked, the Updates choices, the meter options, the ARC USB keys and the Tray icon setting, shared by all devices |
 | `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 

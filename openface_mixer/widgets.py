@@ -163,7 +163,8 @@ class LevelEdit(QLineEdit):
         self.setAlignment(Qt.AlignCenter)
         self.setContextMenuPolicy(Qt.PreventContextMenu)   # a right-click that opens it stops here
         self.setStyleSheet(f"background:{T.WELL.name()};color:{T.LABEL.name()};border:1px solid "
-                           f"{T.rgba(ACCENT, 0.8)};border-radius:{px(SIZES['small_radius'])}px;padding:0;"
+                           f"{T.rgba(ACCENT, 0.8)};border-radius:{px(SIZES['small_radius'])}px;"
+                           f"padding:0;"
                            f"font-family:{MONO_STACK};font-size:{px(9)}px")
         self.setGeometry(rect)
         self.selectAll()
@@ -549,7 +550,7 @@ class Strip(QFrame):
     key identifies the strip in the model ("in:0", "play:2", "out:16"); see model.strip_key().
     """
     WIDTH = SIZES["strip_width"]
-    FOLDED = SIZES["folded_strip_height"]                         # height of a folded strip: its name tag over its meter
+    FOLDED = SIZES["folded_strip_height"]   # a folded strip: its name tag over its meter
     clicked = Signal()
     flags_changed = Signal()             # folded: its solo, mute or clip mark changed
     rename_requested = Signal()
@@ -811,7 +812,8 @@ class Strip(QFrame):
         the fader shows (why: the tooltip saying so, "" when it can)."""
         if why != self._limited:
             self._limited = why
-            self.value.setStyleSheet(lcd_style(ALERT.name(), T.BRIGHT.name()) if why else lcd_style())
+            self.value.setStyleSheet(lcd_style(ALERT.name(), T.BRIGHT.name()) if why
+                                     else lcd_style())
             self.value.setToolTip(why or LEVEL_TIP)
 
     def mouseDoubleClickEvent(self, e):

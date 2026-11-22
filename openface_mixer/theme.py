@@ -95,30 +95,35 @@ def _merge(base, over, where, problems):
     out = dict(base)
     for k, v in over.items():
         k = str(k)
+        name = f"{where}.{k}" if where else k
         if k not in base:
-            if where == "colors.channels" and isinstance(v, str) and QColor(v).isValid():
-                out[k] = v      # a theme may offer its own channel colours
+            if where == "colors.channels":      # a theme may offer its own channel colours
+                if isinstance(v, str) and QColor(v).isValid():
+                    out[k] = v
+                else:
+                    problems.append(f"{name}: {v!r} is not a colour")
             else:
-                problems.append(f"unknown setting {where + '.' if where else ''}{k}")
+                problems.append(f"unknown setting {name}")
             continue
         b = base[k]
         if isinstance(b, dict):
             if isinstance(v, dict):
-                out[k] = _merge(b, v, f"{where}.{k}" if where else k, problems)
+                out[k] = _merge(b, v, name, problems)
             else:
-                problems.append(f"{where}.{k} should be a table")
+                problems.append(f"{name} should be a table")
         elif isinstance(b, str) and where.startswith("colors"):
             if isinstance(v, str) and QColor(v).isValid():
                 out[k] = v
             else:
-                problems.append(f"{where}.{k}: {v!r} is not a colour")
+                problems.append(f"{name}: {v!r} is not a colour")
         elif isinstance(b, (int, float)) and not isinstance(v, bool) and \
-                isinstance(v, (int, float)) and 0 <= v <= 1000:
+                isinstance(v, (int, float)) and (0 if k.endswith(("radius", "spacing")) else 1) \
+                <= v <= 1000:
             out[k] = v
         elif isinstance(b, str) and isinstance(v, str):
             out[k] = v
         else:
-            problems.append(f"{where}.{k}: {v!r} is not a usable value")
+            problems.append(f"{name}: {v!r} is not a usable value")
     return out
 
 
@@ -135,10 +140,15 @@ def load_theme(key=None, path=None):
         values = read_theme_file(path)
     except (OSError, ValueError) as e:
         return default, [f"{Path(path).name}: {getattr(e, 'strerror', None) or e}"]
-    if isinstance(values.get("colors", {}).get("channels"), dict):
+    colors = values.get("colors")
+    if isinstance(colors, dict) and isinstance(colors.get("channels"), dict):
         # a theme that lists channel colours gives the whole menu, in its order
         default = {**default, "colors": {**default["colors"], "channels": {}}}
-    return _merge(default, values, "", problems), problems
+    merged = _merge(default, values, "", problems)
+    if not merged["colors"]["channels"]:
+        merged["colors"]["channels"] = read_theme_file(
+            BUILTIN_DIR / f"{DEFAULT_THEME}.toml")["colors"]["channels"]
+    return merged, problems
 
 
 def chosen_theme():
@@ -165,13 +175,39 @@ def alpha(color, a):
     return c
 
 
+def slug(name):
+    """The file name (without .toml) for a theme called name."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "theme"
+
+
+def new_theme(name, source=None):
+    """Writes a new user theme called name, a copy of the theme file source (default: the one in
+    use, or Deep Ocean's, which lists every value), and returns its path. Raises FileExistsError
+    when a theme file of that name is there already, OSError when it can't be written."""
+    source = Path(source or THEME_FILE or BUILTIN_DIR / f"{DEFAULT_THEME}.toml")
+    text = source.read_text(encoding="utf-8")
+    line = "name = " + '"' + name.replace("\\", "").replace('"', "'") + '"'
+    text, n = re.subn(r"(?m)^name\s*=.*$", lambda _m: line, text, count=1)
+    if not n:
+        text = f"{line}\n{text}"
+    path = user_dir() / f"{slug(name)}.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "x", encoding="utf-8") as f:     # never over a theme that is there
+        f.write(text)
+    return path
+
+
 def _qcolors(table):
     return {k: QColor(v) for k, v in table.items() if isinstance(v, str)}
 
 
 THEME_KEY = chosen_theme()
-_values, THEME_PROBLEMS = (load_theme(path=THEME_KEY) if THEME_KEY.endswith(".toml")
-                           or os.sep in THEME_KEY else load_theme(THEME_KEY))
+THEME_FROM_ENV = bool(os.environ.get("OPENFACE_THEME"))
+THEME_FILE = (Path(THEME_KEY).expanduser() if THEME_KEY.endswith(".toml") or os.sep in THEME_KEY
+              else theme_files().get(THEME_KEY))
+_values, THEME_PROBLEMS = load_theme(THEME_KEY, path=THEME_FILE)
+if THEME_PROBLEMS and THEME_FILE is not None and not THEME_FILE.is_file():
+    THEME_FILE = None
 for _p in THEME_PROBLEMS:
     print(f"openface-mixer: theme: {_p}", file=sys.stderr)
 THEME_NAME = _values.get("name") or DEFAULT_THEME
@@ -393,6 +429,7 @@ def stylesheet():
     w, k, ink, line, acc = BRIGHT.name(), ON_LIGHT.name(), INK_COLOR, LINE, ACCENT
     pill, panel, fld, sm = (px(SIZES[n]) for n in ("pill_radius", "panel_radius",
                                                     "field_radius", "small_radius"))
+    seg = px(SIZES["pill_radius"] - 2)
     p = px
     return f"""
         QMainWindow, QStackedWidget > QWidget {{ background:{BG.name()}; }}
@@ -428,7 +465,7 @@ def stylesheet():
         QPushButton#gear:checked:hover {{ background:{rgba(acc, 0.2)}; }}
         QWidget#segment {{ background:{rgba(ink, 0.6)}; border:1px solid {HAIR};
                           border-radius:{pill}px; }}
-        QPushButton#segbtn {{ background:transparent; border:none; border-radius:{p(SIZES['pill_radius'] - 2)}px;
+        QPushButton#segbtn {{ background:transparent; border:none; border-radius:{seg}px;
                              padding:{p(2)}px {p(14)}px; color:{d}; font-weight:500; }}
         QPushButton#segbtn:hover {{ color:{w}; }}
         QPushButton#segbtn:checked {{ background:{rgba(line, 0.09)}; color:{w};

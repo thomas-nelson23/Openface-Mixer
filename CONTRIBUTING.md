@@ -46,7 +46,8 @@ openface_mixer/         Python GUI package (run with `python3 -m openface_mixer`
   matrix_view.py        the routing grid
   settings_panel.py     right-hand hardware / engine panel
   updater.py            the Updates section's work: check and update the checkout it was installed from, to the newest release or the latest main (no Qt)
-  theme.py              colours, bundled fonts and the Qt stylesheet
+  theme.py              reads the theme file, the bundled fonts, the Qt stylesheet
+  themes/               deep-ocean.toml (the default: every colour, font, main size), graphite.toml
   fonts/                Sora, JetBrains Mono, Michroma (SIL OFL)
 packaging/              .desktop file, systemd user units, udev rules; aur/ has the Arch package recipe
 scripts/                install.sh / uninstall.sh (user install to ~/.local, or staged for a package with DESTDIR)
@@ -80,6 +81,9 @@ installed service running, the GUI attaches to it. To test engine changes, stop 
   read the old format, so users don't lose their mixes.
 - Python style: PEP 8, 100-column lines, standard library only (plus PySide6).
   C style: kernel/PipeWire-like (tabs, `snake_case`).
+- No colours, fonts or look-defining sizes in the code: add a value to
+  `openface_mixer/themes/deep-ocean.toml` (with a comment saying what it is for) and use it
+  from `theme`. Deep Ocean must keep rendering as it did.
 - Add or update tests for model and preset changes. Run `make test lint` before opening a PR.
 - Every pull request adds its line to the *Unreleased* section of [CHANGELOG.md](CHANGELOG.md),
   written for users. A change to an interface nobody could try also gets a line under *Not yet
