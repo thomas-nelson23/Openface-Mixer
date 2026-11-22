@@ -8,9 +8,10 @@ snd-firewire-ctl-services (protocols/fireface/src/former.rs, former/ff800.rs) an
 snd-fireface driver; see docs/HARDWARE.md.
 
 The configuration register is write only. The status register reports the clock source and the
-S/PDIF and optical options, so those start from what the device reports (settings_from_status);
-the rest (levels, jacks, phantom power, instrument options) start at defaults, as in
-snd-firewire-ctl-services. Nothing is written until the first status read has filled them in.
+S/PDIF and optical options, so those follow what the device reports (settings_from_status); the
+rest (levels, jacks, phantom power, instrument options) can't be read and show defaults. Nothing
+is written until the user changes a setting (config_ready), so connecting never changes the
+unit's clock or levels.
 
 Channel layout (the same numbering for meters and the mixer):
   inputs   0-9 AN 1-10, 10-11 S/PDIF, 12-19 ADAT 1, 20-27 ADAT 2
@@ -19,6 +20,7 @@ Channel layout (the same numbering for meters and the mixer):
 AN 1 is the front instrument input (or rear line 1), AN 7/8 front mic or rear line, AN 9/10 the
 rear mic inputs.
 """
+from .model import same_kind
 
 N_ANALOG_IN, N_SPDIF, N_ADAT = 10, 2, 16
 N_LINE_OUT, N_PHONES_OUT = 8, 2
@@ -37,6 +39,7 @@ CLOCK_SOURCES = (               # (key, label, configuration bits in quadlet 2),
     ("adat_2", "ADAT 2", 0x00000400),
     ("spdif", "S/PDIF", 0x00000C00),
     ("word", "Word Clock", 0x00001400),
+    ("tco", "TCO", 0x00001C00),
 )
 IN_LEVELS = (                   # (key, label, quadlet 0 bits, quadlet 1 bits)
     ("low", "Lo Gain", 0x00000008, 0x00000000),
@@ -84,10 +87,11 @@ STATUS_INPUTS = (               # (label, lock bit, sync bit)
     ("S/PDIF", 0x00040000, 0x00100000),
     ("Word Clock", 0x20000000, 0x40000000),
 )
-# status quadlet 1: what the configuration holds now
-S1_CLOCK = {0x00000001: "internal", 0x00000000: "adat_1", 0x00000400: "adat_2",
-            0x00000C00: "spdif", 0x00001000: "word"}
-S1_CLOCK_MASK = 0x00001C01
+# status quadlet 1: what the configuration holds now. Bit 0 is the internal clock whatever the
+# source bits say (as the kernel driver reads it); the codes differ from the configuration's.
+S1_CLOCK = {0x00000000: "adat_1", 0x00000400: "adat_2", 0x00000C00: "spdif", 0x00001000: "word",
+            0x00001800: "tco"}
+S1_CLOCK_MASK = 0x00001C00
 S1_WORD_OUT_SINGLE = 0x00002000
 S1_SPDIF_IN_OPTICAL = 0x00000200
 S1_OPT_OUT_SPDIF = 0x00000100
@@ -136,7 +140,8 @@ def default_settings():
     """Hardware settings as TotalMix shows them (settings dialog and input options)."""
     return {
         "known": False,           # True once filled in from the device's status
-        "clock": "internal",
+        "edited": False,          # True once a setting was changed here (config_ready)
+        "clock": "internal",      # None: the unit reports a source we don't know
         "spdif_in": "coax",       # or "optical"
         "opt_out": "adat",        # or "spdif" (S/PDIF out on the optical port)
         "spdif_pro": False,       # S/PDIF output channel status: professional
@@ -154,21 +159,28 @@ def default_settings():
 
 
 def upgrade_settings(s, base=None):
+    """s completed from base. A value of the wrong kind (a damaged or hand-edited state file)
+    goes back to its default, so no command or panel is handed something it can't use."""
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
+    # states from before the configuration was held back sent it once they were known
+    s.setdefault("edited", bool(s.get("known")))
     for k, v in base.items():
         cur = s.get(k)
         if isinstance(v, list):
-            s[k] = cur if isinstance(cur, list) and len(cur) == len(v) else v
-        else:
-            s.setdefault(k, v)
+            if not isinstance(cur, list) or len(cur) != len(v):
+                cur = v
+            s[k] = [c if same_kind(c, d) else d for c, d in zip(cur, v)]
+        elif not same_kind(cur, v) and not (k == "clock" and k in s and cur is None):
+            s[k] = v            # a clock of None (the unit reports a source we don't know) is kept
     return s
 
 
-def settings_from_status(s, status1):
-    """Take the options the device reports (status quadlet 1) into s and mark it known."""
-    s["clock"] = S1_CLOCK.get(status1 & S1_CLOCK_MASK, s["clock"])
+def settings_from_status(s, status1, clocks=S1_CLOCK):
+    """Take the options the device reports (status quadlet 1) into s and mark it known. The
+    Fireface 400 passes its own clock sources."""
+    s["clock"] = "internal" if status1 & 1 else clocks.get(status1 & S1_CLOCK_MASK)
     s["spdif_in"] = "optical" if status1 & S1_SPDIF_IN_OPTICAL else "coax"
     s["opt_out"] = "spdif" if status1 & S1_OPT_OUT_SPDIF else "adat"
     s["spdif_pro"] = bool(status1 & S1_SPDIF_OUT_PRO)
@@ -224,10 +236,16 @@ def config_words(s):
     return q
 
 
+def config_ready(s):
+    """False while the configuration is left alone: until the options the device reports have
+    been read, the user has changed a setting, and the clock source is one we know."""
+    return bool(s["known"] and s["edited"] and s["clock"])
+
+
 def device_words(s):
-    """(dev_config, dev_cmd) for the engine: (1, the configuration quadlets) once the settings
-    are known, else (0, []) so nothing is written."""
-    return (1, config_words(s)) if s["known"] else (0, [])
+    """(dev_config, dev_cmd) for the engine: (1, the configuration quadlets) once they may be
+    sent (config_ready), else (0, []) so nothing is written."""
+    return (1, config_words(s)) if config_ready(s) else (0, [])
 
 
 def decode_status(q0, q1, status_inputs=STATUS_INPUTS, active_sources=ACTIVE_SOURCES):

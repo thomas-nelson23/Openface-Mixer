@@ -6,26 +6,41 @@ Each device has its own state, matrix and presets: the Digiface's in the config 
 import json
 import math
 import os
+import shutil
 import struct
 from pathlib import Path
 
 from . import APP_ID
-from . import control_room
+from . import control_room, sinks
 from .devices import DEFAULT, DEVICES
-from .model import compute_matrix, compute_out_gains, upgrade_state
+from .model import (
+    clear_sends_outside, compute_matrix, compute_out_gains, is_index, is_num, upgrade_state,
+)
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_ID
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / APP_ID
 
-MATRIX_MAGIC = 0x344D464F                   # "OFM4", see load_matrix() in the engine
+MATRIX_MAGIC = 0x344D464F                   # "OFM4", see engine/matrix_file.c
 DEVICE_MAGIC = 0x3244464F                   # "OFD2": device settings block after the gains
 N_DEV_CMD = 4096                            # OFM_N_DEV_CMD in engine/shm_layout.h
 DEVICE_FILE = CONFIG_DIR / "device"         # key of the device the GUI opened last
 UI_FILE = CONFIG_DIR / "ui.json"            # UI scale, shared by all devices
+# what reading and parsing a missing, unreadable or damaged JSON file can raise
+BAD_FILE = (OSError, ValueError, RecursionError)
 
 UI_SCALE_DEFAULT = 1.0
 UI_SCALE_MIN, UI_SCALE_MAX = 0.5, 3.0
 UI_SCALES = (0.8, 1.0, 1.25, 1.5, 1.75, 2.0)
+PEAK_HOLD_DEFAULT = 1.5
+PEAK_HOLDS = (0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 9.9)   # seconds, offered in the settings
+
+
+def launcher():
+    """The openface-mixer command by its full path, for entries that start it at login, where
+    PATH may not hold it. scripts/install.sh puts this package in <prefix>/share/openface-mixer
+    and the command in <prefix>/bin; from a checkout it is whatever is on PATH."""
+    cmd = Path(__file__).resolve().parents[3] / "bin" / APP_ID
+    return str(cmd) if cmd.is_file() else shutil.which(APP_ID) or APP_ID
 
 
 def device_dir(dev=DEFAULT):
@@ -40,28 +55,80 @@ def matrix_file(dev=DEFAULT):
     return device_dir(dev) / "matrix.bin"         # gains, read by the engine at startup
 
 
+def sinks_file(dev=DEFAULT):
+    return device_dir(dev) / "sinks.conf"         # desktop sinks and sources, read by the engine
+
+
 def presets_file(dev=DEFAULT):
     return device_dir(dev) / "presets.json"       # the 8 snapshot slots
 
 
-def atomic_write(path, data):
+def previous_mix_file(dev=DEFAULT):
+    return device_dir(dev) / "previous-mix.json"  # the mix before the last recall, import or reset
+
+
+def backup_file(path):
+    return path.with_suffix(path.suffix + ".bak")
+
+
+def atomic_write(path, data, keep_backup=False):
+    """Write data to path so that a crash or power cut leaves either the old file or the new
+    one, never a part of one: to a temporary file, synced to disk, then renamed over path.
+    keep_backup first moves the file being replaced to backup_file(path)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if isinstance(data, str):
-        tmp.write_text(data)
-    else:
-        tmp.write_bytes(data)
-    tmp.replace(path)
+    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")     # two windows may save at once
+    try:
+        with open(tmp, "w" if isinstance(data, str) else "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        if keep_backup and path.exists():
+            path.replace(backup_file(path))
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _read_state(path, phones, strict):
+    """The state in path, or None if it can't be read (strict: or its mix is damaged)."""
+    try:
+        return upgrade_state(json.loads(path.read_text()), phones, strict)
+    except BAD_FILE:
+        return None
 
 
 def load_state(dev=DEFAULT):
+    """(state, problem). The state comes from state.json or, if that can't be read or its mix
+    is damaged, from state.json.bak, the save before it. With no usable backup, what can be
+    kept of state.json is repaired and the rest is the default mix. problem is None, or
+    "backup" or "reset" for those two cases, so the window can say what happened."""
     phones = dev.phones_pair(1)
-    try:
-        st = upgrade_state(json.loads(state_file(dev).read_text()), phones)
-    except (OSError, ValueError):
-        st = upgrade_state(None, phones)
-    control_room.control_room(st, phones)["talkback"] = False   # never survives a restart
+    path = state_file(dev)
+    bak = backup_file(path)
+    problem = None
+    st = _read_state(path, phones, True)
+    if st is None:
+        st = _read_state(bak, phones, True)
+        if st is not None:
+            problem = "backup"
+            try:
+                bak.replace(path)   # or the next save would keep the damaged file as the backup
+            except OSError:
+                pass
+        else:
+            problem = "reset" if path.exists() else None
+            st = _read_state(path, phones, False) or upgrade_state(None, phones)
+    return ready_state(st, dev), problem
+
+
+def ready_state(st, dev=DEFAULT):
+    """A state read with upgrade_state, finished for dev: the control room and the device
+    settings checked, and no sends on channels the device doesn't have."""
+    control_room.load(st, dev.phones_pair(1))
     dev.upgrade_settings(st)
+    st["sinks"] = sinks.checked(st.get("sinks"), dev)
+    clear_sends_outside(st, dev.all_channels)
     return st
 
 
@@ -83,7 +150,8 @@ def matrix_file_bytes(st, dev=DEFAULT):
     gains, out_gains = control_room.apply(st, compute_matrix(st, solo=False),
                                           compute_out_gains(st), talkback=False)
     data = struct.pack("<I", MATRIX_MAGIC) + gains.tobytes() + out_gains.tobytes()
-    block = device_block(st, dev)
+    no_solo = {k: [False] * len(v) for k, v in st["solo"].items()}   # FX sends follow solo too
+    block = device_block({**st, "solo": no_solo}, dev)
     if block is not None:
         config, cmds = block
         data += struct.pack(f"<III{N_DEV_CMD}I", DEVICE_MAGIC, config, N_DEV_CMD, *cmds)
@@ -91,15 +159,31 @@ def matrix_file_bytes(st, dev=DEFAULT):
 
 
 def save_state(st, dev=DEFAULT):
-    atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}))
+    atomic_write(state_file(dev), json.dumps({k: v for k, v in st.items() if k != "solo"}),
+                 keep_backup=True)
     atomic_write(matrix_file(dev), matrix_file_bytes(st, dev))
 
 
+def save_sinks(st, dev=DEFAULT):
+    """Write sinks.conf for the engine if the list changed. Returns True if it was written
+    (the engine is then told to read it, Engine.reload_sinks)."""
+    text = sinks.file_text(st["sinks"], dev)
+    path = sinks_file(dev)
+    try:
+        if path.read_text() == text:
+            return False
+    except (OSError, ValueError):
+        pass
+    atomic_write(path, text)
+    return True
+
+
 def load_ui():
-    """ui.json: the UI scale, plus the window size and whether the settings sidebar is open."""
+    """ui.json: the UI scale, the window size, whether the settings sidebar is open, the
+    Updates section's two choices, the meter options and the ARC USB keys."""
     try:
         ui = json.loads(UI_FILE.read_text())
-    except (OSError, ValueError):
+    except BAD_FILE:
         return {}
     return ui if isinstance(ui, dict) else {}
 
@@ -123,6 +207,27 @@ def save_window(width, height, sidebar):
     save_ui(window=[int(width), int(height)], sidebar=bool(sidebar))
 
 
+def load_update_prefs():
+    """(check for updates at startup, follow the latest changes instead of releases). Saved
+    with save_ui(update_check=..., update_channel="releases" or "latest")."""
+    ui = load_ui()
+    return ui.get("update_check") is not False, ui.get("update_channel") == "latest"
+
+
+def load_meter_prefs(ui=None):
+    """The viewer's meter options from ui.json (or the dict ui): RMS shown, the peak hold
+    time in seconds (0.1 to 9.9, as in TotalMix) and the full-scale samples in a row that
+    count as an over (1 to 10). Saved with save_ui(meter_rms=..., peak_hold=...,
+    over_samples=...); a missing or damaged value is its default."""
+    ui = load_ui() if ui is None else ui
+    hold, over = ui.get("peak_hold"), ui.get("over_samples")
+    return {
+        "meter_rms": ui.get("meter_rms") is not False,
+        "peak_hold": round(min(9.9, max(0.1, hold)), 1) if is_num(hold) else PEAK_HOLD_DEFAULT,
+        "over_samples": over if is_index(over, 11) and over else 1,
+    }
+
+
 def load_ui_scale():
     """The saved UI scale (1.0 = the desktop's own scale). It is applied by laying the widgets
     out larger (theme.px), not through QT_SCALE_FACTOR, so nothing is rasterised and stretched."""
@@ -143,7 +248,7 @@ def save_ui_scale(scale):
 def load_device_choice():
     try:
         key = DEVICE_FILE.read_text().strip()
-    except OSError:
+    except (OSError, ValueError):       # ValueError: damaged, not text
         return None
     return key if key in DEVICES else None
 

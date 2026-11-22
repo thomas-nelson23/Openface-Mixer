@@ -5,6 +5,7 @@ and 36 outputs. A device says which of those channels exist at each speed mode, 
 called, and where its engine, config files and PipeWire nodes are.
 """
 import re
+import struct
 from pathlib import Path
 
 from . import fireface400, fireface800, fireface802, hdspe, ucx2
@@ -13,6 +14,7 @@ from .model import chan_label as digiface_chan_label, pair_label as digiface_pai
 
 FIREWIRE_DEVICES = Path("/sys/bus/firewire/devices")
 USB_DEVICES = Path("/sys/bus/usb/devices")
+PCI_DEVICES = Path("/sys/bus/pci/devices")
 RME_OUI = 0x000A35
 RME_USB_VENDOR = 0x2a39
 # The Digiface USB product IDs with the vendor interface the kernel quirk and the engine's
@@ -31,7 +33,8 @@ class Device:
     phones_pairs = ()        # output pairs that are headphones
     max_routes = None        # hardware mixer crosspoint limit, or None (full matrix)
     alsa_card = None         # ALSA card short name holding its settings controls (Hardware)
-    sink_channels = "1/2"    # playback channels the engine's playback sink feeds (PCM 1/2)
+    meter_rms = ()           # kinds ("in", "play", "out") whose RMS level the engine reports
+    meter_overs = False      # the engine reports how many full-scale samples came in a row
 
     @property
     def shm_name(self):
@@ -48,6 +51,17 @@ class Device:
 
     def channels(self, kind, mode):
         raise NotImplementedError
+
+    def all_channels(self, kind):
+        """The channels of this kind the device has at any sample rate, as a set. A mix keeps
+        its sends on these only (model.clear_sends_outside)."""
+        return {c for mode in (1, 2, 4) for c in self.channels(kind, mode)}
+
+    def pcm_channels(self, kind, mode):
+        """The inputs ("in") or playback channels ("play") the driver streams at speed mode
+        1/2/4, in the order of its PCM channels, which PipeWire's ports follow (capture_AUXn,
+        playback_AUXn): the desktop sinks and sources are linked by it (sinks.py)."""
+        return self.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         raise NotImplementedError
@@ -107,6 +121,7 @@ class Digiface(Device):
     bus = "USB"
     phones_pairs = (16,)
     max_routes = 2048
+    meter_rms = ("in", "play", "out")
     alsa_card = DIGIFACE_CARD
 
     @staticmethod
@@ -123,19 +138,6 @@ class Digiface(Device):
 
     def pair_label(self, kind, c, mode):
         return digiface_pair_label(c, self._n_adat(mode), kind != "in")
-
-    def channel_group(self, kind, c, mode):
-        """The group channel c belongs to, for the SHOW options: the standard name's prefix
-        ("AD3" for "AD3 5", "AES", "AN")."""
-        return self.chan_label(kind, c, mode).split()[0]
-
-    def channel_groups(self):
-        """All of the device's channel groups, in channel order."""
-        groups = {}
-        for kind in ("in", "out"):
-            for c in self.channels(kind, 1):
-                groups.setdefault(self.channel_group(kind, c, 1), None)
-        return list(groups)
 
     def phones_pair(self, mode):
         return self._n_adat(mode) // 2
@@ -195,8 +197,9 @@ class Fireface802(FireWireDevice):
     unit_version = 0x000005      # SND_FF_UNIT_VERSION_802 in the kernel driver
 
     def device_words(self, st):
-        return (fireface802.config_word(st["hw"]),
-                fireface802.commands(st["hw"], st.get("stereo", {}).get("play")))
+        hw = st["hw"]
+        return (fireface802.config_word(hw) if fireface802.config_ready(hw) else 0,
+                fireface802.commands(hw, st))
 
     def channel_has_settings(self, kind, c):
         return kind in ("in", "out")      # phase invert on every hardware channel
@@ -213,13 +216,14 @@ class ClassCompliantUSB:
     its second USB MIDI port (engine/fireface_usb.c)."""
     bus = "USB"
     usb_card = ""
+    meter_rms = ("in", "play", "out")    # the level packets carry it (oscmix, "Protocol")
 
     def present(self):
         card = Hardware.find_card(self.usb_card)
         return card is not None and Hardware.card_driver(card) == "USB-Audio"
 
     def device_words(self, st):
-        return 0, self.proto.usb_commands(st["hw"], st.get("stereo", {}).get("play"))
+        return 0, self.proto.usb_commands(st["hw"], st)
 
     def missing_hint(self):
         return (f"Over USB the {self.name.replace('RME ', '').replace(' (USB)', '')} works on "
@@ -236,6 +240,9 @@ class Fireface802USB(ClassCompliantUSB, Fireface802):
 
     def channels(self, kind, mode):
         return fireface802.usb_channels(kind, mode)
+
+    def pcm_channels(self, kind, mode):
+        return fireface802.usb_channels("play", mode)   # the same 22 channels both ways
 
     def missing_hint(self):
         if find_firewire_unit(RME_OUI, self.unit_version) is not None:
@@ -256,7 +263,8 @@ class FirefaceUCX2(ClassCompliantUSB, FireWireDevice):
 
 
 class FormerFireface(FireWireDevice):
-    """Fireface 800 and 400: write-only configuration that starts from the device's status."""
+    """Fireface 800 and 400: write-only configuration that follows the device's status until
+    the user changes a setting."""
     family = "former"
 
     def device_words(self, st):
@@ -284,17 +292,24 @@ class HDSPeCard(Device):
     """An HDSPe PCIe card (hdspe.MODELS) under snd-hdspm or snd-hdspe."""
     family = "hdspe"
     bus = "PCIe"
+    meter_rms = ("in", "play")     # hdspmixer shows no RMS for the outputs of these cards
+    meter_overs = True
 
     def __init__(self, model, name):
         self.model = model
         self.key = model.key
         self.name = name
         self.alsa_card = model.card
-        self.sink_channels = model.sink_channels
         self.phones_pairs = model.phones_pairs
 
     def channels(self, kind, mode):
         return self.model.channels(kind, mode)
+
+    def all_channels(self, kind):
+        return super().all_channels(kind) | set(self.model.extension)
+
+    def pcm_channels(self, kind, mode):
+        return self.model.pcm_channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         return self.model.chan_label(kind, c, mode)
@@ -304,6 +319,32 @@ class HDSPeCard(Device):
 
     def present(self):
         return Hardware.find_card(self.alsa_card) is not None
+
+    def upgrade_settings(self, st):
+        hw = st.get("hw") if isinstance(st.get("hw"), dict) else {}
+        card = hw.get("card")
+        st["hw"] = {"use_anyway": hw.get("use_anyway") is True,
+                    "card": card if isinstance(card, str) else None}
+
+    def device_words(self, st):
+        """The configuration word tells the engine to drive a card its driver rule doubts; the
+        commands hold the name of the card chosen among several, as a C string."""
+        name = (st["hw"]["card"] or "").encode()[:31]
+        name += bytes(-len(name) % 4)
+        return int(st["hw"]["use_anyway"]), list(struct.unpack(f"<{len(name) // 4}I", name))
+
+    def missing_hint(self):
+        if self.key == "aio" and Hardware.find_card(hdspe.MODELS["aiopro"].card) is not None:
+            return "The card in the computer is an AIO Pro: choose RME HDSPe AIO Pro as the device."
+        if self.key == "aiopro" and Hardware.find_card(hdspe.MODELS["aio"].card) is not None:
+            return ("There is an “RME AIO” card. If it is an AIO Pro, the kernel's snd-hdspm "
+                    "driver gives it that name: install the snd-hdspe driver (see the README), "
+                    "or choose RME HDSPe AIO as the device.")
+        if find_pci_card(self.model.pci_revisions):
+            return ("The card is in the computer, but no driver is running it. An snd-hdspe "
+                    "built for an older kernel has to be built again after a kernel update; "
+                    "<tt>sudo dmesg | grep -i hdsp</tt> shows what went wrong.")
+        return ""
 
 
 DEVICES = {d.key: d for d in (
@@ -333,16 +374,29 @@ def _read_hex(path):
         return None
 
 
-def find_firewire_unit(specifier_id, version, root=FIREWIRE_DEVICES):
+def find_firewire_unit(specifier_id, version, root=None):
     """Name of the FireWire node ("fw1") with a unit of this specifier and version, or None."""
     try:
-        units = sorted(p for p in root.iterdir() if re.fullmatch(r"fw\d+\.\d+", p.name))
+        units = sorted(p for p in (root or FIREWIRE_DEVICES).iterdir()
+                       if re.fullmatch(r"fw\d+\.\d+", p.name))
     except OSError:
         return None
     for u in units:
         if _read_hex(u / "specifier_id") == specifier_id and _read_hex(u / "version") == version:
             return u.name.split(".")[0]
     return None
+
+
+def find_pci_card(revisions, root=PCI_DEVICES):
+    """True if an RME HDSPe card with one of these PCI revisions is in the computer, with or
+    without a driver."""
+    try:
+        devs = list(root.iterdir())
+    except OSError:
+        return False
+    return any(_read_hex(d / "vendor") in hdspe.PCI_VENDORS
+               and _read_hex(d / "device") == hdspe.PCI_DEVICE
+               and _read_hex(d / "revision") in revisions for d in devs)
 
 
 def usb_devices(vendor, root=USB_DEVICES):
@@ -374,6 +428,12 @@ def find_other_digiface(root=USB_DEVICES):
         if pid == DIGIFACE_CC_PID or "digiface" in product.lower():
             return pid
     return None
+
+
+def connected():
+    """The keys of the devices that are connected, from /proc/asound and sysfs only: no device
+    is opened, so this is cheap enough to run whenever the Device list is opened."""
+    return {key for key, d in DEVICES.items() if d.present()}
 
 
 def detect(saved=None):

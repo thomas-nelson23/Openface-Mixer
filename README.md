@@ -19,10 +19,25 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   Pick an output, and the input and playback faders set the submix sent to it.
 - **Matrix view:** route any input or playback channel to any output with a click.
 - **Presets:** 8 snapshot slots, like TotalMix, plus export and import of mixes as files.
+- **Workspaces:** *Save workspace* in the Mix section of the settings puts everything for one
+  interface in one file, as TotalMix's workspaces do: the mix, names, colours, icons, layouts,
+  presets, control room, device and effect settings, and the meter and ARC key options.
+  *Load workspace* checks the whole file before it changes anything, keeps the mix it replaces
+  for *Restore previous mix* and reopens the window. A workspace for another interface is
+  refused. Solo, the network remote's settings and the desktop outputs and inputs are not part
+  of a workspace.
 - **UI scale:** the settings panel scales the whole window from 80% to 200%, on top of the
   desktop's display scale. The window is laid out larger or smaller (not rasterised and
   stretched), so it stays sharp at every scale, and the change applies right away.
 - **Fader groups:** 4 groups that move together relatively. Hold Shift to move one fader alone.
+- **Mute and solo groups like TotalMix:** 4 of each, switched with **MUTE 1–4** and **SOLO 1–4**
+  at the end of the Hardware Inputs title. A mute group mutes its channels in the submix they
+  were added in, so no other output is muted by mistake; a solo group solos its channels.
+- **Submix tools like TotalMix:** right-click an output to copy its mix and paste it into
+  another, or to mirror it (the other output then plays the same mix and follows every change).
+  Right-click an input or playback channel to copy, paste or clear its sends to every output.
+  **Trim** makes each fader move all of its channel's sends together, in every submix, and
+  **Cue** on an output plays its mix on Main Out.
 - **Channel strips:** compact, laid out like Pro Tools: name tag on top, pan with its value,
   solo, mute, stereo link, fader with its scale beside the peak meter, and level and peak
   readouts at the bottom. The Hardware Outputs row holds the output master faders.
@@ -31,10 +46,26 @@ on the HDSPe cards, with the familiar TotalMix workflow.
   instrument, studio and device icons on the tag (all saved per device). *Custom channel
   names* in the Display section of the settings switches between your names and the standard
   ones.
+- **Fold a row:** click the title of the Hardware Inputs, Playback or Hardware Outputs row to
+  fold it to a slim strip of channel names over their meters; the other rows take the height.
+  A folded row still shows which channels are soloed, muted or have clipped. Click the title
+  again to unfold it. Which rows are folded is remembered per device.
 - **Hide unused channels:** *Show* in the Display box hides whole channel groups (ADAT 1–4,
   AES, S/PDIF, Analog, Phones, as the interface has them) from the mixer and matrix. Hidden
-  channels keep their routing.
+  channels keep their routing; hiding one switches its solo off.
+- **Layouts:** eight *Layouts* slots in the Display section store the view: hidden channel
+  groups and strips, folded rows and *Custom channel names*. Click *Store*, then a slot, to save
+  the view under a name; click a filled slot to bring it back. A layout never changes the mix
+  (a strip it hides has its solo switched off). Layouts are saved per device.
+- **Meters like TotalMix:** the bright bar is the RMS level and the dimmer bar above it the
+  peak, on interfaces that report RMS (Digiface, 802 over USB, UCX II, and HDSPe inputs and
+  playback; the FireWire Firefaces show peak only). In the Display section, *Show RMS level*
+  switches the RMS bar off, *Peak hold* sets how long the peak line stays, and on the HDSPe
+  cards *Clip after* sets how many full-scale samples in a row light the clip light. These are
+  kept for this computer, for all devices.
 - **Solo like TotalMix:** solo-in-place, post fader, in the current submix only.
+- **Pan and stereo link like TotalMix:** a mono channel is 3 dB down on both sides at the
+  centre. Linking two channels keeps what each had on its own, and unlinking brings it back.
 - **Hardware panel:** clock source, ADAT or S/PDIF per optical port, and input lock/sync/rate status.
   On the Fireface 802 and UCX II also the AES/S/PDIF and optical options of TotalMix's settings
   dialog, on the Fireface 800 and 400 the line levels and the S/PDIF, optical and word clock
@@ -48,17 +79,26 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - **TotalMix FX effects (Fireface 802 and UCX II):** the **EQ** and **D** buttons on every
   hardware input and output strip open TotalMix's EQ panel (Low Cut and a 3-band parametric EQ
   with its response curve) and Dynamics panel (compressor, expander and Auto Level); they light
-  while an effect is on. **FX** in the top bar (Ctrl+E) opens Reverb and Echo, fed by the **FX
-  Send** in each input and playback channel's settings and heard through each output's **FX
-  Return**. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
-  bands) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
+  while an effect is on. A panel opens inside the row, right of its strip: the strips after it
+  move right and the row scrolls, and several strips can have their panels open at once. A
+  second click on the button closes it. **FX** in the top bar (Ctrl+E) opens Reverb and Echo at
+  the end of the outputs row, fed by the **FX Send** in each input and playback channel's
+  settings and heard through each output's **FX Return**. A muted channel, or one left out by a solo, sends nothing to the reverb and echo, and
+  a stereo pair uses its left channel's effects on both sides. On the UCX II the outputs also have **Room EQ** (delay, volume calibration and 9
+  bands, in a window of its own) and inputs AN 1–4 **Autoset**. Right-click a strip → *Copy effects* / *Paste effects*
   to reuse settings.
 
-  ![EQ, Dynamics, Reverb and Echo panels beside a UCX II input strip](docs/screenshots/effects.png)
+  ![EQ and Dynamics open in the inputs row beside a UCX II input strip, Reverb and Echo at the end of the outputs row](docs/screenshots/effects.png)
 - **Input options (Fireface 800):** the ⚙ on inputs AN 1 and AN 7–10: front or rear jack on
   AN 1, 7 and 8, 48V on AN 7–10, and Drive, Limiter and Speaker Emulation on the AN 1
   instrument input.
 - **Input options (Fireface 400):** 48V and gain on AN 1/2, instrument, pad and gain on AN 3/4.
+- **Desktop outputs and inputs:** right-click a playback strip → *Add desktop output…* for a
+  stereo sink on that pair ("Openface Music" on playback 3/4), or an input strip → *Add desktop
+  input…* for a mono or stereo source a chat app can record from. Rename or remove them from the
+  same menu.
+- **PipeWire's sample rate and buffer** at the end of the Clock box: Auto, or a rate from 44.1
+  to 192 kHz and a buffer from 32 to 2048 frames.
 - **Several interfaces:** pick the device in the settings panel. Each has its own mix, presets
   and engine, so a Digiface and a Fireface can run side by side.
 - **Always on:** the mix keeps running with the window closed. A small engine service restores
@@ -83,7 +123,8 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 - The Digiface USB on its standard firmware, **not** Class Compliant mode. Its Class Compliant
   firmware has no hardware mixer (no TotalMix), so there is nothing for Openface Mixer to
   control; switch back with RME's Firmware Update Tool (Windows or macOS)
-- PipeWire with WirePlumber
+- PipeWire with WirePlumber, for the desktop outputs and inputs and the PipeWire rate and buffer
+  settings. The hardware mixer works without it (under JACK alone, for example)
 - Python 3.10+ with PySide6
 - libusb 1.0 and udev rules for the Digiface and FireWire access (installed by `make install`)
 - Build tools: a C compiler, `pkg-config`, and the libpipewire development headers
@@ -92,14 +133,18 @@ on the HDSPe cards, with the familiar TotalMix workflow.
 On Arch / CachyOS:
 
 ```sh
-sudo pacman -S --needed pyside6 libpipewire libusb alsa-utils libpulse gcc pkgconf make
+sudo pacman -S --needed pyside6 qt6-svg libpipewire libusb alsa-utils libpulse gcc pkgconf make
 ```
 
-On Debian / Ubuntu:
+On Debian 13 / Ubuntu 25.04 or newer:
 
 ```sh
-sudo apt install python3-pyside6.qtwidgets python3-pyside6.qtsvg libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
+sudo apt install python3-pyside6.qtwidgets python3-pyside6.qtnetwork python3-pyside6.qtsvg libpipewire-0.3-dev libusb-1.0-0-dev alsa-utils pulseaudio-utils build-essential pkg-config
 ```
+
+Ubuntu 24.04 and Debian 12 have no PySide6 packages. There, leave the three `python3-pyside6`
+packages out and install PySide6 for your user with pip:
+`pip install --user --break-system-packages PySide6-Essentials`.
 
 ## Install
 
@@ -109,26 +154,76 @@ cd Openface-Mixer
 make install
 ```
 
-This installs to `~/.local`, adds **Openface Mixer** to your app menu, and enables the
-`openface-mixer-engine` user service. Remove it with `make uninstall`.
+This installs to `~/.local` (or `make install PREFIX=/somewhere/else`), adds **Openface Mixer**
+to your app menu and installs the engine's user services. An interface's engine is switched on
+for every login the first time Openface Mixer sees that interface, so there is no engine or
+playback sink for hardware you don't have.
 
-To update later, use **Updates** in the settings panel: it checks GitHub for new commits on
-`main` and, on **Update and restart**, backs up `~/.config/openface-mixer`, pulls the checkout
-you installed from, reinstalls and restarts. Keep that checkout where it is; if it has local
-changes or isn't on `main`, update by hand with `git pull && make install`.
+Remove it with `make uninstall` (with the same `PREFIX=` if you gave one). That also removes
+the *Start at login* entries. The udev rules belong to root, so it prints the one command that
+removes them. Mixes and presets stay.
+
+On Arch, [packaging/aur](packaging/aur) has a recipe for a system package
+(`openface-mixer-git`). A packaged copy is updated by the package manager, not by the
+**Updates** section.
+
+### Updates
+
+**Updates** in the settings panel shows which version is installed. A few seconds after the
+app starts it looks on GitHub for a newer one, without a word unless there is one: then the
+gear button gets a dot and the section lists what is new. Untick *Check when the app starts*
+to look only when you press **Check for updates**.
+
+*Update to* chooses what you get:
+
+- **Releases** (the default): versions that have been tried, tagged `vX.Y.Z` on `main`. A
+  copy that is already past the newest release stays as it is until the next one. Until the
+  first release is tagged, this follows `main`.
+- **Latest changes**: every change as soon as it is merged into `main`. For testers.
+
+**Update and restart** backs up `~/.config/openface-mixer` (the newest three backups are
+kept), fast-forwards the checkout you installed from, reinstalls and restarts. Keep that
+checkout where it is and on `main`; if it has local changes or commits of its own, update by
+hand with `git pull && make install`.
+
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md), with a list of fixes that
+still need a tester with the hardware.
 
 ## First run
 
-1. Open **Openface Mixer**.
+1. Open **Openface Mixer**. It opens the interface that is connected; to pick another, use
+   **Device** at the top of the settings, where the connected interfaces say so.
 2. Monitoring works in any PipeWire profile, because the mix happens in the interface. To
    *record* all 32 inputs in apps, switch the Digiface to the **Pro Audio** profile: click
    *Record all inputs* in the settings panel (Digiface only), or pick the profile in your sound
    settings.
 3. To send desktop audio through the mixer, select **Openface Mixer Playback** as your output
-   device. It feeds playback channels 1/2. Send other apps or a DAW to the interface's own output
-   channels (playback channel *n* = output *n*) with qpwgraph or Helvum.
+   device. It feeds playback channels 1/2. For more, right-click a playback strip → *Add desktop
+   output…*: the sink you name ("Music" shows as **Openface Music**) feeds that pair, so
+   each app can have its own fader. *Add desktop input…* on an input strip makes a source apps
+   can record from. Status → *Desktop audio* says whether they are linked; its tooltip lists
+   them. One on a channel the interface lacks at the current sample rate is left out and comes
+   back at a rate that has it. A DAW can still use the interface's own channels (playback
+   channel *n* = output *n*) through qpwgraph or Helvum.
 4. Click an output's name tag (bottom row) to select its submix, then raise input and playback
    faders. Alternatively, click cells in the **Matrix** view.
+
+### Sample rate and buffer
+
+*PipeWire rate* and *Buffer* in the Clock box set PipeWire's `clock.force-rate` and
+`clock.force-quantum` (with `pw-metadata`), so they apply to every program and every device, not
+only this interface. **Auto** lets PipeWire choose and writes nothing. A forced value lasts
+until PipeWire restarts; Openface Mixer does not set it again at login, because it is not the
+app's alone (two devices' windows, or another tool, could disagree) and the app may not be
+running. For a permanent choice, set `default.clock.rate` and `default.clock.quantum` in a file
+under `~/.config/pipewire/pipewire.conf.d/`.
+
+The interface follows the rate PipeWire plays at. On an HDSPe card, *Internal rate* is the
+rate the card runs at while nothing plays (and its master rate when *Clock mode* is Master); as
+soon as PipeWire opens the card it sets the card to the PipeWire rate. On the FireWire
+Firefaces the rate comes from the driver the same way, and *Clock source* only says where the
+clock comes from. With an external clock (word clock, ADAT, AES), choose the rate that clock
+runs at.
 
 ### Controls
 
@@ -143,14 +238,71 @@ changes or isn't on `main`, update by hand with `git pull && make install`.
 | Solo | **S** on a strip: solo-in-place in the current submix |
 | Store a preset | Click an empty slot. To overwrite one, click **Store**, then the slot (Esc cancels), or right-click it. In a narrow window: **Presets ▾** |
 | Export / import a mix | Settings → Mix |
+| Save or load everything for this interface | Settings → Mix → *Save workspace…* / *Load workspace…* |
+| Store or recall a layout | Settings → Display → *Layouts*: **Store**, then a slot (Esc cancels); click a filled slot to recall it |
 | Recall a preset | Click a lit slot |
+| Take back a recall, import, reset, paste or clear | Right-click a slot → *Restore previous mix* (in a narrow window: **Presets ▾**). It brings back the mix as it was just before |
 | Fader groups | Right-click a strip → *Fader group*. Hold Shift to move one fader alone. |
+| Mute and solo groups | Right-click a strip → *Mute group in …* (for the submix being edited) or *Solo group*, then switch the group with **MUTE 1–4** or **SOLO 1–4** |
+| Copy a submix | Right-click an output → *Copy mix*, then right-click another → *Paste mix from …* or *Mirror mix of …*. *Remove mirror* gives the output its own copy again |
+| Copy or clear a channel's sends | Right-click an input or playback strip → *Copy sends*, *Paste sends from …* or *Clear sends…* |
+| Trim | **Trim** at the end of the Hardware Inputs title: a fader moves all of its channel's sends by the same amount, in every submix. Sends that are off stay off |
+| Cue | **Cue** on an output strip: hear that output's mix on Main Out. Press it again, or another output's, to end it |
+| Desktop output or input | Right-click a playback strip → *Add desktop output…*, or an input strip → *Add desktop input…*. The same menu renames or removes it |
 | Rename a channel | Double-click its name, or right-click the strip → *Rename…* (empty = standard name). Settings → Display → *Custom channel names* toggles custom / standard names |
+| Fold a row | Click the row's title (or Tab to it and press Space or Enter). Click again to unfold. In a folded row of inputs or playback channels, a click on a name unfolds it too |
 | Hide channels | Right-click a strip → *Hide channel*, or Settings → Display → *Show*: untick a channel group. Right-click empty mixer space to bring hidden ones back |
 | Matrix | Click an empty cell for 0 dB, drag up or down to set its level, double-click or Delete to clear it. Scrolling moves the grid; Ctrl + scroll changes a level. Arrow keys move the selection, Enter types a level |
 | Mixer / Matrix view | Ctrl+1 / Ctrl+2 |
-| Effects (802, UCX II) | **EQ** / **D** on a strip; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
+| Effects (802, UCX II) | **EQ** / **D** on a strip open its panel in the row, and close it again; **FX** or Ctrl+E for Reverb and Echo. Knobs: drag or scroll (Shift = fine), double-click for the default, right-click or Enter to type a value. Esc or Ctrl+W closes a panel |
 | Show or hide settings | Ctrl+, (or the gear). The window reopens at its last size, with the settings open or closed as you left them |
+
+### Keyboard shortcuts
+
+The same list is in the app: **Keyboard shortcuts** at the bottom of the settings, then
+**Show**. The effects are on the Fireface 802 and UCX II.
+
+| Where | Keys | What they do |
+| --- | --- | --- |
+| Window | Ctrl+, | Show or hide settings |
+| Window | Ctrl+1, Ctrl+2 | Mixer, Matrix |
+| Window | Tab, Shift+Tab | Next, previous control |
+| Window | Esc | Cancel Store or typing |
+| Window | Ctrl+Q | Quit |
+| Row title | Space, Enter | Fold or unfold the row |
+| Fader | Up, Down | 1 dB (Ctrl: 0.5 dB) |
+| Fader | Page Up / Down | 6 dB |
+| Fader | Home | 0 dB |
+| Fader | End | Off (-∞) |
+| Fader | Enter | Type a level |
+| Pan knob | Left, Right | Pan |
+| Pan knob | Home | Centre |
+| Matrix | Arrow keys | Move the selection |
+| Matrix | Enter | Type a level |
+| Matrix | Delete | Clear the cell |
+| Effects | Ctrl+E | Reverb and Echo |
+| Effects | Esc, Ctrl+W | Close a panel |
+| Effects knob | Arrow keys | Turn (Shift: fine) |
+| Effects knob | Page Up / Down | Ten steps |
+| Effects knob | Home | Default value |
+| Effects knob | Enter | Type a value |
+
+### Desktop shortcuts
+
+A running mixer takes commands, so the desktop's own keyboard shortcut settings can give it
+global hotkeys. On KDE Plasma: *System Settings → Keyboard → Shortcuts → Add New → Command or
+Script*. On GNOME: *Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts*.
+
+| Command | What it does |
+| --- | --- |
+| `openface-mixer --dim` | Dim on or off |
+| `openface-mixer --mute-main` | Main Out mute on or off |
+| `openface-mixer --recall 3` | Recall preset 3 (1 to 8) |
+| `openface-mixer --show` | Show the window, starting the mixer if needed |
+
+With two interfaces, add `--device <key>` (for example `--device ff802`). If that mixer is not
+running, a command other than `--show` does nothing, so a hotkey never opens a window by
+surprise: it prints why and exits with status 1.
 
 ### Control room and ARC USB
 
@@ -159,23 +311,31 @@ the output pair set as **Main Out** and are not part of presets:
 
 | Switch | What it does |
 | --- | --- |
-| Dim | Lowers Main Out by 20 dB |
+| Dim | Lowers Main Out by the amount set under *Dim* (20 dB to start with) |
+| Recall | Sets Main Out to the level set under *Recall level* |
 | Mono | Sums Main Out to mono |
 | Speaker B | Sends the Main Out mix to the Speaker B pair instead, at the Main Out level. Pick the pair under *Speaker B* first; it stays silent while Speaker B is off |
-| Talkback | Sends the talkback mic input to Phones, with the rest of the phones mix 20 dB down |
+| Talkback | Sends the talkback mic input to the Phones, with the rest of their mix turned down by the amount set under *Talkback dim* |
 | Ext In | Replaces the Main Out mix with the External In input pair |
+| Cue | **Cue** on an output strip plays that output's mix on Main Out, at the Main Out level, until it is pressed again or another output is cued. Dim, Speaker B and Talkback still work. Not saved |
+
+*Phones* takes up to four headphone outputs. Talkback always goes to all of them; tick further
+outputs under *Talkback to* if others should hear it too.
 
 Plug in an **RME ARC USB** (into the computer, not the Digiface) and it works with the default
 TotalMix layout printed on it:
 
 - Rows 1 and 2: recall presets 1 to 8.
-- Row 3: Mono, Phones (both phones keys), External Input.
+- Row 3: Mono, Volume Phones 1 and 2, External Input.
 - Bottom: Talkback (tap to latch, hold to talk), Speaker B, Dim.
-- Encoder: Main Out volume in 0.5 dB steps, or Phones volume while a Phones key is lit. Faders
-  grouped with it follow, as with the mouse.
+- Encoder: Main Out volume in 0.5 dB steps, or the volume of the first or second Phones output
+  (in the order they were ticked) while its key is lit. With one Phones output both keys
+  select it and both light up. Faders grouped with it follow, as with the mouse.
 
-Key LEDs follow the state. The ARC needs no driver or setup; Openface Mixer must be running for
-it to work (its window can be hidden, see below).
+Key LEDs follow the state. **Keys** beside the ARC's status in the Control Room box lists the
+keys: each can do any of these functions instead, and *Reset to default* brings back the printed
+layout. The choice is kept for this computer, not with the mix. The ARC needs no driver or
+setup; Openface Mixer must be running for it to work (its window can be hidden, see below).
 
 ### Network remote (OSC)
 
@@ -212,14 +372,22 @@ Anyone who can reach the port can change the mix while the remote is on, so only
 a network you trust. To keep the mixer, the ARC USB and the remote running without a window,
 tick **Start at login, no window**, or run `openface-mixer --background --device <key>`. Opening
 Openface Mixer again for that device shows the window, and closing it only hides it; **Ctrl+Q**
-quits. Each device has its own window and login entry, so two interfaces can run side by side.
+quits. It stays that way after an update restart, a new UI scale or a switch to another device.
+Each device has its own window and login entry, so two interfaces can run side by side.
+
+A mixer started this way has an icon in the system tray: click it to show or hide the window,
+right-click it for Dim, Mute main out, the presets and Quit. The icon gets a cyan dot while Dim
+or the main out mute is on, and is greyed with a red dot while the engine is stopped or the
+interface can't be used. **Tray icon**, below Start at login, can show it **Always** (closing the
+window then only hides it, for any mixer) or **Never**. On a desktop without a tray (GNOME without
+an extension) nothing changes.
 
 ### Fireface 802
 
 Connect the 802 over **FireWire** or **USB**. Openface Mixer opens the connected interface, or
 pick it under **Device** in the settings panel: **RME Fireface 802** is the FireWire connection
 (`openface-mixer --device ff802`), **RME Fireface 802 (USB)** the USB one
-(`openface-mixer --device ff802usb`). The first time, the GUI starts and enables the device's
+(`openface-mixer --device ff802usb`). The first time the GUI finds the 802, it enables the device's
 engine (`openface-mixer-engine@ff802` or `@ff802usb`), which then restores the 802's mix at every
 login. Its playback sink is called **Openface Mixer Playback (Fireface 802)** or **(Fireface 802
 USB)**. The two connections keep separate mixes.
@@ -233,7 +401,9 @@ mix.
 
 Openface Mixer is the source of truth for the 802's DSP, as TotalMix is: when it connects it
 sends the whole mix and all settings, including the effects (low cut, EQ, dynamics, auto level,
-FX sends and returns, reverb and echo; all off until you switch them on). Don't run
+FX sends and returns, reverb and echo; all off until you switch them on). Over FireWire the
+clock source and the options are the exception: Openface Mixer shows the clock the 802 runs
+from and does not touch them until you change one of them. Don't run
 `snd-fireface-ctl-service` alongside it.
 
 ### Fireface UCX II
@@ -255,10 +425,12 @@ The 800 works the same way: connect it over **FireWire**, pick **RME Fireface 80
 playback channels and 28 outputs (AN 1–8, phones PH 9/10, S/PDIF, ADAT 1 and 2) are in the mix.
 
 The 800's settings can't be read back, except the clock source and the S/PDIF and optical
-options. So the first time it connects, Openface Mixer takes those from the device, starts the
-rest (line levels, input jacks, 48V, instrument options) at their defaults (Lo Gain in, Hi Gain
-out, front jacks, 48V off), and from then on sends its own copy, as TotalMix does. Don't run
-`snd-fireface-ctl-service` alongside it either.
+options. Openface Mixer shows those as the 800 reports them and changes nothing on the unit
+until you change a setting. That first change sends all of them: the clock the 800 reported,
+and for the rest (line levels, input jacks, 48V, instrument options) what the panel shows,
+which starts at Lo Gain in, Hi Gain out, front jacks and 48V off. From then on Openface Mixer
+sends its own copy on every connect, as TotalMix does. Don't run `snd-fireface-ctl-service`
+alongside it either.
 
 The **Fireface 400** (`openface-mixer --device ff400`, engine `openface-mixer-engine@ff400`)
 works exactly like the 800 and needs the same udev rule. All 18 inputs (AN 1–8, S/PDIF, ADAT),
@@ -282,16 +454,18 @@ login. Everything below about the RayDAT applies to all four; their channels are
 On the RayDAT, pick **RME HDSPe RayDAT** under **Device** (or run `openface-mixer --device raydat`), and its engine
 (`openface-mixer-engine@raydat`) restores the mix at every login. All 36 inputs, 36 playback
 channels and 36 outputs are in the mix, in the card's own order as in TotalMix: AES, S/PDIF,
-then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). The driver
-starts with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
+then ADAT 1–4 (`A1 1` … `A4 8`; 20 channels at 88.2/96 kHz, 12 at 176.4/192 kHz). Both drivers
+start with the mixer silent, so nothing plays until Openface Mixer (or another mixer) has set
 it up.
 
 Which driver the card needs depends on its age:
 
 - Cards from before 2022 run on the kernel's own `snd-hdspm`; nothing to install.
 - Cards from 2022 on need [snd-hdspe](https://github.com/Schroedingers-Cat/snd-hdspe) (its
-  `develop` branch). The kernel's `snd-hdspm` still claims them but can't run them, so Openface
-  Mixer leaves such a card alone and says so. Install snd-hdspe with DKMS as its README
+  `develop` branch). The kernel's `snd-hdspm` still claims them but doesn't run them properly,
+  so Openface Mixer leaves such a card alone and says so. Which cards those are is a guess (see
+  [Status and limitations](#status-and-limitations)): if yours works with `snd-hdspm`, choose **Use
+  anyway** in the settings panel. Otherwise install snd-hdspe with DKMS as its README
   describes (`make install`) and blacklist the old driver:
 
       echo "blacklist snd-hdspm" | sudo tee /etc/modprobe.d/hdspe.conf
@@ -302,25 +476,31 @@ Which driver the card needs depends on its age:
 
 The **Openface Mixer Playback (RayDAT)** sink feeds the driver's first two playback channels,
 which are ADAT 1 channels 1/2 (`A1 1/2`), not AES. The card has no output faders of its own, so
-the output masters are folded into every send, as TotalMix does on this card. The clock and
+the output masters are folded into every send, as TotalMix does on this card. A send and its
+output's level can add up to +6 dB at most; a fader held there shows its level in red. The clock and
 S/PDIF settings are the driver's ALSA controls, which Openface Mixer reads and writes live; they
 aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to write wins.
+With two cards of the same model, the settings panel lets you pick which one to mix.
 
 ## Files
 
 | Path | Contents |
 | --- | --- |
 | `~/.config/openface-mixer/state.json` | Current mix and UI state (Digiface) |
+| `~/.config/openface-mixer/state.json.bak` | The save before the current one, loaded if `state.json` can't be read (Digiface) |
 | `~/.config/openface-mixer/presets.json` | The 8 preset slots (Digiface) |
+| `~/.config/openface-mixer/presets.json.bak` | Only after a `presets.json` that could not be read in full: that file as it was, kept when the presets are next saved (Digiface) |
+| `~/.config/openface-mixer/previous-mix.json` | The mix as it was before the last recall, import, reset or workspace load, for *Restore previous mix* (Digiface) |
 | `~/.config/openface-mixer/matrix.bin` | Flattened gain matrix that the engine loads at startup (Digiface) |
-| `~/.config/openface-mixer/ff802/` | The same three files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
+| `~/.config/openface-mixer/sinks.conf` | The desktop outputs and inputs, written by the app for the engine (Digiface) |
+| `~/.config/openface-mixer/ff802/` | The same files for the Fireface 802 (its clock, AES and channel settings are saved in its `state.json` and `matrix.bin`) |
 | `~/.config/openface-mixer/ff802usb/` | The same for the Fireface 802 over USB |
 | `~/.config/openface-mixer/ff800/` | The same for the Fireface 800 |
 | `~/.config/openface-mixer/ucx2/`, `ff400/` | The same for the Fireface UCX II and 400 |
 | `~/.config/openface-mixer/raydat/`, `aio/`, `aiopro/`, `aes/` | The same for the HDSPe cards |
 | `~/.config/openface-mixer/device` | The device the GUI opened last |
-| `~/.config/openface-mixer/ui.json` | Window (UI) scale, shared by all devices |
-| `~/.config/autostart/openface-mixer.desktop` | Starts Openface Mixer at login without a window (when ticked) |
+| `~/.config/openface-mixer/ui.json` | Window (UI) scale and size, the Updates choices, the meter options, the ARC USB keys and the Tray icon setting, shared by all devices |
+| `~/.config/autostart/openface-mixer-<device>.desktop` | Starts that device's Openface Mixer at login without a window (when ticked), one file per device |
 | `~/.cache/openface-mixer/engine-<device>.log` | Engine log (only when started without systemd) |
 
 ## Development
@@ -328,6 +508,7 @@ aren't stored with the mix. Don't run `hdspmixer` alongside it: the last one to 
 ```sh
 make          # build the engine
 make test     # unit tests (no hardware or display needed)
+make lint     # byte-compile and pyflakes
 make run      # run the GUI from the source tree
 make help     # list all targets
 ```
@@ -345,11 +526,10 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   heard on a unit yet either; see [docs/HARDWARE.md](docs/HARDWARE.md#totalmix-fx-effects).
   They are not part of presets, and the dynamics and auto level gain-reduction meters aren't
   shown. Over USB the 802 follows the Class Compliant protocol documented by oscmix,
-  also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys both select the one Phones pair set in the
-  Control Room box (PH 9/10 by default), not PH 9/10 and PH 11/12 separately.
+  also not yet checked with Openface Mixer on a unit. The ARC USB's two phones keys select PH 9/10 and
+  PH 11/12 once both are ticked under *Phones* in the Control Room box (PH 9/10 alone by default).
 - Fireface 800 support also comes from snd-firewire-ctl-services and the kernel driver and has
   not been checked on a unit yet (see [docs/HARDWARE.md](docs/HARDWARE.md#fireface-800-not-verified-on-hardware-yet)).
-  The TCO module isn't offered as a clock source.
 - Fireface UCX II support follows oscmix's register documentation, Fireface 400 support
   snd-firewire-ctl-services; neither has been checked on a unit yet.
 - HDSPe RayDAT, AIO, AIO Pro and AES support is built on the kernel's `snd-hdspm` driver, the
@@ -357,9 +537,22 @@ Hardware notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
   (see [docs/HARDWARE.md](docs/HARDWARE.md#raydat-not-verified-on-hardware-yet)).
   The driver only accepts mixer changes while playback and recording are opened by the same
   program (PipeWire or JACK normally do that). No TCO or pitch settings. A card counts as
-  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`.
+  2022-or-later (snd-hdspe only) when its PCI vendor ID is RME's own, `1d18`; that rule is not
+  confirmed, so it only warns. With the kernel driver an AIO Pro shows up as an AIO, and on an
+  AIO at 88.2 kHz and above the ADAT channels may not line up with their strips
+  ([docs/HARDWARE.md](docs/HARDWARE.md#aio-aio-pro-and-aes)).
 - The Digiface's hardware mixer allows 2048 active routes; the settings panel warns if a mix
   needs more.
+- The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
+  `make install` installs, which need sudo once). Without them nothing is mixed, and the
+  settings panel says why.
+- Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
+- Solo has no PFL / live mode or exclusive mode yet.
+- No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
+- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
+  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
+  (before version 2.1) are not supported.
+- ARC USB: the footswitch is not supported (it sent nothing in testing).
 
 ### Interfaces not supported yet
 
@@ -374,17 +567,6 @@ These TotalMix interfaces are left out for now:
 | Babyface, Babyface Pro, Fireface UC | No Linux access to their mixers |
 | HDSP 9632/9652, Multiface, Digiface (PCI), RPM | The older `snd-hdsp` driver: firmware loading and a different mixer; the RPM has no mixer |
 | Digiface Dante, AVB and Ravenna interfaces | Network audio with no Linux control path |
-- The mixer needs USB access to the Digiface and FireWire access to the Firefaces (the udev rules
-  `make install` installs, which need sudo once). Without them nothing is mixed, and the
-  settings panel says why.
-- Meters come from the interface itself: inputs, playback and the hardware outputs (post mix).
-- Solo has no PFL / live mode or exclusive mode yet.
-- No EQ, dynamics or reverb on the Digiface: its DSP has no effects.
-- The network remote is checked against TotalMix FX's published OSC addresses and a Q-SYS
-  plugin, not against TotalMix itself; controllers that only speak TotalMix's older bank-based OSC
-  (before version 2.1) are not supported.
-- ARC USB: key assignments are fixed to TotalMix's default layout, and the footswitch is not
-  supported (it sent nothing in testing).
 
 ## Acknowledgements
 

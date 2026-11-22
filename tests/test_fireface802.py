@@ -1,3 +1,4 @@
+import copy
 import struct
 import tempfile
 import unittest
@@ -10,8 +11,8 @@ class CommandTest(unittest.TestCase):
     def test_commands_fit_the_engine(self):
         cmds = ff.commands(ff.default_settings())
         self.assertLessEqual(len(cmds), config.N_DEV_CMD)
-        used = [c for c in cmds if c]          # 0 marks an unused slot (an effect that is off)
-        self.assertEqual(len(used), len(set(used)))
+        self.assertNotIn(0, cmds)              # 0 would be an unused slot: the engine skips it
+        self.assertEqual(len(cmds), len(set(cmds)))
         s = ff.default_settings()              # everything on: every slot in use, none twice
         for ch in s["fx"]["in"] + s["fx"]["out"]:
             ch.update(lc=True, eq=True, dyn=True, al=True)
@@ -49,6 +50,30 @@ class CommandTest(unittest.TestCase):
         self.assertIn(0x0A090001, cmds)                  # AN 11 Inst
         self.assertIn(0x0A080000, cmds)                  # AN 11 48V off
         self.assertNotIn(0x0A080001, cmds)
+
+    def test_inst_clears_the_stored_phantom_power(self):
+        """48V must not come back by itself when Inst is switched off again."""
+        s = ff.default_settings()
+        s["in"]["p48"][2] = s["in"]["p48"][3] = True
+        self.assertIn(0x0A080001, ff.commands(s))        # AN 11 48V on
+        ff.set_inst(s, [2], True)
+        self.assertEqual(s["in"]["p48"], [False, False, False, True])   # AN 12 keeps its own
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090001, cmds)
+        self.assertIn(0x0A080000, cmds)
+        ff.set_inst(s, [2], False)
+        cmds = ff.commands(s)
+        self.assertIn(0x0A090000, cmds)                  # Inst off
+        self.assertIn(0x0A080000, cmds)                  # ... and 48V stays off
+        self.assertIn(0x0B080001, cmds)
+
+    def test_a_saved_state_with_inst_and_phantom_loses_the_phantom(self):
+        s = ff.default_settings()
+        s["in"]["p48"] = [True, True, False, False]
+        s["in"]["inst"] = [True, False, False, True]
+        s = ff.upgrade_settings(s)
+        self.assertEqual(s["in"]["p48"], [False, True, False, False])
+        self.assertEqual(s["in"]["inst"], [True, False, False, True])
 
     def test_output_commands(self):
         s = ff.default_settings()
@@ -89,6 +114,54 @@ class ConfigTest(unittest.TestCase):
         for key, bits in (("word", 0x400), ("aes", 0x800), ("adat_a", 0xC00)):
             s["clock"] = key
             self.assertEqual(ff.config_word(s) & 0x1C00, bits)
+
+    def test_configuration_is_the_units_until_a_setting_changes(self):
+        # connecting must not change the unit's clock: nothing is written until the clock has
+        # been read from its status and the user has changed a setting
+        dev = devices.DEVICES["ff802"]
+        st = m.default_state(4)
+        dev.upgrade_settings(st)
+        st["hw"]["fx"]["send"]["in"][2] = -12.0
+        config_word, cmds = dev.device_words(st)
+        self.assertEqual(config_word, 0)
+        ff.settings_from_status(st["hw"], (0x2 << 28) | 0x201)     # running from word clock
+        self.assertEqual(st["hw"]["clock"], "word")
+        self.assertEqual(dev.device_words(st)[0], 0)
+        st["hw"].update(edited=True, aes_pro=True)                 # what the settings panel does
+        self.assertEqual(dev.device_words(st)[0], 0x2040 | 0x400 | 0x20)
+        st["hw"]["known"] = False                                  # changed before any connect
+        self.assertEqual(dev.device_words(st)[0], 0)
+        # the DSP commands are not held back: channel settings and effects go out all along,
+        # and the effects follow a mute
+        self.assertEqual(dev.device_words(st)[1], cmds)
+        self.assertIn(0x0201FF88, cmds)                            # AN 3 FX send -12.0 dB
+        st["mute"]["in"][2] = True
+        self.assertIn(0x0201FD76, dev.device_words(st)[1])         # ... off while muted
+
+    def test_clock_from_status(self):
+        s = ff.default_settings()
+        for bits, key in ((0xE00, "internal"), (0x201, "word"), (0x402, "aes"),
+                          (0x604, "adat_a"), (0x808, "adat_b"), (0x60C, "adat_a")):
+            ff.settings_from_status(s, bits)
+            self.assertEqual(s["clock"], key)
+        # the source codes of ADAT A and B are disputed: an input without lock can't be the
+        # source, so it is not taken for one (and never written)
+        for bits in (0x608, 0x804, 0x200, 0x401):
+            ff.settings_from_status(s, bits)
+            self.assertIsNone(s["clock"])
+        ff.settings_from_status(s, 0xA00)                # no source we know: never written
+        s["edited"] = True
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+
+    def test_upgrade_keeps_a_configuration_the_user_made(self):
+        # states from before "edited": sent on every connect, so a changed one stays the user's
+        old = ff.default_settings()
+        del old["known"], old["edited"]
+        self.assertFalse(ff.config_ready(ff.upgrade_settings(dict(old))))
+        s = ff.upgrade_settings(dict(old, clock="word"))
+        self.assertTrue(ff.config_ready(s))
+        self.assertEqual(ff.config_word(s) & 0x1C00, 0x400)
 
 
 class StatusTest(unittest.TestCase):
@@ -171,6 +244,43 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(len(s["in"]["phase"]), ff.N_PHYS_IN)   # wrong length: reset
         self.assertEqual(s["out"], ff.default_settings()["out"])
 
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        base = ff.default_settings()
+        s = ff.default_settings()
+        s.update(clock=[], aes_in=3, aes_pro="x", word_single=None)
+        s["in"].update(phase=["x"] + [True] * (ff.N_PHYS_IN - 1),
+                       gain=[None, float("nan"), 6.5, 3] + [0.0] * (ff.N_LINE_IN - 4),
+                       level=[1.5, -1, "x", True, 0] + [1] * (ff.N_LINE_IN - 5))
+        s["out"] = "x"
+        s = ff.upgrade_settings(s)
+        self.assertEqual({k: s[k] for k in ("clock", "aes_in", "aes_pro", "word_single")},
+                         {k: base[k] for k in ("clock", "aes_in", "aes_pro", "word_single")})
+        self.assertEqual(s["in"]["phase"], [False] + [True] * (ff.N_PHYS_IN - 1))
+        self.assertEqual(s["in"]["gain"][:4], [0.0, 0.0, 6.5, 3])
+        self.assertEqual(s["in"]["level"][:5], [1, 1, 1, 1, 0])
+        self.assertEqual(s["out"], base["out"])
+        ff.commands(s)                      # what the damaged values used to break
+        ff.usb_commands(s)
+        ff.config_word(s)
+
+    def test_an_unknown_clock_source_stays_unknown_when_loaded(self):
+        # saved while the unit reported no source we know: loading must not make it Internal,
+        # or the next connect would write Internal to the unit
+        s = ff.default_settings()
+        s.update(known=True, edited=True, clock=None)
+        s = ff.upgrade_settings(s)
+        self.assertIsNone(s["clock"])
+        self.assertFalse(ff.config_ready(s))
+        ff.commands(s)
+
+    def test_good_settings_are_kept(self):
+        s = ff.default_settings()
+        s.update(clock="adat_b", aes_in="optical", opt_out="spdif", aes_pro=True)
+        s["in"].update(gain=[12.0] * ff.N_LINE_IN, level=[0] * ff.N_LINE_IN,
+                       p48=[True] * ff.N_MIC_IN)
+        s["out"]["level"] = [2] * ff.N_LINE_OUT
+        self.assertEqual(ff.upgrade_settings(copy.deepcopy(s)), s)
+
 
 class DeviceTest(unittest.TestCase):
     def test_find_firewire_unit(self):
@@ -197,7 +307,9 @@ class DeviceTest(unittest.TestCase):
         usb = devices.DEVICES["ff802usb"]
         self.assertEqual(usb.service, "openface-mixer-engine@ff802usb.service")
         self.assertEqual(usb.family, "latter")
-        self.assertEqual(usb.device_words({"hw": ff.default_settings()})[0], 0)
+        st = m.default_state(4)
+        usb.upgrade_settings(st)
+        self.assertEqual(usb.device_words(st)[0], 0)
         self.assertEqual(config.state_file(usb), config.CONFIG_DIR / "ff802usb" / "state.json")
 
     def test_digiface_layout_unchanged(self):
@@ -213,7 +325,7 @@ class FileTest(unittest.TestCase):
         dev = devices.DEVICES["ff802"]
         st = m.default_state(4)
         dev.upgrade_settings(st)
-        st["hw"]["clock"] = "aes"
+        st["hw"].update(clock="aes", known=True, edited=True)
         data = config.matrix_file_bytes(st, dev)
         base = 4 + (m.N_OUT * m.N_SRC + m.N_OUT) * 4
         self.assertEqual(len(data), base + 12 + config.N_DEV_CMD * 4)

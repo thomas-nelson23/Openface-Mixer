@@ -1,9 +1,17 @@
 import copy
+import importlib.util
+import os
+import struct
+import subprocess
+import tempfile
 import unittest
+from array import array
 from pathlib import Path
 from unittest import mock
 
-from openface_mixer import devices, hardware, hdspe as rd, model as m
+from openface_mixer import config, devices, hardware, hdspe as rd, model as m
+
+HAVE_QT = importlib.util.find_spec("PySide6") is not None
 
 # amixer -c N contents, cut down to the RayDAT controls the GUI uses (snd-hdspm's names)
 AMIXER = """\
@@ -162,7 +170,17 @@ CARDS = """\
 """
 
 
+TWO_CARDS = CARDS + """\
+ 3 [HDSPMx4d5e6f   ]: HDSPM - RME RayDAT_4d5e6f
+                      RME RayDAT S/N 0x4d5e6f at 0xf7a00000, irq 18
+"""
+
 RAYDAT, AIO, AES = rd.MODELS["raydat"], rd.MODELS["aio"], rd.MODELS["aes"]
+
+
+def m_default_mix():
+    st = m.default_state(0)
+    return m.compute_matrix(st), m.compute_out_gains(st)
 
 
 class ChannelTest(unittest.TestCase):
@@ -192,7 +210,7 @@ class ChannelTest(unittest.TestCase):
         self.assertEqual(AIO.chan_label("in", 19, 1), "A 8")
         dev = devices.DEVICES["aio"]
         self.assertEqual(dev.phones_pair(1), 3)
-        self.assertEqual(dev.sink_channels, "AN 1/2")
+        self.assertEqual(dev.pcm_channels("play", 1)[:2], [0, 1])     # the playback sink: AN 1/2
         self.assertEqual(devices.DEVICES["aiopro"].channels("in", 1), AIO.channels("in", 1))
 
     def test_aes(self):
@@ -220,6 +238,19 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(st["rate"], 96000)
         # TCO (no module: N/A) is left out; AES has no lock, so no rate
         self.assertEqual(st["inputs"], [("AES", "No Lock", None), ("ADAT 1", "Sync", "96 kHz")])
+
+    def test_rate_under_hdspm(self):
+        # the measured clock is at single speed; the rate that was set holds the speed
+        c = hardware.parse_amixer_contents(AMIXER)
+        c["Internal Clock"] = {"value": 5, "values": [5], "rw": True, "numid": 1,
+                               "items": [f"{r / 1000:g} kHz" for r in rd.HDSPM_RATES]}
+        for measured, item, rate in ((47998, 2, 48000), (48001, 5, 96000), (44099, 5, 88200),
+                                     (44100, 8, 176400), (44101, 2, 44100), (96003, 5, 96000),
+                                     (46000, 2, 46000), (0, 5, 0)):
+            c["System Sample Rate"]["value"] = measured
+            c["Internal Clock"]["value"] = item
+            self.assertEqual(rd.decode_status(c)["rate"], rate)
+        self.assertEqual(rd.hdspm_rate(47998, None), 48000)
 
     def test_decode_hdspe(self):
         c = hardware.parse_amixer_contents(AMIXER_HDSPE)
@@ -269,14 +300,75 @@ class StatusTest(unittest.TestCase):
         self.assertFalse(rd.driver_usable(rd.HDSPM, rd.VENDOR_RME))
         self.assertTrue(rd.driver_usable(rd.HDSPE, rd.VENDOR_RME))
 
+    def test_clock_mode_in_effect(self):
+        # what the Clock light compares with the chosen mode
+        hdspm = hardware.parse_amixer_contents(AMIXER)
+        self.assertEqual(rd.decode_status(hdspm)["mode"], "AutoSync")      # ADAT 1 in sync
+        hdspm["ADAT1 SyncCheck"]["value"] = hdspm["ADAT1 SyncCheck"]["values"][0] = 0
+        self.assertIsNone(rd.decode_status(hdspm)["mode"])                 # nothing to follow
+        hdspm["Clock Mode"]["value"] = hdspm["Clock Mode"]["values"][0] = 0
+        self.assertEqual(rd.decode_status(hdspm)["mode"], "Master")
+        c = hardware.parse_amixer_contents(AMIXER_HDSPE)
+        self.assertEqual(rd.decode_status(c)["mode"], "AutoSync")          # on ADAT 1
+        cur = c["Current AutoSync Reference"]
+        cur["value"] = cur["values"][0] = cur["items"].index("Intern")
+        st = rd.decode_status(c)
+        self.assertEqual((st["mode"], st["source"]), (None, "AutoSync, on Internal"))
+
+    def test_limited(self):
+        gains = array("f", bytes(4 * 4 * 3))
+        out_gains = array("f", [1.0, m.db2lin(6.0), 0.0, 1.5])
+        gains[0 * 3 + 0] = 1.99          # +6 dB send, output at 0 dB: fine
+        gains[1 * 3 + 0] = 1.0           # 0 dB into an output at +6 dB: just fits
+        gains[1 * 3 + 1] = 1.2           # more than the card can do
+        gains[2 * 3 + 2] = 1.99          # muted output
+        gains[3 * 3 + 2] = 1.5
+        self.assertEqual(rd.limited(gains, out_gains, 3), {(1, 1), (3, 2)})
+        self.assertEqual(rd.limited(*m_default_mix(), m.N_SRC), set())
+
+    def test_run(self):
+        done = subprocess.CompletedProcess([], 0, "out", "")
+        for effect, want in ((FileNotFoundError(), (None, "missing")),
+                             (subprocess.TimeoutExpired("amixer", 2), (None, "timeout")),
+                             (PermissionError(13, "Permission denied"),
+                              (None, "[Errno 13] Permission denied")),
+                             ([done], ("out", None)),
+                             ([subprocess.CompletedProcess([], 1, "", "x\namixer: busy\n")],
+                              (None, "amixer: busy")),
+                             ([subprocess.CompletedProcess([], 1, "", "")],
+                              (None, "amixer failed"))):
+            with mock.patch.object(hardware.subprocess, "run", side_effect=effect) as run:
+                self.assertEqual(hardware.run(["amixer"]), want)
+            self.assertEqual(run.call_args.kwargs["timeout"], 2)
+            self.assertEqual(run.call_args.kwargs["env"]["LC_ALL"], "C")
+
+    def test_read_says_why(self):
+        hw = hardware.Hardware(RAYDAT.card)
+        with mock.patch.object(Path, "read_text", return_value=CARDS), \
+                mock.patch.object(hardware.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertIsNone(hw.read())
+        self.assertEqual((hw.card, hw.error), (1, "missing"))
+        with mock.patch.object(Path, "read_text", return_value=""):
+            self.assertIsNone(hw.read())
+        self.assertEqual((hw.card, hw.error), (None, None))
+
     def test_write_by_numid(self):
         hw = hardware.Hardware(RAYDAT.card)
         hw.card, hw.ctrls = 1, hardware.parse_amixer_contents(AMIXER_HDSPE)
-        with mock.patch.object(hardware.subprocess, "run") as run:
-            hw.write("Clock Mode", 1)
-            hw.write("Unknown", 0)
+        refused = subprocess.CompletedProcess(
+            [], 1, "", "amixer: Control hw:1 element write error: Device or resource busy\n")
+        with mock.patch.object(hardware.subprocess, "run", side_effect=[
+                subprocess.CompletedProcess([], 0, "", ""), refused,
+                subprocess.TimeoutExpired("amixer", 2)]) as run:
+            self.assertIsNone(hw.write("Clock Mode", 1))
+            self.assertIn("busy", hw.write("Unknown", 0))
+            self.assertEqual(hw.write("Clock Mode", 0), "timeout")
         self.assertEqual(run.call_args_list[0].args[0][4:], ["cset", "numid=11", "1"])
         self.assertEqual(run.call_args_list[1].args[0][4:], ["cset", "name=Unknown", "0"])
+
+    def test_set_card_profile(self):
+        with mock.patch.object(hardware.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertEqual(hardware.set_card_profile("card", "pro-audio"), "missing")
 
     def test_not_found(self):
         self.assertIsNone(rd.decode_status(None))
@@ -304,6 +396,72 @@ class DeviceTest(unittest.TestCase):
             self.assertFalse(devices.DEVICES["aio"].present())
             self.assertEqual(hardware.Hardware.find_card(AIO.card + " Pro"), 2)
             self.assertTrue(devices.DEVICES["aiopro"].present())
+
+
+    def test_use_anyway(self):
+        dev = devices.DEVICES["aio"]
+        st = m.default_state(dev.phones_pair(1))
+        dev.upgrade_settings(st)
+        self.assertEqual(st["hw"], {"use_anyway": False, "card": None})
+        self.assertIsNone(config.device_block(st, dev))        # nothing for the engine
+        self.assertNotIn(b"OFD2", config.matrix_file_bytes(st, dev))
+        st["hw"] = {"use_anyway": True, "junk": 1, "card": 7}
+        dev.upgrade_settings(st)
+        self.assertEqual(st["hw"], {"use_anyway": True, "card": None})
+        self.assertEqual(config.device_block(st, dev)[0], 1)   # the engine's dev_config
+        self.assertIn(b"OFD2", config.matrix_file_bytes(st, dev))
+
+    def test_second_card(self):
+        self.assertEqual(hardware.Hardware.find_cards(""), [])
+        with mock.patch.object(Path, "read_text", return_value=TWO_CARDS):
+            self.assertEqual(hardware.Hardware.find_cards(RAYDAT.card),
+                             [(1, "RME RayDAT_1a2b3c"), (3, "RME RayDAT_4d5e6f")])
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card), 1)
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card, "RME RayDAT_4d5e6f"), 3)
+            # the chosen card was taken out: the one that is there
+            self.assertEqual(hardware.Hardware.find_card(RAYDAT.card, "RME RayDAT_777777"), 1)
+            hw = hardware.Hardware(RAYDAT.card)
+            hw.exact = "RME RayDAT_4d5e6f"
+            with mock.patch.object(hardware.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 0, AMIXER, "")):
+                hw.read()
+            self.assertEqual(hw.card, 3)
+        # the engine gets the name as a C string in the command slots
+        dev = devices.DEVICES["raydat"]
+        st = m.default_state(0)
+        dev.upgrade_settings(st)
+        st["hw"]["card"] = "RME RayDAT_4d5e6f"
+        config_word, cmds = config.device_block(st, dev)
+        raw = struct.pack(f"<{len(cmds)}I", *cmds)
+        self.assertEqual((config_word, raw[:raw.index(0)]), (0, b"RME RayDAT_4d5e6f"))
+        st["hw"]["card"] = "x" * 40                         # the card info's name is 32 bytes
+        self.assertEqual(dev.device_words(st)[1], [0x78787878] * 7 + [0x00787878])
+
+    def test_missing_hint(self):
+        aio, aiopro, raydat = (devices.DEVICES[k] for k in ("aio", "aiopro", "raydat"))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, vendor, device, rev in (("0000:00:1f.3", 0x8086, 0xa348, 0x10),
+                                              ("0000:03:00.0", 0x1d18, 0x3fc6, 212),
+                                              ("0000:04:00.0", 0x10ee, 0x0007, 211)):
+                (root / name).mkdir()
+                for key, v in (("vendor", vendor), ("device", device), ("revision", rev)):
+                    (root / name / key).write_text(f"0x{v:04x}\n")
+            self.assertTrue(devices.find_pci_card(aio.model.pci_revisions, root))
+            self.assertTrue(devices.find_pci_card(aiopro.model.pci_revisions, root))
+            self.assertFalse(devices.find_pci_card(raydat.model.pci_revisions, root))
+            self.assertFalse(devices.find_pci_card((212,), root / "none"))
+        with mock.patch.object(hardware.Hardware, "find_card", return_value=None):
+            with mock.patch.object(devices, "find_pci_card", return_value=True):
+                self.assertIn("no driver", aio.missing_hint())
+            with mock.patch.object(devices, "find_pci_card", return_value=False):
+                self.assertEqual(aio.missing_hint(), "")
+        # an AIO Pro under snd-hdspm is an "RME AIO" card
+        cards = CARDS.replace("HDSPe - RME AIO Pro_00012345", "HDSPM - RME AIO_1a2b3d")
+        with mock.patch.object(Path, "read_text", return_value=cards):
+            self.assertIn("gives it that name", aiopro.missing_hint())
+        with mock.patch.object(Path, "read_text", return_value=CARDS):      # and the reverse
+            self.assertIn("is an AIO Pro", aio.missing_hint())
 
 
 class OldMixTest(unittest.TestCase):
@@ -337,6 +495,149 @@ class OldMixTest(unittest.TestCase):
         mix = m.extract_mix(self.old_state())
         st = m.apply_mix(m.default_state(16), copy.deepcopy(mix))
         self.check_full(st)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
+class PanelTest(unittest.TestCase):
+    """What the settings panel and a strip show (Qt widgets, drawn nowhere)."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def keep(self, widget):
+        """Have the widget deleted when its test is over: one that is still there when the
+        interpreter exits can crash Qt on the way out."""
+        import shiboken6
+        self.addCleanup(shiboken6.delete, widget)
+        return widget
+
+    def panel(self, key="raydat", **hw):
+        from openface_mixer import settings_panel
+        dev = devices.DEVICES[key]
+        st = m.default_state(dev.phones_pair(1))
+        dev.upgrade_settings(st)
+        st["hw"].update(hw)
+        with mock.patch.object(settings_panel.updater, "install_source", return_value=None):
+            return self.keep(settings_panel.SettingsPanel(hardware.Hardware(dev.alsa_card),
+                                                          dev, st))
+
+    @staticmethod
+    def lit(light):
+        return light.ON in light.text()
+
+    def test_clock_light_in_autosync(self):
+        p = self.panel()
+        ctrls = hardware.parse_amixer_contents(AMIXER)
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(ctrls)
+            self.assertEqual(p.rd_combos["clock"].currentText(), "AutoSync")
+            self.assertTrue(self.lit(p.cur_src))               # following ADAT 1
+            self.assertIn("this source", p.cur_src.toolTip())
+            ctrls["ADAT1 SyncCheck"]["value"] = ctrls["ADAT1 SyncCheck"]["values"][0] = 0
+            p.update_hdspe(ctrls)
+            self.assertFalse(self.lit(p.cur_src))              # no input to follow
+            self.assertIn("AutoSync, prefers ADAT 1", p.cur_src.toolTip())
+            ctrls["Clock Mode"]["value"] = ctrls["Clock Mode"]["values"][0] = 0
+            p.update_hdspe(ctrls)
+            self.assertTrue(self.lit(p.cur_src))               # Master
+
+    def test_read_failures(self):
+        p = self.panel()
+        for card, error, ctrls, want in ((None, None, None, "Card not found"),
+                                         (1, "missing", None, "amixer is not installed"),
+                                         (1, "timeout", None, "amixer did not answer"),
+                                         (1, "amixer: no", None, "Can't read settings"),
+                                         (1, None, {}, "Can't read settings")):
+            p.hw.card, p.hw.error = card, error
+            p.update_hdspe(ctrls)
+            self.assertIn(want, p.rate.text())
+        self.assertIn("ALSA controls", p.rate.toolTip())
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(hardware.parse_amixer_contents(AMIXER))
+        self.assertEqual((p.rate.text(), p.rate.toolTip()), ("96 kHz", ""))
+
+    def test_refused_setting_says_why(self):
+        from openface_mixer import settings_panel
+        p = self.panel()
+        said = []
+        p.notice.connect(said.append)
+        for why in ("amixer: Control hw:1 element write error: Device or resource busy",
+                    "missing", "timeout", None):
+            with mock.patch.object(p.hw, "write", return_value=why):
+                p._write("Clock Mode", 1)
+        self.assertEqual(len(said), 3)
+        self.assertIn("playback and recording are open in two programs", said[0])
+        self.assertEqual(said[1:], ["Not changed: amixer is not installed",
+                                    "Not changed: amixer did not answer"])
+        self.assertEqual(settings_panel.write_failure("timeout", devices.DEFAULT, "pactl"),
+                         "Not changed: pactl did not answer")
+        # on other interfaces the reason is the end of what amixer says
+        self.assertEqual(settings_panel.write_failure(
+            "amixer: Control hw:0 element write error: Device or resource busy",
+            devices.DEFAULT), "Not changed: Device or resource busy")
+
+    def test_use_anyway(self):
+        p = self.panel("aio")
+        status = {"hw": "wrong-driver", "hw_nodes": 0, "hw_levels": 0, "processing": True,
+                  "sink_linked": False}
+        p.update_hw_mixer(status)
+        self.assertFalse(p.use_btn.isHidden())
+        self.assertIn("Check driver", p.hw_label.text())
+        self.assertIn("Use anyway", p.status_note.text())
+        changed = []
+        p.hw_changed.connect(lambda: changed.append(1))
+        p.use_btn.click()
+        self.assertEqual((p.st["hw"]["use_anyway"], changed), (True, [1]))
+        p.update_hw_mixer(dict(status, hw="active"))
+        self.assertTrue(p.use_btn.isHidden())
+        p.update_hw_mixer(dict(status, hw="wrong-driver"))
+        p.update_hw_mixer(None)
+        self.assertTrue(p.use_btn.isHidden())
+
+    def test_doubted_driver_turns_settings_off(self):
+        ctrls = hardware.parse_amixer_contents(AMIXER)
+        for anyway in (False, True):
+            p = self.panel(use_anyway=anyway)
+            p.hw.card = 1
+            with mock.patch.object(Path, "read_text", return_value=CARDS), \
+                    mock.patch.object(hardware.Hardware, "pci_vendor",
+                                      return_value=rd.VENDOR_RME):
+                p.update_hdspe(ctrls)
+            self.assertEqual(p.rd_combos["clock"].isEnabled(), anyway)
+            self.assertEqual("Settings are off" in p.rd_info.text(), not anyway)
+
+    def test_card_choice_only_with_several(self):
+        p = self.panel()
+        chosen = []
+        p.card_chosen.connect(lambda: chosen.append(1))
+        with mock.patch.object(Path, "read_text", return_value=CARDS):
+            p.update_hdspe(None)
+        self.assertTrue(p.card_combo.isHidden())
+        p.hw.card = 1
+        with mock.patch.object(Path, "read_text", return_value=TWO_CARDS):
+            p.update_hdspe(None)
+        self.assertFalse(p.card_combo.isHidden())
+        self.assertEqual(p.card_combo.currentText(), "RME RayDAT_1a2b3c")    # the one in use
+        p.card_combo.setCurrentIndex(1)
+        p.card_combo.activated.emit(1)
+        self.assertEqual((p.st["hw"]["card"], p.hw.exact, chosen),
+                         ("RME RayDAT_4d5e6f", "RME RayDAT_4d5e6f", [1]))
+        self.assertTrue(self.panel("aio").card_combo.isHidden())
+
+    def test_limited_readout(self):
+        from openface_mixer import widgets
+        s = self.keep(widgets.Strip("in:0", "AN 1", [0], "in"))
+        plain = s.value.styleSheet(), s.value.toolTip()
+        s.set_limited("Held at +6 dB")
+        self.assertNotEqual(s.value.styleSheet(), plain[0])
+        self.assertEqual(s.value.toolTip(), "Held at +6 dB")
+        s.set_limited("")
+        self.assertEqual((s.value.styleSheet(), s.value.toolTip()), plain)
 
 
 if __name__ == "__main__":

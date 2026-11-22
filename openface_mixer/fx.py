@@ -20,10 +20,13 @@ Playback channels reach the FX unit through mixers 30 (left) and 31 (right) of t
 both: 0x4000 + 0x40 * mixer + 0x20 + playback channel as a register (UCX II 0x47a0/0x47e0).
 
 The settings live in st["hw"]["fx"] in display units (dB, Hz, ms, seconds); commands() turns
-them into raw values. A switched-off effect sends only its switch: its parameter slots are 0
-(unused), so the engine leaves them alone until the effect is switched on again.
+them into raw values. An effect's parameters are sent whether it is on or off, in slots before
+its switch: the engine sends the slots in order, so an effect never starts with settings
+another controller left in the unit.
 """
 import math
+
+from .model import any_solo, is_num
 
 # ------------------------------------------------------------------ parameters
 # (key, scale (raw = value * scale), low, high, default), low/high/default in display units.
@@ -292,7 +295,7 @@ def _fill(cur, base):
         if isinstance(v, bool):
             ok = isinstance(c, bool)
         elif isinstance(v, (int, float)):
-            ok = isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c)
+            ok = is_num(c)
         else:
             ok = isinstance(c, type(v))
         if not ok:
@@ -303,7 +306,17 @@ def _fill(cur, base):
 def _levels(cur, n):
     if not isinstance(cur, list) or len(cur) != n:
         return [None] * n
-    return [v if isinstance(v, (int, float)) and not isinstance(v, bool) else None for v in cur]
+    return [v if is_num(v) else None for v in cur]
+
+
+def _hold(cur, params, prefix=""):
+    """Keep cur's values inside their parameters' ranges, and whole-number ones (list choices
+    such as a filter type, Hz, ms) whole: a damaged or hand-edited 1.5 or 99 would otherwise
+    reach a combo box and its panel could not open."""
+    for key, _scale, lo, hi, _default in params:
+        v = max(lo, min(hi, cur[prefix + key]))
+        cur[prefix + key] = round(v) if isinstance(lo, int) else float(v)
+    return cur
 
 
 def upgrade_settings(fx, m):
@@ -316,16 +329,23 @@ def upgrade_settings(fx, m):
         if not isinstance(cur, list) or len(cur) != n:
             cur = base[kind]
         fx[kind] = [_fill(c, b) for c, b in zip(cur, base[kind])]
+        for ch in fx[kind]:
+            for section in STRIP_SECTIONS:
+                _hold(ch, m.params(section), section[0] + "_")
     send = fx.get("send") if isinstance(fx.get("send"), dict) else {}
     fx["send"] = {k: _levels(send.get(k), len(v)) for k, v in base["send"].items()}
     fx["ret"] = _levels(fx.get("ret"), m.n_out)
-    for unit in ("reverb", "echo"):
-        fx[unit] = _fill(fx.get(unit), base[unit])
+    for section in (REVERB, ECHO):
+        unit = section[0]
+        fx[unit] = _hold(_fill(fx.get(unit), base[unit]), m.params(section))
     if m.room_eq:
         cur = fx.get("room")
         if not isinstance(cur, list) or len(cur) != m.n_out:
             cur = base["room"]
-        fx["room"] = [_fill(c, b) for c, b in zip(cur, base["room"])]
+        params = [ROOM_DELAY, VOLUME_CAL] + [(key, *room_param(m, key))
+                                             for b in range(1, ROOM_BANDS + 1)
+                                             for key in room_band_keys(b)]
+        fx["room"] = [_hold(_fill(c, b), params) for c, b in zip(cur, base["room"])]
     return fx
 
 
@@ -354,37 +374,33 @@ def mixer_gain(db, usb):
 
 
 def _strip_words(m, ch_id, ch):
+    """Each effect's parameters, then its switch (register 0 of the effect)."""
     words = []
     for section in STRIP_SECTIONS:
         name = section[0]
-        on = bool(ch[name])
-        words.append(m.strip_word(ch_id, name, 0, on))
         for i, (key, scale, lo, hi, _) in enumerate(m.params(section)):
             words.append(m.strip_word(ch_id, name, i + 1,
-                                      raw_value(ch[f"{name}_{key}"], scale, lo, hi)) if on else 0)
+                                      raw_value(ch[f"{name}_{key}"], scale, lo, hi)))
+        words.append(m.strip_word(ch_id, name, 0, bool(ch[name])))
     return words
 
 
 def _unit_words(m, section, unit):
-    on = bool(unit["on"])
-    words = [m.fx_word(section[0], 0, on)]
-    for i, (key, scale, lo, hi, _) in enumerate(m.params(section)):
-        words.append(m.fx_word(section[0], i + 1, raw_value(unit[key], scale, lo, hi))
-                     if on else 0)
-    return words
+    words = [m.fx_word(section[0], i + 1, raw_value(unit[key], scale, lo, hi))
+             for i, (key, scale, lo, hi, _) in enumerate(m.params(section))]
+    return words + [m.fx_word(section[0], 0, bool(unit["on"]))]
 
 
 def _room_words(m, out, room):
-    on = bool(room["on"])
     _, scale, lo, hi, _ = ROOM_DELAY
-    words = [m.room_word(out, 0, raw_value(room["delay"], scale, lo, hi)),
-             m.room_word(out, 1, on)]
+    words = [m.room_word(out, 0, raw_value(room["delay"], scale, lo, hi))]
     i = 2
     for b in range(1, ROOM_BANDS + 1):
         for key in room_band_keys(b):
             scale, lo, hi, _ = room_param(m, key)
-            words.append(m.room_word(out, i, raw_value(room[key], scale, lo, hi)) if on else 0)
+            words.append(m.room_word(out, i, raw_value(room[key], scale, lo, hi)))
             i += 1
+    words.append(m.room_word(out, 1, bool(room["on"])))
     _, scale, lo, hi, _ = VOLUME_CAL
     words.append(m.volcal_word(out, raw_value(room["volcal"], scale, lo, hi)))
     return words
@@ -398,24 +414,47 @@ def play_send_word(mixer, p, gain):
     return 0x40000000 | ((0x40 * mixer + PLAY_SOURCE + p) << 16) | (gain & 0xFFFF)
 
 
-def commands(fx, m, play_stereo=None, usb=False):
-    """All effect commands for fx (st["hw"]["fx"]), in a fixed slot order: 0 is an unused slot.
+def effect_channels(kind, channels):
+    """The channels of a strip that hold its effects, which its buttons and panels show and
+    edit. A linked input or playback pair runs on its left channel's effects (commands()); the
+    right channel's own stay stored for when the pair is unlinked. An output pair has one set
+    of effects, kept on both channels."""
+    return channels if kind == "out" else channels[:1]
 
-    play_stereo: the stereo flags of the playback pairs (st["stereo"]["play"]). A linked pair
-    sends its left channel to the FX unit's left input and its right channel to the right, as
-    TotalMix does; a mono playback channel goes to both."""
+
+def commands(fx, m, st=None, usb=False):
+    """All effect commands for fx (st["hw"]["fx"]), in a fixed slot order.
+
+    st: the mixer state, for what depends on the mix (None: nothing linked, muted or soloed).
+    A linked input or playback pair gets its left channel's effects and FX send on both
+    channels. A linked playback pair sends its left channel to the FX unit's left input and
+    its right channel to the right, as TotalMix does; a mono playback channel goes to both.
+    A muted channel, and one left out because another is soloed, sends nothing to the FX unit."""
+    soloing = bool(st) and any_solo(st)
+
+    def linked(kind, c):
+        return bool(st) and bool(st["stereo"][kind][c // 2])
+
+    def own(kind, c):
+        return c - 1 if c % 2 and linked(kind, c) else c
+
+    def send(kind, c):
+        if st and (st["mute"][kind][c] or (soloing and not st["solo"][kind][c])):
+            return None
+        return fx["send"][kind][own(kind, c)]
+
     words = []
     for c in range(m.n_in):
-        words += _strip_words(m, c, fx["in"][c])
+        words += _strip_words(m, c, fx["in"][own("in", c)])
     for c in range(m.n_out):
         words += _strip_words(m, m.out_offset + c, fx["out"][c])
     for c in range(m.n_in):
-        words.append(m.in_send_word(c, level_raw(fx["send"]["in"][c])))
+        words.append(m.in_send_word(c, level_raw(send("in", c))))
     for p in range(m.n_play):
-        linked = bool(play_stereo and p // 2 < len(play_stereo) and play_stereo[p // 2])
-        g = mixer_gain(fx["send"]["play"][p], usb)
+        g = mixer_gain(send("play", p), usb)
         for side, mixer in enumerate(FX_MIXERS):
-            words.append(play_send_word(mixer, p, g if not linked or p % 2 == side else 0))
+            words.append(play_send_word(mixer, p,
+                                        g if not linked("play", p) or p % 2 == side else 0))
     for c in range(m.n_out):
         words.append(m.out_return_word(c, level_raw(fx["ret"][c])))
     words += _unit_words(m, REVERB, fx["reverb"])

@@ -15,7 +15,8 @@ process, shared memory and config files, so several can run at once.
         ▼                           │
  openface-mixer-engine (C) ──libusb, interface 1──▶ Digiface DSP mixer (2048 nodes, output faders)
         │                  ◀──level meters (EP 0x84)──
-        └─ "Openface Mixer Playback" sink ──PipeWire link──▶ Digiface playback 1/2
+        └─ desktop sinks and sources ──PipeWire links──▶ Digiface playback and input channels
+           (sinks.conf, written by the GUI; by default "Openface Mixer Playback" on playback 1/2)
 ```
 
 ## Engine (`engine/openface-mixer-engine.c`)
@@ -35,19 +36,54 @@ the engine is the same for all of them.
 - Every 500 ms it reads the device status: the sample rate goes to the GUI (which adapts the
   channel count to 1x/2x/4x speed), and if the driver has reset the mixer (replug, resume) the
   whole mix is restored.
-- A meter thread reads the level endpoint every 10 ms and raises the shared-memory peaks.
-- It loads `libpipewire-module-loopback` to create the **Openface Mixer Playback** sink and links
-  it to the Digiface's `playback_AUX0/1` (matched by node name prefix
-  `alsa_output.usb-RME_Digiface_USB`; the HDSPe cards and USB Firefaces by their ALSA card name), re-linking on
-  hotplug or profile changes. No audio passes through the engine itself.
+- A meter thread reads the device's levels and raises the shared-memory peaks: every 10 ms
+  on the Digiface (`meter_us`; 20 or 30 ms on the others) while a GUI reads them, which the engine
+  sees by the `gui_heartbeat` word the GUI counts up with every meter read. Half a second after
+  the last read it drops to `meter_idle_us`, once a second, only so that `hw_levels` stays
+  true (the USB Firefaces ten times a second: their meter request also keeps the device's
+  MIDI port awake). The first read of a GUI that comes back wakes the thread at the next tick.
+- It loads one `libpipewire-module-loopback` per desktop sink or source in the device's
+  `sinks.conf` (by default only the **Openface Mixer Playback** sink, on the driver's first two
+  playback channels) and links each to the interface's Pro Audio ports: a sink's two outputs to
+  `playback_AUXn`, a source's input or inputs from `capture_AUXn`, where n is the channel's
+  place among the driver's PCM channels at the current speed. The GUI works those out
+  (`sinks.py`; they differ from the mixer's channel numbers on the RayDAT and the AIO), so a
+  line of the file is `sink|source NODE.NAME L1 R1 L2 R2 L4 R4 description`, with -1 where the
+  interface lacks the channel at that speed: the engine leaves that one out there and makes it
+  again at a rate that has it. The interface's nodes are matched by node name prefix
+  (`alsa_output.usb-RME_Digiface_USB`, `alsa_input.` for capture; the HDSPe cards and USB
+  Firefaces by their ALSA card name, the FireWire Firefaces by the unit's GUID in the node
+  name), re-linking on hotplug or profile changes. The GUI writes the file when the list
+  changes and counts up `pw_reload`; the engine reads it again, keeps the modules whose line
+  did not change and makes or removes the others. A missing or damaged file means the default
+  sink, as before the list. No audio passes through the engine itself.
 - It runs as a systemd **user service**: `openface-mixer-engine` for the Digiface,
-  `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. At startup it loads the
+  `openface-mixer-engine@KEY` (`@ff802`, `@raydat` and so on) for the others. The GUI starts the
+  service of the device it opens and enables it for every login once the engine reports the
+  interface as active (`Engine.enable`), so no engine or sink runs for hardware that was never
+  connected. The units start after PipeWire (`After=`) but neither need nor start it (no
+  `Requires=` or `Wants=`, so a JACK-only setup keeps PipeWire off), and are enabled for
+  `default.target`, so the hardware mixer comes up at login without PipeWire too; `install.sh` moves the links an older install made under
+  `pipewire.service.wants`. At startup it loads the
   device's `matrix.bin` (gain matrix, output gains and device settings), which the GUI keeps up
-  to date; files from before the 36-channel layout are moved into place. When it exits, the
-  interface keeps mixing with the last mix.
+  to date; files from before the 36-channel layout are moved into place. A file it does not
+  recognise (another format, cut short, or with anything left over) is ignored as a whole
+  (`matrix_file.c`): the engine logs that and starts with the default routing, playback n to
+  output n, as on a fresh install. When it exits, the interface keeps mixing with the last mix.
+- One engine runs per device and user: it holds a lock (`flock`) on the device's shared-memory
+  file for as long as it lives, so the kernel drops the lock however the engine ends. A second
+  engine waits a second for the first to go, then says so in one line and exits with status 3,
+  which the units list under `RestartPreventExitStatus`.
+- PipeWire is optional: without it the engine runs the hardware mixer, meters and status as
+  usual, says once that PipeWire is not running and tries to connect again every second
+  (`pw_tick`, on the 20 ms timer). When PipeWire goes away the engine drops its sinks, sources,
+  links and connection and goes on the same way. Once PipeWire is back it connects in the same
+  process and makes the sinks and sources again; the device stays open and the mix is not sent
+  again. `pw_connected`, `pw_nodes` and `pw_linked` in the shared memory tell the GUI.
 - The Fireface 802 can't report its DSP state, so on every (re)connect the engine sends the whole
-  mix and all settings, about 2,300 transactions (over USB, the same as register writes, spread
-  over the ticks the MIDI output buffer needs). The 800 takes its mixer as one block write
+  mix and all settings, about 3,700 transactions, 10 ms of them per tick so the meters and the
+  heartbeat keep running (over USB, the same as register writes, spread over the ticks the MIDI
+  output buffer needs). The 800 takes its mixer as one block write
   per output, so a full send is about 60 transactions.
 
 ## Shared memory (`engine/shm_layout.h`)
@@ -61,13 +97,17 @@ the AES 0–17 and 0–15; the UCX II 0–19; the AIO the card's own numbers up 
 
 | Field | Writer | Meaning |
 | --- | --- | --- |
-| header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, playback sink linked |
+| header (64 bytes) | engine | magic `OFMX`, version, heartbeat, sample rate, pid, desktop sinks and sources all linked |
+| `gui_heartbeat` (header) | GUI | counted up with every meter read; while it moves, the engine reads the device's meters at full rate |
 | `hw_state`, `hw_nodes`, `hw_levels` | engine | hardware mixer status, routes in use, meters live |
 | `gain[36][72]` | GUI | linear send gains, with pan, source mute and solo folded in |
 | `out_gain[36]` | GUI | output master per channel, 0 when muted |
 | `peak_src[72]`, `peak_out[36]` | engine raises, GUI zeroes | max-hold peak meters |
+| `rms_src`, `rms_out`, `over_src`, `over_out` (after `dev_cmd`) | engine raises, GUI zeroes | RMS levels where the device reports them (Digiface, USB Firefaces; HDSPe inputs and playback), and full-scale samples in a row where it counts them (HDSPe) |
 | `dev_status`, `dev_status2` (header) | engine | device status (802: sync status register; 800: its two status quadlets) |
 | `dev_config`, `dev_cmd[4096]` | GUI | 802 configuration register and setting commands (0 = unused); 800: `dev_cmd[0..2]` are the configuration quadlets, sent while `dev_config` is 1 |
+| `pw_reload` | GUI | counted up after the GUI writes `sinks.conf`; the engine reads it again |
+| `pw_connected`, `pw_nodes`, `pw_linked` | engine | connected to PipeWire; desktop sinks and sources made at this rate; how many of them are linked |
 
 No locks are used: 32-bit float stores are atomic on the supported platforms, and a torn meter
 reset costs at most one missed peak. The engine never blocks on the GUI.
@@ -79,45 +119,105 @@ app.MainWindow
  ├─ model.py        state dict  ──compute_matrix()──▶ engine.write_matrix()
  ├─ presets.py      PresetBank (8 slots) + mix file import/export
  ├─ widgets.py      Strip = name tag + Knob + S/M/ST buttons + Fader + Meter + readouts
+ │                  Row = a title that folds the row + its Strips + the effects panels open in it
  ├─ matrix_view.py  grid editor for the same sends
  ├─ fx.py / fx_panels.py  TotalMix FX effects (802, UCX II): model and commands / EQ, D, FX panels
  ├─ settings_panel  hardware.Hardware (amixer)  /  hardware.pw_digiface_card (pactl)
+ │                  hardware.pw_clock, set_pw_clock (pw-metadata: PipeWire's rate and buffer)
+ ├─ sinks.py        the desktop sinks and sources (no Qt) ──config.save_sinks()──▶ sinks.conf
  ├─ remote_link.py  RemoteLink (UDP socket) ⇄ osc_remote.py (TotalMix Global OSC, no Qt)
- └─ config.py       state.json / matrix.bin / presets.json
+ ├─ commands.py     lines a second start sends on the window's local socket (app.serve)
+ ├─ tray_icon.py    Tray (QSystemTrayIcon) ⇄ tray.py (when it shows, menu, state; no Qt)
+ └─ config.py       state.json / matrix.bin / presets.json / sinks.conf
 ```
 
 ### The mixer model
 
-- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked.
+- **Sources** are mono channels (`in` 0–35, `play` 0–35). Adjacent pairs can be stereo-linked
+  (`model.set_stereo`): the pair then has one strip, and the right channel takes the left one's
+  level and mute. What the two channels had on their own (sends, mutes, the right channel's
+  fader group) is kept in `state["unlinked"]`, which is part of the mix, and comes back on
+  unlink; the right channel's name, colour, icon and effect settings simply stay stored. A
+  submix whose level or balance was changed while linked, and a pair with nothing kept, unlink
+  as in TotalMix: both channels at the pair's level, panned hard left and right.
 - **Outputs** are stereo pairs (0–17; on the Digiface pair 16 = phones at single speed).
 - The device decides which channels exist at the current rate and their names
   (`Device.channels()`, `chan_label()`, `pair_label()`); the window only builds strips for those.
 - **Device settings** (Firefaces) live in `state["hw"]`. `fireface802.commands()` (and
   `ucx2.usb_commands()`) turns them into the DSP command list the engine sends, in a fixed slot
   order so only changed slots go out; `fireface800.config_words()` (and `fireface400`'s) into the
-  three configuration quadlets, which are written only after the first status read has filled in
-  the options the device reports. On the 802 and UCX II the command list ends with the TotalMix FX effects
+  three configuration quadlets. Over FireWire the configuration holds the clock source and is
+  write only, so the GUI shows what the unit's status reports and sends no configuration until
+  the user changes a setting (`config_ready()` in the protocol modules, `follow_unit()` in
+  `app.py`): connecting never changes the unit's clock. On the 802 and UCX II the command list ends with the TotalMix FX effects
   (`fx.commands()`: channel strip effects, FX sends and returns, reverb, echo, Room EQ), whose
-  parameters stay 0 (unused slots) while their effect is off. The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
-  and written live. The settings panel picks its layout by `Device.family` ("latter", "former",
+  parameters sit in the slots before their effect's switch and are sent whether it is on or off, so
+  an effect never starts with settings another controller left in the unit. The effects follow
+  the mix: a muted channel, or one left out by a solo, has its FX send off, and a linked pair
+  gets its left channel's effects on both channels (the right channel's own stay stored). The HDSPe cards' settings are ALSA controls (`hdspe.py`), read
+  and written live; what is stored is the "Use anyway" answer to the driver warning, which
+  reaches the engine as a non-zero configuration word, and the card picked among several of a
+  model, whose name is a string in the command slots (the backend's `attach()` gives it the
+  shared memory to look at when it opens the card). The settings panel picks its layout by `Device.family` ("latter", "former",
   "hdspe").
 - `sends[kind][channel][pair] = [gain_dB | None, pan]` holds the TotalMix-style submixes. The
   faders show the sends into the selected pair (`state["selected"]`).
-- Pan uses a balance law: at centre both sides get full level. A mono source is panned across the
-  pair; in a linked stereo pair, left goes to left and right goes to right.
+- A mono source is panned across the pair with constant power, as in TotalMix: full level at
+  either end and 3 dB down on both sides at the centre (`model.pan_gains`). In a linked stereo
+  pair, left goes to left and right goes to right, and pan is their balance: full level on both
+  sides at the centre. Until state version 5 mono sources used the balance law too. States,
+  presets and mix files from then (`presets.json` and mix files: version 1) are converted when
+  they are read, so they sound as they did (`model.convert_pan_law`); the one thing that can't be
+  kept is a level above the fader's +6 dB, which is held there.
 - **Solo** (`state["solo"]`) is TotalMix's solo-in-place: while any source is soloed, the
   unsoloed ones are left out of the *selected* output pair only, so it follows the submix you
   are editing. Solo is never saved (`save_state` drops it, `matrix.bin` is written without it,
-  `upgrade_state` clears it) and is not part of a mix. The top bar's SOLO button clears all
-  solos and brings the same set back on the next click.
+  `upgrade_state` clears it) and is not part of a mix. Only a channel with a strip can be
+  soloed: whenever the strips are rebuilt (a strip or channel group hidden, a recall, another
+  sample rate), `MainWindow.solo_as_shown` switches solo off for every channel without one,
+  so nothing out of sight can silence a submix.
 - `compute_matrix()` folds sends, pan, source mutes and solo into the 36×72 gain matrix;
   `compute_out_gains()` gives the output masters, which map to the DSP's own output faders.
 - **Fader groups** live in `state["groups"]` as `{strip_key: 1..4}`. Moving a grouped fader
   applies the same dB change to the other members (`model.group_follow`). −∞ counts as the
   fader floor (−80 dB), so a group can go all the way down and come back up together.
-- **Presets** store `extract_mix(state)`: stereo links, mutes, sends, output levels and groups.
+- **Mute and solo groups** (TotalMix's, 4 of each). `state["mute_groups"]` holds per group
+  whether it is on and its sends as `[strip_key, pair]`: a mute group mutes a channel in one
+  submix only, and `compute_matrix()` leaves those sends out while the group is on.
+  `state["solo_groups"]` is `{strip_key: 1..4}`; a solo group button just sets the solo of its
+  channels, so solo itself is unchanged.
+- **Mirror** (`state["mirror"]`, `{"out:3": 1}`): the pair plays the other pair's submix and
+  follows it, with its own output level. `model.submix_of()` gives the pair whose sends a pair
+  plays; the faders, the matrix view and the remote edit that one. Copy, paste and clear of a
+  submix or of a channel's sends (`copy_mix`, `paste_mix`, `copy_sends`, ...) also change what
+  a linked pair keeps for unlinking, and the window applies them through `replace_mix`, so
+  *Restore previous mix* takes them back.
+- **Trim** (`state["trim"]`, saved, not part of a mix): a source fader moves every send of its
+  channel that is on by the same dB (`model.trim_sends`), between -80 and +6 dB. A drag that
+  starts at -∞ switches on the send in the selected submix only, so it can't lift the others.
+- **Cue** is the window's `cue` (an output pair or None), never saved: `control_room.apply()`
+  copies that pair's rows of the matrix over Main Out's before Mono, Speaker B, Dim and Talkback.
+- **Presets** store `extract_mix(state)`: stereo links and what they keep for unlinking, mutes,
+  sends, output levels, mirrors and the fader, mute and solo groups.
   UI state such as the selected output and active tab is not stored, and neither are device
   settings, as in TotalMix's snapshots.
+- **Files are checked before they are used.** `model.checked_mix()` copies a mix into today's
+  shape and raises `ValueError` if any part of it is damaged; presets, imported mixes and
+  `apply_mix()` all go through it, so a damaged file is refused whole and the live mix is never
+  left half-changed. `config.load_state()` reads `state.json` the same strict way, falls back
+  to `state.json.bak` (the save before it, kept by `atomic_write`), and only then repairs what
+  it can; the window says once which of the two happened. Everything outside the mix (names,
+  control room, remote, device and effect settings) is put back to its default where its type
+  or range is wrong, so no file can stop the window from opening. The desktop sinks and sources
+  (`state["sinks"]`, not part of a mix) go through `sinks.checked()`: an entry that is damaged,
+  on channels the interface never has or on a channel an earlier one has is left out, and a
+  list that is not a list becomes the default. A preset slot that is
+  damaged shows as empty; the next save keeps that `presets.json` as `presets.json.bak`.
+- **Replacing the mix** (recall, import, reset, restore) goes through `MainWindow.replace_mix`,
+  which first writes the outgoing mix to `previous-mix.json` (one file, overwritten each time)
+  for *Restore previous mix*, then clears the sends and fader groups of channels the device
+  doesn't have at any sample rate (`model.clear_sends_outside`, also run when the state is
+  loaded).
 
 ### Updating flow
 
@@ -126,5 +226,14 @@ app.MainWindow
 3. `push_matrix()` recomputes the matrix, writes it to shared memory, and schedules a debounced
    save of `state.json` and `matrix.bin`.
 4. Timers poll the meters (30 Hz), engine status (2 Hz), ALSA controls (1 Hz) and the
-   PipeWire profile (every 3 s).
-5. Selecting another output pair re-pushes the matrix while anything is soloed.
+   PipeWire profile (every 3 s) while the window is shown (`MainWindow.pace_timers`). Hidden
+   in the background, only the engine status is polled, every 2 s: the ARC and the network
+   remote follow the interface through it. The meters are read 10 times a second if an OSC
+   controller or the Send to host gets levels, and not at all otherwise. Showing the window
+   polls everything once at that moment. The OSC and ARC links run on their own timers,
+   shown or not.
+5. Nothing sleeps on the interface thread: the engine is started and restarted through
+   timers (`start_engine`, `restart_engine`), `poll_engine` sends the mix to an engine that
+   has just come up, and the name of the Send to host is looked up on a thread
+   (`RemoteLink.set_target`).
+6. Selecting another output pair re-pushes the matrix while anything is soloed.

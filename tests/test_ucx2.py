@@ -1,6 +1,6 @@
 import unittest
 
-from openface_mixer import config, devices, model as m, ucx2
+from openface_mixer import config, devices, fireface802 as ff802, model as m, ucx2
 
 
 class CommandTest(unittest.TestCase):
@@ -20,6 +20,30 @@ class CommandTest(unittest.TestCase):
                      0x0503FD76, 0x34010000, 0x05020000, 0x004F0000):
             self.assertIn(word, cmds, hex(word))
         self.assertLessEqual(len(cmds), config.N_DEV_CMD)   # the engine's dev_cmd slots
+
+    def test_no_command_is_an_empty_slot(self):
+        """The engine skips a 0 word. Input 1's mute, register 0 = 0, is sent with its parity
+        bit (which the engine puts on the wire in any case) so that it goes out too."""
+        cmds = ucx2.usb_commands(ucx2.default_settings())
+        self.assertNotIn(0, cmds)
+        self.assertEqual(len(cmds), len(set(cmds)))
+        self.assertIn(0x80000000, cmds)                     # AN 1 mute off
+        self.assertIn(0x00400000, cmds)                     # AN 2: odd parity as it is
+        for c in range(ucx2.N_IN):
+            word = c << 6 << 16                             # mute off, as it was sent before
+            self.assertIn(ff802.with_parity(word), cmds, hex(word))
+        # the engine's ff802_parity() drops bit 31 and sets it again: the same on the wire
+        self.assertEqual(ff802.with_parity(0x80000000), ff802.with_parity(0))
+
+    def test_the_inst_rule_is_the_802s(self):
+        """The 802 drops a stored 48V where Inst is on. The UCX II has no Inst: a stray key in
+        its state must not switch AN 1/2's 48V off."""
+        s = ucx2.default_settings()
+        s["in"]["p48"] = [True, True]
+        s["in"]["inst"] = [True, True]
+        self.assertEqual(ucx2.upgrade_settings(s)["in"]["p48"], [True, True])
+        s["in"]["inst"] = 1
+        self.assertEqual(ucx2.upgrade_settings(s)["in"]["p48"], [True, True])
 
     def test_status(self):
         st = ucx2.decode_usb_status(0x80000000 | 5 << 8 | 4)
@@ -45,6 +69,18 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(cfg, 0)
         self.assertIn(0x307B0000, cmds)
         self.assertIn("Class Compliant", dev.missing_hint())
+
+    def test_damaged_settings_go_back_to_their_defaults(self):
+        s = ucx2.default_settings()
+        s.update(clock={}, spdif_pro=None)
+        s["in"].update(gain=["x"] + [9.5] * 7, level=[1.5, 1] + [0] * 4, hiz=[0, True])
+        s["out"]["level"] = [2, None] + [0] * 6
+        s = ucx2.upgrade_settings(s)
+        self.assertEqual((s["clock"], s["spdif_pro"]), ("internal", False))
+        self.assertEqual(s["in"]["gain"], [0.0] + [9.5] * 7)
+        self.assertEqual((s["in"]["level"][:2], s["in"]["hiz"]), ([0, 1], [False, True]))
+        self.assertEqual(s["out"]["level"][:2], [2, 0])
+        ucx2.usb_commands(s)                # what the damaged values used to break
 
 
 if __name__ == "__main__":

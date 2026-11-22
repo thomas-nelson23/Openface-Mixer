@@ -23,6 +23,7 @@ Channel layout (the same numbering for meters and the mixer):
 """
 
 from . import fx as fxmod
+from .model import same_kind
 
 N_LINE_IN, N_MIC_IN, N_AES, N_ADAT = 8, 4, 2, 16
 N_LINE_OUT, N_PHONES_OUT = 8, 4
@@ -64,6 +65,8 @@ CLOCK_SOURCES = (                       # (key, label, config bits), TotalMix's 
     ("adat_a", "ADAT A", 0x00000C00),
     ("adat_b", "ADAT B", 0x00001000),
 )
+
+CONFIG_KEYS = ("clock", "aes_in", "opt_out", "aes_pro", "word_single")   # config_word()'s
 
 OPTION_ROWS = (                 # settings panel: (label, key, ((text, value), ...))
     ("AES input", "aes_in", (("XLR", "xlr"), ("Optical (ADAT B)", "optical"))),
@@ -144,7 +147,9 @@ def pair_label(kind, c):
 def default_settings():
     """Hardware settings as TotalMix shows them (settings dialog and channel settings)."""
     return {
-        "clock": "internal",
+        "known": False,           # FireWire: True once the clock was read from the unit's status
+        "edited": False,          # FireWire: True once a clock or option setting was changed here
+        "clock": "internal",      # None: the unit reports a source we don't know
         "aes_in": "xlr",          # or "optical" (AES/S/PDIF in from the second optical port)
         "opt_out": "adat",        # or "spdif" (S/PDIF out on the optical port)
         "aes_pro": False,         # AES/S/PDIF output channel status: professional
@@ -165,9 +170,15 @@ def default_settings():
 
 
 def upgrade_settings(s, base=None, fx_model=FX):
+    """s completed from base. A value of the wrong kind (a damaged or hand-edited state file)
+    goes back to its default, so no command or panel is handed something it can't use."""
     base = base or default_settings()
     if not isinstance(s, dict):
         return base
+    if "edited" in base and "edited" not in s:
+        # states from before the configuration was held back: it was sent on every connect, so
+        # it stays the user's if any of it was ever changed
+        s["known"] = s["edited"] = any(k in s and s[k] != base[k] for k in CONFIG_KEYS)
     for k, v in base.items():
         if k == "fx":
             s[k] = fxmod.upgrade_settings(s.get(k), fx_model)
@@ -175,11 +186,27 @@ def upgrade_settings(s, base=None, fx_model=FX):
             part = s.get(k) if isinstance(s.get(k), dict) else {}
             for kk, vv in v.items():
                 cur = part.get(kk)
-                part[kk] = cur if isinstance(cur, list) and len(cur) == len(vv) else vv
+                if not isinstance(cur, list) or len(cur) != len(vv):
+                    cur = vv
+                # a level is a place in a list of choices: a whole number, not below 0
+                part[kk] = [c if same_kind(c, d) and (kk != "level" or type(c) is int and c >= 0)
+                            else d for c, d in zip(cur, vv)]
             s[k] = part
-        else:
-            s.setdefault(k, v)
+        elif not same_kind(s.get(k), v) and not (k == "clock" and "edited" in base
+                                                 and k in s and s[k] is None):
+            s[k] = v            # FireWire: a clock of None (unknown source) is kept
+    if "inst" in base["in"]:        # states from before set_inst() may hold Inst and 48V
+        s["in"]["p48"] = [p and not inst for p, inst in zip(s["in"]["p48"], s["in"]["inst"])]
     return s
+
+
+def set_inst(s, mics, on):
+    """Inst on AN 9-12 (mics: 0-3). Switching it on switches 48V off, as on the unit, and
+    clears the stored 48V so phantom power can't come back when Inst is switched off."""
+    for m in mics:
+        s["in"]["inst"][m] = on
+        if on:
+            s["in"]["p48"][m] = False
 
 
 def phys_cmd(ch, cmd, value):
@@ -196,10 +223,10 @@ def with_parity(word):
     return word if bin(word).count("1") % 2 else word | 0x80000000
 
 
-def commands(s, play_stereo=None, usb=False):
+def commands(s, st=None, usb=False):
     """All DSP setting commands for settings s, in the order they are sent: the channel
     settings, then the effects (fx.commands: channel strip effects, FX sends and returns, reverb
-    and echo). play_stereo: the playback pairs' stereo flags, for the playback FX sends."""
+    and echo). st: the mixer state, for the stereo links, mutes and solos the effects follow."""
     cmds = []
     i, o = s["in"], s["out"]
     for c in range(N_PHYS_IN):
@@ -211,30 +238,49 @@ def commands(s, play_stereo=None, usb=False):
     for m in range(N_MIC_IN):
         ch = N_LINE_IN + m
         cmds.append(phys_cmd(ch, IN_MIC_INST, i["inst"][m]))
-        # Inst switches phantom power off, as on the unit
+        # never 48V with Inst (set_inst() clears it; this guards a state that holds both)
         cmds.append(phys_cmd(ch, IN_MIC_POWER, i["p48"][m] and not i["inst"][m]))
     for c in range(N_PHYS_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_PHASE, o["phase"][c]))
     for c in range(N_LINE_OUT):
         cmds.append(phys_cmd(OUT_CH_OFFSET + c, OUT_LINE_LEVEL, o["level"][c]))
-    return cmds + fxmod.commands(s["fx"], FX, play_stereo, usb)
+    return cmds + fxmod.commands(s["fx"], FX, st, usb)
 
 
 def reg_cmd(reg, value):
     return (reg << 16) | (int(value) & 0xFFFF)
 
 
-def usb_commands(s, play_stereo=None):
+def usb_commands(s, st=None):
     """commands(s), plus the clock and option registers that FireWire sets with config_word()."""
     keys = [k for k, _, _ in CLOCK_SOURCES]
     clock = keys.index(s["clock"]) if s["clock"] in keys else 0
-    return commands(s, play_stereo, usb=True) + [
+    return commands(s, st, usb=True) + [
         reg_cmd(USB_REG_CLOCK, clock),
         reg_cmd(USB_REG_WORD_SINGLE, s["word_single"]),
         reg_cmd(USB_REG_OPT_IN_SPDIF, s["aes_in"] == "optical"),
         reg_cmd(USB_REG_AES_PRO, s["aes_pro"]),
         reg_cmd(USB_REG_OPT_OUT_SPDIF, s["opt_out"] == "spdif"),
     ]
+
+
+def settings_from_status(s, status):
+    """Take the clock source the unit runs from (sync status register) into s and mark it
+    known. The register does not report the options. An input counts as the source only while
+    it has lock: the unit can't run from one that has none, and the kernel driver and
+    snd-firewire-ctl-services give ADAT A and B each other's source codes (not lock bits)."""
+    source = STATUS_SOURCES.get(status & 0xE00)
+    lock = {label: bit for label, bit, _sync, _shift in STATUS_INPUTS}.get(source)
+    keys = {label: key for key, label, _ in CLOCK_SOURCES}
+    s["clock"] = keys.get(source) if lock is None or status & lock else None
+    s["known"] = True
+
+
+def config_ready(s):
+    """False while the configuration register is left alone. It is write only and holds the
+    clock source and the options together, so it is sent only once the clock has been read from
+    the unit and the user has changed a setting: connecting never changes the unit's clock."""
+    return bool(s["known"] and s["edited"] and s["clock"])
 
 
 def config_word(s):

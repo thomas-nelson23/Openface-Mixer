@@ -4,8 +4,10 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import QProcess, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut,
+)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -14,12 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 from . import APP_ID, APP_NAME
-from . import arc, control_room, fx, osc_remote
+from . import arc, commands, control_room, fx, hdspe, osc_remote, sinks, tray
 from .channel_settings import ChannelSettings
 from .fx_panels import DynamicsPanel, EqPanel, FxUnitPanel, RoomEqPanel
 from .config import (
-    device_block, load_device_choice, load_state, load_ui_scale, load_window, presets_file,
-    save_device_choice, save_state, save_ui_scale, save_window,
+    device_block, load_device_choice, load_state, load_ui, load_ui_scale, load_window,
+    presets_file, previous_mix_file, save_device_choice, save_sinks, save_state, save_ui,
+    save_ui_scale, save_window,
 )
 from .control_panel import ArcLink, ControlRoomPanel
 from .devices import DEVICES, detect
@@ -27,31 +30,47 @@ from .engine import Engine
 from .hardware import Hardware, pw_digiface_card
 from .matrix_view import MatrixView
 from .model import (
-    N_GROUPS, N_IN, N_PAIRS, N_SLOTS, NEG_INF, any_solo, apply_mix, compute_matrix,
-    compute_out_gains, default_state, display_name, extract_mix, get_strip_db, group_follow,
-    set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode, strip_channels,
-    strip_color, strip_hidden, strip_icon, strip_key,
+    N_GROUPS, N_IN, N_SLOTS, N_SRC, NEG_INF, any_solo, apply_layout, apply_mix, clear_sends,
+    clear_sends_outside, compute_matrix, compute_out_gains, copy_mix, copy_sends, default_state,
+    display_name, extract_layout, extract_mix, get_strip_db, group_follow, group_members,
+    mute_group, parse_key, paste_mix, paste_sends, remove_mirror, set_mirror, set_mute_group,
+    set_stereo, set_strip_color, set_strip_db, set_strip_hidden, set_strip_icon, speed_mode,
+    strip_channels, strip_color, strip_hidden, strip_icon, strip_key, submix_of, trim_sends,
 )
-from .presets import PresetBank, export_mix, import_mix
-from .remote_link import RemoteLink, RemotePanel, remote_settings
-from .settings_panel import SettingsPanel, Sidebar, ask
+from .presets import PresetBank, export_mix, export_workspace, import_mix, import_workspace
+from .remote_link import LEVEL_MS, RemoteLink, RemotePanel, remote_settings
+from .settings_panel import RED, SettingsPanel, Sidebar, ask, hw_color, hw_words, light
 from .theme import (
-    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, apply_theme, compact_boxes,
-    icon_pixmap, px,
+    ACCENT, CHANNEL_COLORS, CHANNEL_ICONS, GROUP_COLOR, KIND_COLOR, PANEL, SOLO, WARN,
+    apply_theme, compact_boxes, icon_pixmap, px,
 )
-from .widgets import Row, Strip
+from .tray_icon import Tray
+from .widgets import Meter, Row, Strip, small_button
+
+
+def reason(e):
+    """Why a file could not be read or written, without the error number and path that Python
+    puts around it."""
+    return getattr(e, "strerror", None) or str(e)
 
 
 class MainWindow(QMainWindow):
     def __init__(self, dev, background=False):
         super().__init__()
         self.dev = dev
-        self.background = background       # started at login: closing hides the window
+        self.background = background       # started without a window: closing hides it
+        self.tray = None                   # the tray icon, made once the window is built
         self.setWindowTitle(f"{APP_NAME} — {dev.name}")
         self.engine = Engine(dev)
         self.hw = Hardware(dev.alsa_card)
         self.ui_scale = load_ui_scale()    # applied by main() through theme.apply_theme
-        self.st = load_state(dev)
+        self.st, problem = load_state(dev)
+        self._load_notice = {       # said once, when the window is first shown
+            "backup": "The saved mix could not be read. The last good copy was loaded.",
+            "reset": "The saved mix was damaged. What could not be read was reset to the default.",
+        }.get(problem)
+        if dev.family == "hdspe":
+            self.hw.exact = self.st["hw"]["card"]      # one of several cards of the model
         self.presets = PresetBank(presets_file(dev))
         self.switch_to = None              # device key to reopen the window for, see main()
         self._quitting = False             # Ctrl+Q: close for real even when started in the background
@@ -59,11 +78,24 @@ class MainWindow(QMainWindow):
         self.rate = 48000
         self.mode = 1                      # speed mode: 1x / 2x / 4x
         self.strips = {}                   # strip key -> Strip (currently built strips)
+        self._limited = set()              # HDSPe: crosspoints held at +6 dB (show_limited)
         self.fx_panels = {}                # (kind of panel, strip key) -> open effect panel
         self.fx_clipboard = None           # copied channel effects (Copy / Paste effects)
+        self.mix_clipboard = None          # (name, pair, copy_mix()) from Copy mix
+        self.sends_clipboard = None        # (name, copy_sends()) from Copy sends
+        self.cue = None                    # output pair heard on Main Out (Cue), never saved
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.save)
         self.engine_error = None           # why the engine could not be started, shown in Status
+        self.engine_status, self.hw_text = None, ""    # as of the last poll, for the tray icon
+        self._engine_up = False            # the engine answered the last poll
+        self._engine_due = 0.0             # until when a started engine may take to answer
+        self._start_timer = QTimer(self, singleShot=True, interval=300, timeout=self.start_engine)
         self._last_meter = time.monotonic()
+        self._shown = False                # the polls follow it, see pace_timers()
+        self._meter_timer = QTimer(self, timeout=self.update_meters)
+        self._engine_timer = QTimer(self, timeout=self.poll_engine)
+        self._hw_timer = QTimer(self, timeout=self.poll_hw)
+        self._profile_timer = QTimer(self, timeout=self.poll_profile)
 
         central = QWidget()
         outer = QHBoxLayout(central)          # the mixer, then the settings sidebar
@@ -91,12 +123,16 @@ class MainWindow(QMainWindow):
         rows = QVBoxLayout(mixer_page)
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(px(10))
-        self.row_in = Row("Hardware Inputs", "", KIND_COLOR["in"])
-        self.row_play = Row("Playback", "", KIND_COLOR["play"])
-        self.row_out = Row("Hardware Outputs", "master level · click a name tag to edit its submix",
-                           KIND_COLOR["out"])
+        self.row_in = Row("in", "Hardware Inputs", "", KIND_COLOR["in"])
+        self.row_play = Row("play", "Playback", "", KIND_COLOR["play"])
+        self.row_out = Row("out", "Hardware Outputs",
+                           "master level · click a name tag to edit its submix", KIND_COLOR["out"])
+        self.row_in.head_row.addWidget(self._build_mix_tools())
         for r in (self.row_in, self.row_play, self.row_out):
-            rows.addWidget(r, 1)
+            rows.addWidget(r)
+            r.set_folded(r.kind in self.st["folded"])
+            r.fold_changed.connect(self.rows_folded)
+        rows.addStretch()           # takes the height when every row is folded
         self.matrix = MatrixView(self)
         self.tabs = QStackedWidget()
         self.tabs.addWidget(mixer_page)
@@ -107,15 +143,26 @@ class MainWindow(QMainWindow):
         self.settings.eng_btn.clicked.connect(self.restart_engine)
         self.settings.device_selected.connect(self.switch_device)
         self.settings.hw_changed.connect(self.push_matrix)
+        self.settings.notice.connect(self.notify)
+        self.settings.card_chosen.connect(self.restart_engine)
         self.settings.shown_changed.connect(self.channels_shown)
         self.settings.names_changed.connect(self.set_custom_names)
+        self.settings.meters_changed.connect(self.apply_meter_prefs)
+        self.settings.layout_stored.connect(self.store_layout)
+        self.settings.layout_recalled.connect(self.recall_layout)
         self.settings.export_btn.clicked.connect(self.export_mix)
         self.settings.import_btn.clicked.connect(self.import_mix)
+        self.settings.save_ws_btn.clicked.connect(self.save_workspace)
+        self.settings.load_ws_btn.clicked.connect(self.load_workspace)
         self.settings.reset_btn.clicked.connect(self.reset_mix)
         self.settings.ui_scale_changed.connect(self.set_ui_scale)
         self.settings.restart_requested.connect(self.restart_app)
-        self.control = ControlRoomPanel(self.st)
+        self.settings.update_waiting.connect(self.show_update_waiting)
+        self.arc_keys = arc.assignment(load_ui().get("arc_keys"))   # this computer's ARC
+        self.control = ControlRoomPanel(self.st, self.arc_keys)
         self.control.changed.connect(self.push_matrix)
+        self.control.arc_keys_changed.connect(self.set_arc_keys)
+        self.control.recall.connect(self.recall_main)
         self.settings.add_control_room(self.control)
         self.remote_panel = RemotePanel(self.st, dev)
         self.settings.add_before_updates(self.remote_panel)
@@ -123,7 +170,9 @@ class MainWindow(QMainWindow):
         self.remote.received.connect(self.remote_message)
         self.remote.status_changed.connect(
             lambda st: self.remote_panel.set_status(st, self.remote.target_error))
+        self.remote.status_changed.connect(lambda _st: self.pace_timers())
         self.remote_panel.changed.connect(self.apply_remote_settings)
+        self.remote_panel.tray_changed.connect(lambda: self.tray.apply())
         self._hw_active = False
         compact_boxes(self.settings)
         self.arc = ArcLink(self)
@@ -141,23 +190,19 @@ class MainWindow(QMainWindow):
         self.toast = QLabel(central)      # short feedback ("Saved … in slot 3"), see notify()
         self.toast.setObjectName("toast")
         self.toast.hide()
+        self.toast.mousePressEvent = lambda _e: self.toast.hide()
         self._toast_timer = QTimer(self, singleShot=True, interval=3500, timeout=self.toast.hide)
         self._build_shortcuts()
 
+        self.apply_meter_prefs()
         self.tabs.setCurrentIndex(int(self.st.get("tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
-        self.poll_hw()
         self.rebuild_all()
         self.refresh_slots()
         self.ensure_engine()
+        self.engine_status = self.engine.status()   # so the tray icon starts out right
         self.push_matrix()
-        self.apply_remote_settings()
-
-        QTimer(self, interval=33, timeout=self.update_meters).start()
-        QTimer(self, interval=1000, timeout=self.poll_hw).start()
-        QTimer(self, interval=500, timeout=self.poll_engine).start()
-        QTimer(self, interval=3000, timeout=self.poll_profile).start()
-        self.poll_profile()
+        self.apply_remote_settings()    # also starts the polls a hidden window needs
         self.setMinimumHeight(px(640))   # the width's minimum comes from the layout
         # reopen as it was left: window size and the settings sidebar
         size, sidebar_open = load_window()
@@ -168,6 +213,7 @@ class MainWindow(QMainWindow):
         self.fit_top_bar(width)          # sets the bar's compact minimum before the first resize
         self.resize(width, height)
         self.tab_focus_only()
+        self.tray = Tray(self)
 
     # ------------------------------------------------------------------ top bar
     def _build_top_bar(self):
@@ -262,18 +308,57 @@ class MainWindow(QMainWindow):
         self.settings_btn.setObjectName("gear")
         self.settings_btn.setCheckable(True)
         self.settings_btn.setChecked(True)
-        self.settings_btn.setToolTip("Show or hide settings (Ctrl+,)")
         self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setIconSize(QSize(px(14), px(14)))
+        self.show_update_waiting(False)
+        top.addWidget(self.settings_btn)
+        return top
+
+    def _build_mix_tools(self):
+        """TotalMix's Trim Gains, and its mute and solo groups, at the end of the inputs' title."""
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(px(3))
+        self.trim_btn = small_button("Trim", "#ffffff", "#0b0f1c", width=40,
+                                     tip="Trim: a channel's fader moves all of its sends by the "
+                                         "same amount, in every submix")
+        self.trim_btn.setChecked(self.st["trim"])
+        self.trim_btn.toggled.connect(self.set_trim)
+        lay.addWidget(self.trim_btn)
+        self.group_btns = {}
+        for kind, color, ink in (("mute", "#2ad4ff", "#021012"), ("solo", SOLO.name(), "#0b0f1c")):
+            lay.addSpacing(px(8))
+            lay.addWidget(self._caption(kind.upper()))
+            for g in range(1, N_GROUPS + 1):
+                b = small_button(str(g), color, ink, width=20)
+                b.clicked.connect(lambda _=False, k=kind, n=g: self.toggle_group(k, n))
+                b.setAccessibleName(f"{kind.title()} group {g}")
+                lay.addWidget(b)
+                self.group_btns[kind, g] = b
+        for b in (self.trim_btn, *self.group_btns.values()):
+            b.setFixedHeight(px(16))        # as high as the row's title, which sets the line
+        return box
+
+    def show_update_waiting(self, waiting):
+        """The gear button, with a dot while the Updates section has an update to install."""
         gear = QIcon()
         size = px(14)
         for color, state in (("#d9eef2", QIcon.Off), ("#2ad4ff", QIcon.On)):
             pm = icon_pixmap("settings", color, size)
+            if pm and waiting:
+                pm = QPixmap(pm)
+                p = QPainter(pm)
+                p.setRenderHint(QPainter.Antialiasing)
+                p.setPen(QPen(PANEL, px(1)))        # a dark rim, so it stands off the gear
+                p.setBrush(WARN)
+                p.drawEllipse(QRectF(size - px(6) - 0.5, 0.5, px(6), px(6)))
+                p.end()
             if pm:
                 gear.addPixmap(pm, QIcon.Normal, state)
         self.settings_btn.setIcon(gear)
-        self.settings_btn.setIconSize(QSize(size, size))
-        top.addWidget(self.settings_btn)
-        return top
+        self.settings_btn.setToolTip("Show or hide settings (Ctrl+,)"
+                                     + ("\nAn update is waiting under Updates" if waiting else ""))
 
     def _build_shortcuts(self):
         """The standard settings key and a few for what people do most."""
@@ -282,12 +367,22 @@ class MainWindow(QMainWindow):
             ("Ctrl+E", lambda: self.dev.fx is not None and self.fx_btn.toggle()),
             ("Ctrl+1", lambda: self.tabs.setCurrentIndex(0)),
             ("Ctrl+2", lambda: self.tabs.setCurrentIndex(1)),
-            ("Escape", lambda: self.store_btn.setChecked(False)),
+            ("Escape", self.escape),
+            ("Ctrl+W", self.close_fx_panel),
             ("Ctrl+Q", self.quit_app),          # also quits when closing only hides (--background)
         )
         for key, slot in keys:
             sc = QShortcut(QKeySequence(key), self)
             sc.activated.connect(slot)
+
+    def escape(self):
+        """Esc un-arms Store (of the presets or the layouts); with nothing to un-arm it closes
+        an effects panel."""
+        armed = [b for b in (self.store_btn, self.settings.layout_store) if b.isChecked()]
+        for b in armed:
+            b.setChecked(False)
+        if not armed:
+            self.close_fx_panel()
 
     def tab_focus_only(self):
         """Buttons take the keyboard focus from Tab, not from a click, so the focus ring only
@@ -296,9 +391,10 @@ class MainWindow(QMainWindow):
             if b.focusPolicy() != Qt.NoFocus:
                 b.setFocusPolicy(Qt.TabFocus)
 
-    def notify(self, text):
+    def notify(self, text, stay=False):
         """Brief feedback over the bottom of the mixer, gone after a few seconds. Only for
-        things that are also visible elsewhere (nothing has to be read in time)."""
+        things that are also visible elsewhere (nothing has to be read in time); anything else
+        is shown with stay, until it is clicked or the next message comes."""
         self.toast.setText(text)
         self.toast.adjustSize()
         area = self.centralWidget().width() - (self.sidebar.width() if self.sidebar.is_open()
@@ -307,7 +403,51 @@ class MainWindow(QMainWindow):
                         self.centralWidget().height() - self.toast.height() - px(24))
         self.toast.raise_()
         self.toast.show()
-        self._toast_timer.start()
+        if stay:
+            self._toast_timer.stop()
+        else:
+            self._toast_timer.start()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self._shown:
+            self._shown = True
+            self.engine.read_peaks()    # tells the engine to read the meters again, and
+            self._last_meter = time.monotonic()    # drops the peaks held while nobody looked
+            self.pace_timers()
+            for poll in (self.poll_engine, self.poll_hw, self.poll_profile, self.poll_pw_clock):
+                poll()                  # what the window shows is as old as the last hide
+        if self._load_notice:
+            QTimer.singleShot(0, lambda text=self._load_notice: self.notify(text, stay=True))
+            self._load_notice = None
+        self.refresh_tray()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._shown = False
+        self.pace_timers()
+        self.refresh_tray()
+
+    def pace_timers(self):
+        """Nothing polls for a window nobody sees (closed with --background, never opened, or
+        minimised where the desktop says so). Shown: the meters 30 times a second, the engine
+        status twice, the ALSA controls every second (amixer) and the PipeWire profile every
+        3 s (pactl). Hidden: amixer and pactl stop. The engine status is still read, every 2 s:
+        it is also how the window follows the interface for the ARC and the network remote
+        (connected or not, sample rate, a FireWire unit's clock). The meters are only read
+        while the remote sends levels to a controller, at the rate it sends them; while
+        nobody reads them the engine reads the device's meters at its idle rate. An engine
+        that was just started is looked for every 50 ms, shown or not."""
+        levels = LEVEL_MS if self.remote.wants_levels() else 0
+        engine = 50 if self._engine_due else 500 if self._shown else 2000
+        for timer, ms in ((self._meter_timer, 33 if self._shown else levels),
+                          (self._engine_timer, engine),
+                          (self._hw_timer, 1000 if self._shown else 0),
+                          (self._profile_timer, 3000 if self._shown else 0)):
+            if not ms:
+                timer.stop()
+            elif not timer.isActive() or timer.interval() != ms:
+                timer.start(ms)
 
     @staticmethod
     def _caption(text):
@@ -384,6 +524,7 @@ class MainWindow(QMainWindow):
             name = self.presets.name(i)
             store.addAction(f"{i + 1}  {name}" if name else f"{i + 1}  (empty)",
                             lambda _=False, n=i: self.store_slot(n))
+        self._add_restore_action(menu)
 
     # ------------------------------------------------------------------ building strips
     def channels(self, kind):
@@ -396,7 +537,8 @@ class MainWindow(QMainWindow):
         return self.dev.pair_label(k, c, self.mode) if pair else self.dev.chan_label(k, c, self.mode)
 
     def label(self, kind, c, pair=False):
-        """The strip's name: its custom name (while NAMES is on) or the standard one."""
+        """The strip's name: its custom name (while custom names are on) or the standard
+        one."""
         key = strip_key("out", c // 2) if kind == "out" else strip_key(kind, c)
         return display_name(self.st, key, self.standard_label(kind, c, pair))
 
@@ -450,6 +592,12 @@ class MainWindow(QMainWindow):
         menu.exec(pos)
         menu.deleteLater()
 
+    def rows_folded(self):
+        """A row was folded or unfolded: remembered with the device's state."""
+        self.st["folded"] = [r.kind for r in (self.row_in, self.row_play, self.row_out)
+                             if r.folded]
+        self.schedule_save()
+
     def out_pairs(self, all_pairs=False):
         return [c // 2 for c in self.channels("out")
                 if c % 2 == 0 and (all_pairs or self.shown("out", c))]
@@ -500,8 +648,8 @@ class MainWindow(QMainWindow):
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
-            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
-            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
+            s.eq_requested.connect(lambda st=s: self.toggle_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.toggle_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
@@ -510,6 +658,21 @@ class MainWindow(QMainWindow):
         self.refresh_settings_buttons()
         self.refresh_sends(kind)
         self.matrix.rebuild()
+        if self.solo_as_shown(kind):
+            self.push_matrix()
+
+    def solo_as_shown(self, kind):
+        """Solo is what the strips show: off for a channel without one (hidden, or not there
+        at this sample rate), which would silence the submix with nothing on screen to say
+        why, and the same on both channels of a linked pair. True if that changed any."""
+        solo = self.st["solo"][kind]
+        shown = [False] * len(solo)
+        for s in (self.row_in if kind == "in" else self.row_play).strips:
+            for c in s.channels:
+                shown[c] = solo[s.channels[0]]
+        changed = shown != solo
+        solo[:] = shown
+        return changed
 
     def rebuild_outputs(self):
         self.strips = {k: s for k, s in self.strips.items() if not k.startswith("out:")}
@@ -518,7 +681,7 @@ class MainWindow(QMainWindow):
         for pair in self.out_pairs():
             title = self.label("out", 2 * pair, True)
             key = strip_key("out", pair)
-            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False,
+            s = Strip(key, title, [2 * pair, 2 * pair + 1], "out", show_pan=False, show_cue=True,
                       standard=self.standard_label("out", 2 * pair, True),
                       color=strip_color(self.st, key), icon=strip_icon(self.st, key),
                       show_settings=any(self.dev.channel_has_settings("out", ch)
@@ -528,14 +691,15 @@ class MainWindow(QMainWindow):
             o = self.st["out"][pair]
             s.set_fader(NEG_INF if o["gain"] is None else o["gain"])
             s.mute.setChecked(o["mute"])
+            s.cue.toggled.connect(lambda on, pr=pair: self.set_cue(pr, on))
             s.clicked.connect(lambda pr=pair: self.select_out(pr, by_pair=True))
             s.fader.changed.connect(lambda db, st=s: self.on_fader(st, db))
             s.mute.toggled.connect(lambda on, pr=pair: self.set_out_mute(pr, on))
             s.context_requested.connect(lambda pos, st=s: self.strip_menu(st, pos))
             s.rename_requested.connect(lambda st=s: self.rename_strip(st))
             s.settings_requested.connect(lambda pos, st=s: self.channel_settings(st, pos))
-            s.eq_requested.connect(lambda st=s: self.open_fx_panel(st, "eq"))
-            s.dyn_requested.connect(lambda st=s: self.open_fx_panel(st, "dyn"))
+            s.eq_requested.connect(lambda st=s: self.toggle_fx_panel(st, "eq"))
+            s.dyn_requested.connect(lambda st=s: self.toggle_fx_panel(st, "dyn"))
             s.set_group(self.st["groups"].get(key))
             strips.append(s)
             self.strips[key] = s
@@ -548,15 +712,21 @@ class MainWindow(QMainWindow):
         if strips and sel not in [s.pair for s in strips]:
             sel = strips[-1].pair
         self.select_out(sel, by_pair=True)
+        cue = self.cue
+        self.refresh_cue()
+        if self.cue != cue:
+            self.push_matrix()
 
     def refresh_sends(self, kind):
         """Show the sends into the selected output pair on the source faders."""
         row = self.row_in if kind == "in" else self.row_play
-        p = self.st["selected"]
+        p = submix_of(self.st, self.st["selected"])
         for s in row.strips:
             gdb, pan = self.st["sends"][kind][s.channels[0]][p]
             s.set_fader(NEG_INF if gdb is None else gdb)
             s.pan.set_value(pan)
+        self.show_limited()
+        self.refresh_groups()
 
     # ------------------------------------------------------------------ model updates
     def select_out(self, idx, by_pair=False):
@@ -567,7 +737,12 @@ class MainWindow(QMainWindow):
         i = self.submix.findData(pair)
         if i >= 0:
             self.submix.setCurrentIndex(i)
-            hint = f"faders send to&nbsp; <b style='color:{ACCENT.name()}'>{self.submix.itemText(i)}</b>"
+            hint = f"<b style='color:{ACCENT.name()}'>{self.submix.itemText(i)}</b>"
+            src = self.st["mirror"].get(strip_key("out", pair))
+            if src is not None:
+                hint += f" (mirrors {self.label('out', 2 * src, True)})"
+            hint = (f"Trim: faders move every submix · showing&nbsp; {hint}" if self.st["trim"]
+                    else f"faders send to&nbsp; {hint}")
             self.row_in.set_subtitle(hint)
             self.row_play.set_subtitle(hint)
         self.refresh_sends("in")
@@ -582,22 +757,34 @@ class MainWindow(QMainWindow):
         """A fader moved: update the model, then let its fader group follow (Shift = solo move)."""
         old = get_strip_db(self.st, strip.key)
         set_strip_db(self.st, strip.key, db)
+        moved = {strip.key: old}
         if strip.group and not (QApplication.keyboardModifiers() & Qt.ShiftModifier):
+            before = {k: get_strip_db(self.st, k) for k in group_members(self.st, strip.key)}
             for key, val in group_follow(self.st, strip.key, old, db).items():
+                moved[key] = before[key]
                 if key in self.strips:
                     self.strips[key].set_fader(val)
+        # Trim Gains: the other submixes follow (trim_sends), but not while a send is being
+        # switched on from -∞ here, which would lift them all to +6 dB
+        if self.st["trim"] and not strip.fader.dragged_from_off():
+            for key, was in moved.items():
+                now = get_strip_db(self.st, key)
+                shown = trim_sends(self.st, key, was, now)
+                if shown != now and key in self.strips:
+                    self.strips[key].set_fader(shown)
         self.push_matrix()
 
     def set_send_at(self, kind, chans, pair, db):
         """Used by the matrix view: set the send level of chans into a given output pair."""
+        p = submix_of(self.st, pair)        # a mirrored pair's cells are its source's
         for c in chans:
-            self.st["sends"][kind][c][pair][0] = None if db is None else round(db, 2)
-        if pair == self.st["selected"]:
+            self.st["sends"][kind][c][p][0] = None if db is None else round(db, 2)
+        if p == submix_of(self.st, self.st["selected"]):
             self.refresh_sends(kind)
         self.push_matrix()
 
     def set_pan(self, kind, chans, pan):
-        p = self.st["selected"]
+        p = submix_of(self.st, self.st["selected"])
         for c in chans:
             self.st["sends"][kind][c][p][1] = round(pan, 3)
         self.push_matrix()
@@ -617,20 +804,7 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def toggle_stereo(self, kind, c, on):
-        st = self.st
-        st["stereo"][kind][c // 2] = on
-        # keep the audible result similar: stereo uses balance, mono L/R get hard-panned
-        for p in range(N_PAIRS):
-            left, right = st["sends"][kind][c][p], st["sends"][kind][c + 1][p]
-            right[0] = left[0]
-            if on:
-                left[1] = right[1] = 0.0
-            else:
-                left[1], right[1] = -1.0, 1.0
-        st["mute"][kind][c + 1] = st["mute"][kind][c]
-        st["solo"][kind][c + 1] = st["solo"][kind][c]
-        st["groups"].pop(strip_key(kind, c + 1), None)   # the right channel no longer has a strip
-        st["names"].pop(strip_key(kind, c + 1), None)
+        set_stereo(self.st, kind, c, on)
         QTimer.singleShot(0, lambda: self.rebuild_sources(kind))
         self.push_matrix()
 
@@ -640,6 +814,8 @@ class MainWindow(QMainWindow):
         popup = ChannelSettings(self.dev, self.st["hw"], strip.kind, strip.channels,
                                 strip.name, self)
         popup.setAttribute(Qt.WA_DeleteOnClose)
+        if self.dev.family == "former":   # these are all part of the configuration
+            popup.changed.connect(lambda: self.st["hw"].update(edited=True))
         popup.changed.connect(self.push_matrix)
         popup.changed.connect(self.refresh_settings_buttons)
         popup.room_eq_requested.connect(lambda: self.open_fx_panel(strip, "room"))
@@ -649,80 +825,117 @@ class MainWindow(QMainWindow):
     def refresh_settings_buttons(self):
         f = self.st["hw"].get("fx") if self.dev.fx is not None else None
         for s in self.strips.values():
+            own = fx.effect_channels(s.kind, s.channels)
             if s.kind == "play":
                 s.set_settings_active(bool(f) and any(f["send"]["play"][c] is not None
-                                                      for c in s.channels))
+                                                      for c in own))
                 continue
             on = any(self.dev.channel_settings_active(self.st, s.kind, c) for c in s.channels)
             if f:
                 values = f["ret"] if s.kind == "out" else f["send"]["in"]
-                on = on or any(values[c] is not None for c in s.channels) or (
+                on = on or any(values[c] is not None for c in own) or (
                     s.kind == "out" and any(fx.room_active(f, c) for c in s.channels))
-                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in s.channels),
-                                any(fx.dyn_active(f, s.kind, c) for c in s.channels))
+                s.set_fx_active(any(fx.eq_active(f, s.kind, c) for c in own),
+                                any(fx.dyn_active(f, s.kind, c) for c in own),
+                                [which for which in ("eq", "dyn")
+                                 if (which, s.key) in self.fx_panels])
             s.set_settings_active(on)
 
     # ------------------------------------------------------------------ TotalMix FX effects
     def open_fx_panel(self, strip, which):
-        """The strip's EQ, Dynamics or (UCX II outputs) Room EQ panel; one per strip, raised
-        if it is already open."""
+        """The strip's EQ or Dynamics panel, in the row right of the strip (EQ before Dynamics),
+        or the Room EQ of a UCX II output in a window of its own. One per strip and kind."""
         key = (which, strip.key)
         panel = self.fx_panels.get(key)
-        if panel is not None and panel.channels == strip.channels:
+        if panel is None:
+            f, model = self.st["hw"]["fx"], self.dev.fx
+            if which == "room":
+                panel = RoomEqPanel(strip.name, f, model, strip.channels, self)
+                panel.adjustSize()
+                # beside the strip, kept on the screen
+                pos = strip.mapToGlobal(strip.rect().topRight())
+                screen = strip.screen().availableGeometry()
+                x = min(pos.x() + px(4), screen.right() - panel.width())
+                y = min(max(screen.top(), pos.y()), screen.bottom() - panel.height())
+                panel.move(max(screen.left(), x), y)
+            else:
+                cls = EqPanel if which == "eq" else DynamicsPanel
+                panel = cls(strip.name, f, model, strip.kind, strip.channels)
+                panel.set_tag(strip.name, strip.tag_color())
+                self.row_of(strip).dock(panel, strip.key, first=which == "eq")
+            self.add_fx_panel(key, panel)
+        if which == "room":
             panel.show()
             panel.raise_()
             panel.activateWindow()
-            return
-        if panel is not None:
-            panel.close()
-        f, model = self.st["hw"]["fx"], self.dev.fx
-        if which == "room":
-            panel = RoomEqPanel(strip.name, f, model, strip.channels, self)
         else:
-            cls = EqPanel if which == "eq" else DynamicsPanel
-            panel = cls(strip.name, f, model, strip.kind, strip.channels, self)
+            self.row_of(strip).reveal(panel)
+        panel.setFocus()                    # Esc and Ctrl+W close it
+
+    def toggle_fx_panel(self, strip, which):
+        """The strip's EQ and D buttons open the panel and close it again."""
+        panel = self.fx_panels.get((which, strip.key))
+        if panel is None:
+            self.open_fx_panel(strip, which)
+        else:
+            panel.close()
+
+    def row_of(self, strip):
+        return {"in": self.row_in, "play": self.row_play, "out": self.row_out}[strip.kind]
+
+    def add_fx_panel(self, key, panel):
         panel.setAttribute(Qt.WA_DeleteOnClose)
         panel.changed.connect(self.fx_changed)
-        panel.destroyed.connect(lambda _=None, k=key, p=panel: self.fx_panels.get(k) is p and
-                                self.fx_panels.pop(k))
+        panel.closed.connect(lambda: self.fx_panel_closed(key, panel))
         self.fx_panels[key] = panel
-        panel.adjustSize()
-        # beside the strip, kept on the screen
-        pos = strip.mapToGlobal(strip.rect().topRight())
-        screen = strip.screen().availableGeometry()
-        x = min(pos.x() + px(4), screen.right() - panel.width())
-        y = min(max(screen.top(), pos.y()), screen.bottom() - panel.height())
-        panel.move(max(screen.left(), x), y)
-        panel.show()
+        self.refresh_settings_buttons()
+
+    def fx_panel_closed(self, key, panel):
+        if self.fx_panels.get(key) is panel:
+            del self.fx_panels[key]
+        which, strip, focus = key[0], self.strips.get(key[1]), self.focusWidget()
+        if which == "unit":
+            self.fx_btn.setChecked(False)
+        elif strip is not None and focus is not None and (
+                focus is panel or panel.isAncestorOf(focus)):
+            (strip.eq_btn if which == "eq" else strip.dyn_btn).setFocus()   # back where it began
+        self.refresh_settings_buttons()
+
+    def close_fx_panel(self):
+        """Esc and Ctrl+W with the keyboard outside a panel: close the one opened last."""
+        shown = [p for p in self.fx_panels.values() if p.isVisible()]
+        if shown:
+            shown[-1].close()
 
     def close_stale_fx_panels(self):
-        """After a rebuild (stereo link, speed change): close panels whose strip is gone or now
-        covers other channels."""
+        """After a rebuild (stereo link, speed change, a new name): close panels whose strip is
+        gone or now covers other channels, and show the strip's name and colour on the others."""
         for (which, key), panel in list(self.fx_panels.items()):
             if which == "unit":
                 continue
             strip = self.strips.get(key)
             if strip is None or strip.channels != panel.channels:
                 panel.close()
+            elif which != "room":
+                panel.set_tag(strip.name, strip.tag_color())
 
     def show_fx_unit(self, on):
+        """Reverb and Echo, at the end of the outputs row (the FX button)."""
         panel = self.fx_panels.get(("unit", ""))
-        if not on:
+        if panel is not None and self.tabs.currentIndex() == 1:
+            self.tabs.setCurrentIndex(0)    # it is open behind the Matrix: show it
+            self.fx_btn.setChecked(True)
+            self.row_out.reveal(panel)
+        elif not on:
             if panel is not None:
                 panel.close()
-            return
-        if panel is None:
-            panel = FxUnitPanel(self.st["hw"]["fx"], self.dev.fx, self)
-            panel.setAttribute(Qt.WA_DeleteOnClose)
-            panel.changed.connect(self.fx_changed)
-            panel.closed.connect(lambda: (self.fx_panels.pop(("unit", ""), None),
-                                          self.fx_btn.setChecked(False)))
-            self.fx_panels[("unit", "")] = panel
-            panel.adjustSize()
-            g = self.geometry()
-            panel.move(g.right() - panel.width() - px(40), g.top() + px(80))
-        panel.show()
-        panel.raise_()
+        elif panel is None:
+            self.tabs.setCurrentIndex(0)
+            self.row_out.set_folded(False)
+            panel = FxUnitPanel(self.st["hw"]["fx"], self.dev.fx)
+            self.row_out.dock(panel)
+            self.add_fx_panel(("unit", ""), panel)
+            panel.setFocus()
 
     def fx_changed(self):
         self.push_matrix()
@@ -733,7 +946,8 @@ class MainWindow(QMainWindow):
         self.notify(f"Copied the effects of {strip.name}")
 
     def paste_effects(self, strip):
-        fx.paste_channel(self.st["hw"]["fx"], strip.kind, strip.channels, self.fx_clipboard,
+        fx.paste_channel(self.st["hw"]["fx"], strip.kind,
+                         fx.effect_channels(strip.kind, strip.channels), self.fx_clipboard,
                          self.dev.fx)
         for which in ("eq", "dyn"):
             panel = self.fx_panels.get((which, strip.key))
@@ -748,8 +962,65 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.quit()
 
+    def show_window(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def window_shown(self):
+        return self.isVisible() and not self.isMinimized()
+
+    def command(self, name, slot=None):
+        """A command from a desktop shortcut (commands.py) or the tray menu: the same as the
+        button. The tray also has "hide" and "quit"."""
+        if name == "show":
+            self.show_window()
+        elif name == "hide":
+            self.close()                # as the window's close button: saves, then hides
+        elif name == "quit":
+            self.quit_app()
+        elif name == "dim":
+            control_room.toggle(self.st, "dim")
+            self.push_matrix()
+        elif name == "mute-main":
+            main = control_room.control_room(self.st)["main"]
+            self.set_out_mute(main, not self.st["out"][main]["mute"])
+            self.sync_strips()
+        elif name == "recall" and self.presets.slots[slot]:
+            self.recall_slot(slot)
+
+    def tray_view(self):
+        """(menu, icon state, tooltip) for the tray icon (tray.py)."""
+        cr = control_room.control_room(self.st)
+        muted = self.st["out"][cr["main"]]["mute"]
+        status = self.engine_status
+        if status is None and self._engine_due:
+            status = {"hw": "starting", "processing": True, "rate": 0}     # being started
+        return (tray.menu(self.window_shown(), cr["dim"], muted,
+                          [self.presets.name(i) for i in range(N_SLOTS)],
+                          self.st.get("active_slot")),
+                tray.icon_state(status, cr["dim"], muted),
+                tray.tooltip(self.dev.name, status, self.hw_text or "Connecting…", cr["dim"],
+                             muted))
+
+    def refresh_tray(self):
+        if self.tray is not None:
+            self.tray.refresh()
+
+    def hides_on_close(self):
+        """Closing the window hides it while something can bring it back: the tray icon, or
+        opening the app again for a mixer started without a window."""
+        return self.background or (self.tray is not None and self.tray.visible())
+
     def switch_device(self, key):
         if key == self.dev.key:
+            return
+        if self.background and tell_running(DEVICES[key]):
+            # that device has a window already, which shows now: this one keeps running hidden
+            self.settings.device.setCurrentIndex(self.settings.device.findData(self.dev.key))
+            self.close()
             return
         self.switch_to = key
         self.close()
@@ -770,8 +1041,11 @@ class MainWindow(QMainWindow):
         server = QApplication.instance().findChild(QLocalServer)
         if server is not None:
             server.close()              # or the new process would hand over to this one and exit
-        launched = QProcess.startDetached(
-            sys.executable, ["-m", "openface_mixer", "--device", self.dev.key], os.getcwd())
+        # a background instance stays one, with its window shown as it is now
+        args = ["--device", self.dev.key] + (["--background", "--show"] if self.background
+                                             else [])
+        launched = QProcess.startDetached(sys.executable, ["-m", "openface_mixer"] + args,
+                                          os.getcwd())
         if isinstance(launched, tuple):     # PySide6 returns (ok, pid)
             launched = launched[0]
         if not launched:
@@ -847,26 +1121,97 @@ class MainWindow(QMainWindow):
         none.setChecked(cur_icon is None)
         none.triggered.connect(lambda: self.set_icon(strip, None))
         menu.addSeparator()
-        grp = menu.addMenu("Fader group")
-        for g in range(N_GROUPS + 1):
-            a = (grp.addAction("None") if g == 0 else
-                 grp.addAction(self._swatch(GROUP_COLOR[g].name()), f"Group {g}"))
-            a.setCheckable(True)
-            a.setChecked(strip.group == g)
-            a.triggered.connect(lambda _=False, n=g: self.set_group(strip, n))
+        self._group_menu(menu, "Fader group", strip.group, lambda n: self.set_group(strip, n))
+        if strip.kind != "out":
+            sel = self.st["selected"]
+            self._group_menu(menu, f"Mute group in {self.label('out', 2 * sel, True)}",
+                             mute_group(self.st, strip.key, submix_of(self.st, sel)),
+                             lambda n: self.choose_mute_group(strip, n))
+            self._group_menu(menu, "Solo group", self.st["solo_groups"].get(strip.key, 0),
+                             lambda n: self.choose_solo_group(strip, n))
         menu.addAction("Fader to 0 dB", lambda: self.move_fader(strip, 0.0))
         menu.addAction("Fader to -∞", lambda: self.move_fader(strip, NEG_INF))
         if self.dev.fx is not None and strip.kind in ("in", "out"):
             menu.addSeparator()
-            menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
-            menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
+            if not strip.folded:        # the panels open beside the strip's controls
+                menu.addAction("EQ…", lambda: self.open_fx_panel(strip, "eq"))
+                menu.addAction("Dynamics…", lambda: self.open_fx_panel(strip, "dyn"))
             menu.addAction("Copy effects", lambda: self.copy_effects(strip))
             paste = menu.addAction("Paste effects", lambda: self.paste_effects(strip))
             paste.setEnabled(self.fx_clipboard is not None)
+        self._add_submix_tools(menu, strip)
+        if strip.kind in ("play", "in"):
+            self.desktop_menu(menu, strip)
         menu.addSeparator()
         menu.addAction("Hide channel", lambda: self.hide_strip(strip))
         menu.exec(pos)
         menu.deleteLater()
+
+    def _group_menu(self, menu, title, current, choose):
+        grp = menu.addMenu(title)
+        for g in range(N_GROUPS + 1):
+            a = (grp.addAction("None") if g == 0 else
+                 grp.addAction(self._swatch(GROUP_COLOR[g].name()), f"Group {g}"))
+            a.setCheckable(True)
+            a.setChecked(current == g)
+            a.triggered.connect(lambda _=False, n=g: choose(n))
+
+    # ------------------------------------------------------------------ desktop sinks, sources
+    def desktop_menu(self, menu, strip):
+        """The strip menu's desktop output (a playback pair's sink) or desktop input (an input
+        channel's or pair's source): add one, or rename or remove the one there."""
+        kind, lst = strip.kind, self.st["sinks"]
+        if kind == "play":
+            first = strip.channels[0] - strip.channels[0] % 2
+            entry = {"kind": "sink", "ch": first, "stereo": True}
+        else:
+            entry = {"kind": "source", "ch": strip.channels[0], "stereo": len(strip.channels) > 1}
+        what = "output" if kind == "play" else "input"
+        menu.addSeparator()
+        i = sinks.find(lst, entry["kind"], sinks.channels(entry))
+        if i is not None:
+            name = sinks.description(lst[i]["name"])
+            menu.addAction(f"Rename desktop {what} “{name}”…", lambda: self.rename_desktop(i))
+            menu.addAction(f"Remove desktop {what} “{name}”", lambda: self.remove_desktop(i))
+            return
+        if set(sinks.channels(entry)) <= set(self.dev.pcm_channels(sinks.kind_of(entry),
+                                                                    self.mode)):
+            add = menu.addAction(f"Add desktop {what}…", lambda: self.add_desktop(entry))
+            add.setEnabled(len(lst) < sinks.MAX)
+
+    def _desktop_where(self, entry):
+        k, c = sinks.kind_of(entry), entry["ch"]
+        label = (self.dev.pair_label if entry["stereo"] else self.dev.chan_label)(k, c, self.mode)
+        return f"{'Playback' if k == 'play' else 'Input'} {label}"
+
+    def _ask_desktop_name(self, title, entry, text):
+        where = self._desktop_where(entry)
+        name, ok = QInputDialog.getText(
+            self, title, f"Name for {where[0].lower()}{where[1:]} in the desktop's sound "
+            f"settings (shown after “{sinks.PREFIX}”):", text=text)
+        return sinks.clean_name(name) if ok else ""
+
+    def add_desktop(self, entry):
+        what = "output" if entry["kind"] == "sink" else "input"
+        name = self._ask_desktop_name(f"Add desktop {what}", entry, self._desktop_where(entry))
+        if name:
+            self.st["sinks"].append({**entry, "name": name})
+            self.save()
+
+    def rename_desktop(self, i):
+        entry = self.st["sinks"][i]
+        what = "output" if entry["kind"] == "sink" else "input"
+        old = entry["name"]
+        name = self._ask_desktop_name(f"Rename desktop {what}", entry,
+                                      old[len(sinks.PREFIX) + 1:] if old.startswith(
+                                          sinks.PREFIX + " ") else old)
+        if name:
+            entry["name"] = name
+            self.save()
+
+    def remove_desktop(self, i):
+        del self.st["sinks"][i]
+        self.save()
 
     @staticmethod
     def _swatch(hexcol):
@@ -889,6 +1234,7 @@ class MainWindow(QMainWindow):
     def set_color(self, strip, color):
         set_strip_color(self.st, strip.key, color)
         strip.set_color(color)
+        self.close_stale_fx_panels()        # the panels' name tags show the colour too
         self.matrix.rebuild()
         self.schedule_save()
 
@@ -909,9 +1255,155 @@ class MainWindow(QMainWindow):
         strip.set_group(group)
         self.schedule_save()
 
+    # ------------------------------------------------------------------ mute and solo groups
+    def choose_mute_group(self, strip, group):
+        """The strip's send into the submix being edited goes into mute group group (0: none)."""
+        set_mute_group(self.st, strip.key, submix_of(self.st, self.st["selected"]), group)
+        self.push_matrix()
+
+    def choose_solo_group(self, strip, group):
+        if group:
+            self.st["solo_groups"][strip.key] = group
+        else:
+            self.st["solo_groups"].pop(strip.key, None)
+        self.refresh_groups()
+        self.schedule_save()
+
+    def solo_group_channels(self, group):
+        """[(kind, channel)] of the strips in the solo group that are shown."""
+        return [(s.kind, c) for key, g in self.st["solo_groups"].items() if g == group
+                for s in [self.strips.get(key)] if s is not None for c in s.channels]
+
+    def toggle_group(self, kind, group):
+        """A mute group button switches its sends' mutes on or off; a solo group button solos
+        its channels, or switches their solo off when they all are soloed, as TotalMix does."""
+        if kind == "mute":
+            grp = self.st["mute_groups"][group - 1]
+            grp["on"] = not grp["on"] and bool(grp["sends"])
+        else:
+            chans = self.solo_group_channels(group)
+            on = not all(self.st["solo"][k][c] for k, c in chans)
+            for k, c in chans:
+                self.st["solo"][k][c] = on
+            self.sync_strips()
+        self.push_matrix()
+
+    def refresh_groups(self):
+        """The group buttons, and the mute buttons of channels a mute group silences in the
+        submix being edited."""
+        sel = submix_of(self.st, self.st["selected"])
+        for (kind, g), b in self.group_btns.items():
+            if kind == "mute":
+                sends = self.st["mute_groups"][g - 1]["sends"]
+                on = self.st["mute_groups"][g - 1]["on"]
+                names = [f"{self.key_name(k)} in {self.label('out', 2 * p, True)}"
+                         for k, p in sends]
+            else:
+                chans = self.solo_group_channels(g)
+                on = bool(chans) and all(self.st["solo"][k][c] for k, c in chans)
+                names = [self.key_name(k) for k, n in self.st["solo_groups"].items() if n == g]
+            b.setChecked(on)
+            b.setEnabled(bool(names))
+            b.setToolTip(f"{kind.title()} group {g}: {', '.join(names)}" if names else
+                         f"{kind.title()} group {g} is empty · add channels from their "
+                         "right-click menu")
+        for s in self.strips.values():
+            if s.kind != "out":
+                g = mute_group(self.st, s.key, sel)
+                s.set_group_muted(g if g and self.st["mute_groups"][g - 1]["on"] else 0)
+
+    def key_name(self, key):
+        """The name of the strip with this key, as it shows (or would)."""
+        kind, c = parse_key(key)
+        return self.label(kind, c, len(strip_channels(self.st, kind, c)) == 2)
+
+    # ------------------------------------------------------------------ Trim, Cue and submixes
+    def set_trim(self, on):
+        self.st["trim"] = on
+        self.select_out(self.st["selected"], by_pair=True)     # the rows say so
+        self.schedule_save()
+
+    def set_cue(self, pair, on):
+        """TotalMix's Cue: one output's submix on Main Out at a time, until its Cue is pressed
+        again or another output's is."""
+        self.cue = pair if on else None
+        self.push_matrix()
+
+    def refresh_cue(self):
+        """Cue ends when its output becomes Main Out or goes out of sight."""
+        main = control_room.control_room(self.st)["main"]
+        if self.cue == main or self.cue not in self.out_pairs():
+            self.cue = None
+        for s in self.row_out.strips:
+            s.cue.blockSignals(True)
+            s.cue.setChecked(s.pair == self.cue)
+            s.cue.setEnabled(s.pair != main)
+            s.cue.blockSignals(False)
+            s.show_flags()                  # a folded strip's edge
+
+    def _add_submix_tools(self, menu, strip):
+        """TotalMix's copy, paste and mirror of an output's submix, and copy, paste and clear
+        of a channel's sends."""
+        menu.addSeparator()
+        if strip.kind == "out":
+            clip = self.mix_clipboard
+            menu.addAction("Copy mix", lambda: self.copy_mix(strip))
+            menu.addAction(f"Paste mix from {clip[0]}" if clip else "Paste mix",
+                           lambda: self.paste_mix(strip)).setEnabled(clip is not None)
+            mirrors = self.st["mirror"].get(strip.key)
+            if mirrors is not None:
+                menu.addAction(f"Remove mirror of {self.label('out', 2 * mirrors, True)}",
+                               lambda: self.change_mix(lambda st: remove_mirror(st, strip.pair),
+                                                       f"{strip.name} has its own mix again"))
+            else:
+                menu.addAction(f"Mirror mix of {clip[0]}" if clip else "Mirror mix",
+                               lambda: self.mirror_mix(strip)).setEnabled(
+                    clip is not None and submix_of(self.st, clip[1]) != strip.pair)
+        else:
+            clip = self.sends_clipboard
+            menu.addAction("Copy sends", lambda: self.copy_sends(strip))
+            menu.addAction(f"Paste sends from {clip[0]}" if clip else "Paste sends",
+                           lambda: self.change_mix(
+                               lambda st: paste_sends(st, strip.kind, strip.channels[0], clip[1]),
+                               f"Pasted the sends of {clip[0]} into {strip.name}")).setEnabled(
+                clip is not None)
+            menu.addAction("Clear sends…", lambda: self.clear_sends(strip))
+
+    def change_mix(self, change, message):
+        """Make a submix tool's change on a copy of the mix and use it as a recall would, so
+        that Restore previous mix can take it back."""
+        work = {**self.st, **extract_mix(self.st)}
+        change(work)
+        self.replace_mix(extract_mix(work), message, self.st["active_slot"])
+
+    def copy_mix(self, strip):
+        self.mix_clipboard = (strip.name, strip.pair, copy_mix(self.st, strip.pair))
+        self.notify(f"Copied the mix of {strip.name}")
+
+    def paste_mix(self, strip):
+        name, _pair, mix = self.mix_clipboard
+        self.change_mix(lambda st: paste_mix(st, strip.pair, mix),
+                        f"Pasted the mix of {name} into {strip.name}")
+
+    def mirror_mix(self, strip):
+        name, pair, _mix = self.mix_clipboard
+        self.change_mix(lambda st: set_mirror(st, strip.pair, pair),
+                        f"{strip.name} mirrors {name}")
+
+    def copy_sends(self, strip):
+        self.sends_clipboard = (strip.name, copy_sends(self.st, strip.kind, strip.channels[0]))
+        self.notify(f"Copied the sends of {strip.name}")
+
+    def clear_sends(self, strip):
+        if ask(self, "Clear sends", f"Switch off every send of {strip.name}, in every submix?",
+               "Clear"):
+            self.change_mix(lambda st: clear_sends(st, strip.kind, strip.channels[0]),
+                            f"Cleared the sends of {strip.name}")
+
     # ------------------------------------------------------------------ presets
     def refresh_slots(self):
         self.update_arc_leds()
+        self.refresh_tray()
         active = self.st.get("active_slot")
         for i, b in enumerate(self.slot_btns):
             name = self.presets.name(i)
@@ -944,13 +1436,40 @@ class MainWindow(QMainWindow):
         self.notify(f"Saved “{name}” in slot {i + 1}")
 
     def recall_slot(self, i):
-        apply_mix(self.st, self.presets.slots[i]["mix"])
-        self.st["active_slot"] = i
-        name = self.presets.name(i)
+        self.replace_mix(self.presets.slots[i]["mix"], f"Recalled “{self.presets.name(i)}”", i)
+
+    def replace_mix(self, mix, message, slot=None):
+        """Recall, Import, Reset and Restore all end here. The mix that is replaced is written
+        to one file first, overwritten each time, so that a slip can be taken back with
+        "Restore previous mix". Sends on channels this interface doesn't have are switched off,
+        so a mix from a bigger interface leaves no routing that no strip shows."""
+        try:
+            export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
+        except OSError:
+            pass                    # a full disk must not stop a recall
+        apply_mix(self.st, mix)
+        clear_sends_outside(self.st, self.dev.all_channels)
+        self.st["active_slot"] = slot
         self.rebuild_all()
         self.refresh_slots()
         self.push_matrix()
-        self.notify(f"Recalled “{name}”")
+        self.notify(message)
+
+    def restore_previous_mix(self):
+        try:
+            _name, mix = import_mix(previous_mix_file(self.dev))
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Restore previous mix",
+                                f"Could not restore the previous mix:\n{reason(e)}")
+            return
+        self.replace_mix(mix, "Restored the previous mix")
+
+    def _add_restore_action(self, menu):
+        menu.addSeparator()
+        a = menu.addAction("Restore previous mix", self.restore_previous_mix)
+        a.setToolTip("The mix as it was before the last recall, import, reset, paste or clear")
+        a.setEnabled(previous_mix_file(self.dev).exists())
+        menu.setToolTipsVisible(True)
 
     def slot_menu(self, i):
         menu = QMenu(self)
@@ -959,7 +1478,8 @@ class MainWindow(QMainWindow):
             menu.addAction("Recall", lambda: self.recall_slot(i))
             menu.addAction("Rename…", lambda: self._rename_slot(i))
             menu.addSeparator()
-            menu.addAction("Clear", lambda: (self.presets.clear(i), self.refresh_slots()))
+            menu.addAction("Clear…", lambda: self.clear_slot(i))
+        self._add_restore_action(menu)
         menu.exec(self.slot_btns[i].mapToGlobal(self.slot_btns[i].rect().bottomLeft()))
         menu.deleteLater()
 
@@ -970,12 +1490,50 @@ class MainWindow(QMainWindow):
             self.presets.rename(i, name.strip())
             self.refresh_slots()
 
+    def clear_slot(self, i):
+        if ask(self, "Clear preset", f"Clear “{self.presets.name(i)}” from slot {i + 1}? "
+               "This can't be undone.", "Clear"):
+            self.presets.clear(i)
+            if self.st.get("active_slot") == i:
+                self.st["active_slot"] = None       # nothing is recalled from an empty slot
+                self.schedule_save()
+            self.refresh_slots()
+
+    def store_layout(self, i):
+        old = self.st["layouts"][i]
+        name, ok = QInputDialog.getText(self, "Store layout", f"Name for layout {i + 1}:",
+                                        text=old["name"] if old else f"Layout {i + 1}")
+        if not ok:
+            return
+        name = name.strip() or f"Layout {i + 1}"
+        self.st["layouts"][i] = extract_layout(self.st, name)
+        self.settings.refresh_layouts()
+        self.schedule_save()
+        self.notify(f"Saved layout “{name}” in {i + 1}")
+
+    def recall_layout(self, i):
+        """Show the channels and rows as layout i has them. Only what is shown changes; a solo
+        on a channel the layout hides is switched off (rebuild_sources), as when hiding it."""
+        layout = self.st["layouts"][i]
+        apply_layout(self.st, layout)
+        for r in (self.row_in, self.row_play, self.row_out):
+            r.set_folded(r.kind in layout["folded"])
+        self.settings.show_view()
+        self.rebuild_all()
+        self.schedule_save()
+        self.notify(f"Layout “{layout['name']}”")
+
     def export_mix(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export mix", "mix.ofmix.json",
                                               "Openface Mixer mix (*.json)")
-        if path:
-            slot = self.st.get("active_slot")
-            export_mix(path, self.presets.name(slot) if slot is not None else "Mix", extract_mix(self.st))
+        if not path:
+            return
+        slot = self.st.get("active_slot")
+        try:
+            export_mix(path, self.presets.name(slot) if slot is not None else "Mix",
+                       extract_mix(self.st))
+        except OSError as e:
+            QMessageBox.warning(self, "Export mix", f"Could not export to {path}:\n{reason(e)}")
 
     def import_mix(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import mix", "", "Openface Mixer mix (*.json)")
@@ -984,40 +1542,111 @@ class MainWindow(QMainWindow):
         try:
             name, mix = import_mix(path)
         except (OSError, ValueError) as e:
-            QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{e}")
+            QMessageBox.warning(self, "Import mix", f"Could not import {path}:\n{reason(e)}")
             return
-        apply_mix(self.st, mix)
-        self.st["active_slot"] = None
-        self.rebuild_all()
-        self.refresh_slots()
-        self.push_matrix()
-        self.notify(f"Imported “{name}”")
+        self.replace_mix(mix, f"Imported “{name}”")
+
+    def save_workspace(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace",
+                                              f"{self.dev.key}.workspace.json",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            export_workspace(path, self.dev, self.st, self.presets.slots,
+                             {**self.settings.meter_prefs, "arc_keys": self.arc_keys})
+        except OSError as e:
+            QMessageBox.warning(self, "Save workspace", f"Could not save to {path}:\n{reason(e)}")
+            return
+        self.notify("Saved the workspace")
+
+    def load_workspace(self):
+        """Every part of the file is checked before anything is replaced. The mix it replaces
+        is kept for Restore previous mix, and the window then reopens with what was loaded,
+        as after a change of UI scale."""
+        path, _ = QFileDialog.getOpenFileName(self, "Load workspace", "",
+                                              "Openface Mixer workspace (*.json)")
+        if not path:
+            return
+        try:
+            st, slots, ui = import_workspace(path, self.dev)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not load {path}:\n{reason(e)}")
+            return
+        if not ask(self, "Load workspace", "Replace the mix, names, presets, layouts and "
+                   "settings with the workspace? The current mix can be brought back with "
+                   "Restore previous mix.", "Load workspace"):
+            return
+        if self.dev.family == "hdspe":
+            st["hw"] = self.st["hw"]        # which card and its driver answer: this computer's
+        if "remote" in self.st:
+            st["remote"] = self.st["remote"]    # so is the OSC remote (never in a workspace)
+        st["sinks"] = self.st["sinks"]      # and the desktop sinks and sources
+        try:
+            export_mix(previous_mix_file(self.dev), "Previous mix", extract_mix(self.st))
+        except OSError:
+            pass                    # a full disk must not stop it, as for a recall
+        self.st.clear()
+        self.st.update(st)
+        self.presets.slots = slots
+        try:
+            self.save()
+            self.presets.save()
+            save_ui(**ui)
+        except OSError as e:
+            QMessageBox.warning(self, "Load workspace", f"Could not save it all:\n{reason(e)}")
+        self.reopen_geometry = self.geometry()
+        self.switch_to = self.dev.key
+        self.close()
+        QApplication.quit()             # main() opens the window again with the workspace
 
     def reset_mix(self):
         if not ask(self, "Reset mix", "Reset all routing to the default (playback n → output n, "
-                   "no input monitoring, no groups)? This can't be undone.", "Reset mix"):
+                   "no input monitoring, no groups)?", "Reset mix"):
             return
-        apply_mix(self.st, extract_mix(default_state(self.dev.phones_pair(1))))
-        self.st["active_slot"] = None
-        self.rebuild_all()
-        self.refresh_slots()
-        self.push_matrix()
-        self.notify("Mix reset to default")
+        self.replace_mix(extract_mix(default_state(self.dev.phones_pair(1))),
+                         "Mix reset to default")
 
     # ------------------------------------------------------------------ engine sync and saving
     def push_matrix(self):
-        self.engine.write_matrix(*control_room.apply(self.st, compute_matrix(self.st),
-                                                     compute_out_gains(self.st)))
+        self.refresh_cue()
+        gains, out_gains = control_room.apply(self.st, compute_matrix(self.st),
+                                              compute_out_gains(self.st), cue=self.cue)
+        self.engine.write_matrix(gains, out_gains)
         self.engine.write_device(device_block(self.st, self.dev))
+        if self.dev.family == "hdspe":
+            self._limited = hdspe.limited(gains, out_gains, N_SRC)
+            self.show_limited()
         self.matrix.update()
         self.control.refresh()
+        self.refresh_groups()
         self.update_arc_leds()
+        self.refresh_tray()
         self.schedule_save()
+
+    def show_limited(self):
+        """An HDSPe card has no output fader: its output level is part of every send, and a
+        send stops at +6 dB. Mark the faders that ask for more than that."""
+        if self.dev.family != "hdspe":
+            return
+        outs = {o for o, _src in self._limited}
+        sel = self.st["selected"]
+        for s in self.strips.values():
+            if s.kind == "out":
+                on = not outs.isdisjoint(s.channels)
+                s.set_limited("Some sends to this output are held at +6 dB, the most the card "
+                              "can do. Lower this level to get them back." if on else "")
+            else:
+                base = 0 if s.kind == "in" else N_IN
+                on = any((o, base + c) in self._limited
+                         for o in (2 * sel, 2 * sel + 1) for c in s.channels)
+                s.set_limited("Held at +6 dB: this send and the output level add up to more "
+                              "than the card can do." if on else "")
 
     # ------------------------------------------------------------------ ARC USB
     def arc_key(self, key, pressed):
         """An ARC key went down or up. Keys act on press; Talkback also on release."""
-        action = arc.DEFAULT_KEYS[key]
+        action = self.arc_keys[key]
         cr = control_room.control_room(self.st)
         if action == "talkback":
             if pressed:
@@ -1039,8 +1668,9 @@ class MainWindow(QMainWindow):
             if self.presets.slots[slot]:
                 self.recall_slot(slot)
             return
-        if action == "phones":
-            cr["encoder"] = "main" if cr["encoder"] == "phones" else "phones"
+        if action in control_room.ENCODER_TARGETS:  # a lit Phones key again: back to Main Out
+            lit = action != "main" and arc.key_lit(self.st, action, None)
+            cr["encoder"] = "main" if lit else action
             self.update_arc_leds()
             self.schedule_save()
             return
@@ -1048,13 +1678,24 @@ class MainWindow(QMainWindow):
         self.push_matrix()
 
     def arc_encoder(self, clicks):
-        """The encoder turns the Main Out (or Phones) master; its fader group follows, as when
-        the fader is moved with the mouse."""
+        """The encoder turns the Main Out (or Phones) master."""
         key = strip_key("out", control_room.encoder_pair(self.st))
         old = get_strip_db(self.st, key)
         _pair, db = control_room.step_volume(self.st, clicks)
-        moved = {key: db, **group_follow(self.st, key, old, db)}
-        for k, val in moved.items():
+        self.out_moved(key, old, db)
+
+    def recall_main(self):
+        """TotalMix's Recall: Main Out goes to the stored listening level."""
+        cr = control_room.control_room(self.st)
+        key = strip_key("out", cr["main"])
+        old = get_strip_db(self.st, key)
+        set_strip_db(self.st, key, cr["recall_db"])
+        self.out_moved(key, old, cr["recall_db"])
+
+    def out_moved(self, key, old, db):
+        """An output master was set without its fader: show it, and let its fader group follow
+        as when the fader is moved with the mouse, also where a strip is hidden."""
+        for k, val in {key: db, **group_follow(self.st, key, old, db)}.items():
             if k in self.strips:
                 self.strips[k].set_fader(val)
         self.push_matrix()
@@ -1066,37 +1707,59 @@ class MainWindow(QMainWindow):
 
     def update_arc_leds(self):
         slot = self.st.get("active_slot")
-        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in arc.DEFAULT_KEYS])
+        if slot is not None and not self.presets.slots[slot]:
+            slot = None                 # an empty slot's key stays dark, whatever the state says
+        self.arc.set_leds([arc.key_lit(self.st, a, slot) for a in self.arc_keys])
+
+    def set_arc_keys(self, keys):
+        """What each ARC key does, from the Control Room section; kept for this computer."""
+        self.arc_keys = keys
+        try:
+            save_ui(arc_keys=keys)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.update_arc_leds()
 
     def schedule_save(self):
         self._save_timer.start()
 
     def save(self):
         save_state(self.st, self.dev)
+        self.sync_sinks()
+
+    def sync_sinks(self):
+        """Write the desktop sinks and sources for the engine if they changed, and tell it."""
+        if save_sinks(self.st, self.dev):
+            self.engine.reload_sinks()
+
+    def poll_pw_clock(self):
+        self.settings.read_pw_clock()   # PipeWire's rate and buffer may have changed meanwhile
 
     def ensure_engine(self):
         if self.engine.outdated():
             self.restart_engine()   # an older engine from before an upgrade is still running
-            time.sleep(0.5)
-        if self.engine.status() is None:
-            self.save()   # so a freshly started engine loads our matrix
-            ok, msg = self.engine.start()
-            if not ok:
-                # shown in the Status section instead of an alert at launch
-                self.engine_error = msg
-                return
-            for _ in range(30):
-                time.sleep(0.05)
-                if self.engine.status() is not None:
-                    break
+        elif self.engine.status() is None:
+            self.start_engine()
+        else:
+            self.sync_sinks()       # one already running reads a list changed meanwhile
+
+    def start_engine(self):
+        """Starts the engine and returns at once. poll_engine then looks for it every 50 ms, for
+        1.5 s at most, without calling it stopped meanwhile, and sends it the mix as it is by
+        then."""
+        self.save()   # so a freshly started engine loads our matrix
+        ok, msg = self.engine.start()
+        # shown in the Status section instead of an alert at launch
+        self.engine_error = None if ok else msg
+        self._engine_due = time.monotonic() + 1.5 if ok else 0.0
+        self.pace_timers()
 
     def restart_engine(self):
         self.engine_error = None
-        self.save()
         self.engine.stop()
-        time.sleep(0.3)
-        self.engine.start()
-        QTimer.singleShot(600, self.push_matrix)
+        self._engine_up = False     # the next one to answer is new, and is sent the mix
+        self._engine_due = time.monotonic() + 2.0
+        self._start_timer.start()   # once the old engine has had time to go
 
     # ------------------------------------------------------------------ network remote (OSC)
     def apply_remote_settings(self):
@@ -1108,6 +1771,7 @@ class MainWindow(QMainWindow):
             self.remote.stop()
         elif port != r["port"]:
             self.remote.start(r["port"])
+        self.pace_timers()
         self.schedule_save()
 
     def remote_snapshot(self):
@@ -1118,6 +1782,8 @@ class MainWindow(QMainWindow):
         """A controller on the network changed something (osc_remote.apply says what)."""
         res = osc_remote.apply(self.st, self.dev, self.mode, address, args)
         if res.kind == "changed":
+            for kind in ("in", "play"):
+                self.solo_as_shown(kind)        # a remote can't solo what is hidden here
             if res.selected is not None and res.selected != self.submix.currentData():
                 self.select_out(res.selected, by_pair=True)
             self.sync_strips()
@@ -1148,24 +1814,32 @@ class MainWindow(QMainWindow):
             s.mute.blockSignals(True)
             s.mute.setChecked(mute)
             s.mute.blockSignals(False)
+            s.show_flags()
 
     # ------------------------------------------------------------------ polling
     def poll_engine(self):
         s = self.engine.status()
+        if self._engine_due:
+            if s is None and time.monotonic() < self._engine_due:
+                return                  # still starting
+            self._engine_due = 0.0
+            self.pace_timers()
+        if s is not None and not self._engine_up:
+            self.push_matrix()          # a (re)started engine: the mix as it is now
+        self._engine_up = s is not None
+        self.engine_status, self.hw_text = s, hw_words(self.dev, s["hw"])[0] if s else ""
+        self.refresh_tray()
         self.settings.update_hw_mixer(s, self.engine_error)
         sep = "<span style='color:#2a4552'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
         if s is None:
-            txt = "<span style='color:#ff2a4f'>○</span>&nbsp; ENGINE STOPPED"
+            txt = light(RED) + "&nbsp; Engine stopped"
             self.status.setToolTip("The engine is not running · click for details")
         else:
-            hw_col = ("#2ad4ff" if s["hw"] == "active" else
-                      "#ffb020" if s["hw"] in ("no-nodes", "starting") else "#ff2a4f")
             rate = f"{s['rate'] / 1000:g} kHz" if s["rate"] else "— kHz"
             limit = f"/{self.dev.max_routes}" if self.dev.max_routes else ""
             routes = (f"{s['hw_nodes']}{limit} routes" if s["hw"] in ("active", "no-nodes")
-                      else "offline")
-            dot = "●" if s["hw"] in ("active", "no-nodes", "starting") else "○"
-            txt = (f"<span style='color:{hw_col}'>{dot}</span>&nbsp; HW DSP" +
+                      else "no reply" if s["hw"] == "no-reply" else "offline")
+            txt = (light(hw_color(s["hw"])) + "&nbsp; HW DSP" +
                    ("" if self._status_short else f"{sep}{rate}{sep}{routes}"))
             self.status.setToolTip(f"Hardware DSP: {rate}, {routes} · click for details")
             if s["rate"] and speed_mode(s["rate"]) != self.mode:
@@ -1173,18 +1847,33 @@ class MainWindow(QMainWindow):
                 self.rebuild_all()
         self.status.setText(txt)
         active = s is not None and s["hw"] == "active"
+        if active and not self._hw_active:
+            self.engine.enable()        # the interface is there: restore its mix at every login
         self._hw_active = active
         if self.dev.family == "latter":
-            self.settings.update_latter_status(s["dev_status"] if active else None)
+            if active and self.dev.bus == "FireWire":
+                self.follow_unit(s["dev_status"])
+            # "no-reply" is connected too: the clock shows as unknown, not as not connected
+            connected = active or (s is not None and s["hw"] == "no-reply")
+            self.settings.update_latter_status(s["dev_status"] if connected else None)
         elif self.dev.family == "former":
-            hw = self.st["hw"]
-            if active and not hw["known"]:
-                # the configuration is write only: start from what the device reports
-                self.dev.proto.settings_from_status(hw, s["dev_status2"])
-                self.settings.refresh_ff800_settings()
-                self.push_matrix()
+            if active:
+                self.follow_unit(s["dev_status2"])
             self.settings.update_former_status((s["dev_status"], s["dev_status2"])
                                                if active else None)
+
+    def follow_unit(self, status):
+        """A FireWire Fireface's configuration is write only and holds the clock source. Until
+        the user changes a setting here, show what the unit reports and write nothing (the
+        protocol module's config_ready), so connecting never changes the unit's clock."""
+        hw = self.st["hw"]
+        if self.dev.proto.config_ready(hw):
+            return
+        before = dict(hw)
+        self.dev.proto.settings_from_status(hw, status)
+        if hw != before:
+            self.settings.refresh_fw_settings()
+            self.push_matrix()
 
     def poll_hw(self):
         if self.dev.key == "digiface":
@@ -1196,18 +1885,31 @@ class MainWindow(QMainWindow):
         if self.dev.key == "digiface":
             self.settings.update_profile(*pw_digiface_card())
 
+    def apply_meter_prefs(self):
+        prefs = self.settings.meter_prefs
+        Meter.show_rms = prefs["meter_rms"]
+        Meter.hold_s = prefs["peak_hold"]
+        Meter.over_count = prefs["over_samples"]
+        for s in self.strips.values():
+            s.meter.update()
+
     def update_meters(self):
         now = time.monotonic()
         dt, self._last_meter = now - self._last_meter, now
-        src, out = self.engine.read_peaks()
-        if src is None:
+        meters = self.engine.read_peaks()
+        if meters[0] is None:
             return
-        for s in self.row_in.strips:
-            s.meter.push([src[c] for c in s.channels], dt)
-        for s in self.row_play.strips:
-            s.meter.push([src[N_IN + c] for c in s.channels], dt)
-        for s in self.row_out.strips:
-            s.meter.push([out[c] for c in s.channels], dt)
+        src, out, rms_src, rms_out, over_src, over_out = meters
+        for row, base, peaks, rms, overs in (
+                (self.row_in, 0, src, rms_src, over_src),
+                (self.row_play, N_IN, src, rms_src, over_src),
+                (self.row_out, 0, out, rms_out, over_out)):
+            with_rms = row.kind in self.dev.meter_rms
+            for s in row.strips:
+                chans = [base + c for c in s.channels]
+                s.meter.push([peaks[c] for c in chans], dt,
+                             [rms[c] for c in chans] if with_rms else None,
+                             [overs[c] for c in chans] if self.dev.meter_overs else None)
         self.remote.add_peaks("in", self.channels("in"), src)
         self.remote.add_peaks("play", self.channels("play"), src[N_IN:])
         self.remote.add_peaks("out", self.channels("out"), out)
@@ -1216,31 +1918,110 @@ class MainWindow(QMainWindow):
         self.save()
         size = (self.normalGeometry() if self.isMaximized() else self.geometry()).size()
         save_window(size.width(), size.height(), self.sidebar.is_open())
-        if self.background and self.switch_to is None and not self._quitting:
-            e.ignore()                  # keep mixing and serving the remote; reopen to show
+        if self.hides_on_close() and self.switch_to is None and not self._quitting:
+            e.ignore()                  # keep serving the ARC USB and the remote; the tray icon
+                                        # or opening the app again shows the window
             self.hide()
             return
+        if self.cue is not None:        # the interface keeps mixing: Main Out's own mix again
+            self.set_cue(self.cue, False)
         super().closeEvent(e)
 
 
-def _single_instance(app, dev):
-    """Make this the only running Openface Mixer window for dev (each device has its own engine,
-    mix and window, so one per device may run). If one is already running, ask it to show its
-    window and return None; otherwise return the server that answers later starts."""
-    name = f"{APP_ID}-{os.getuid()}-{dev.key}"
-    probe = QLocalSocket()
-    probe.connectToServer(name)
-    if probe.waitForConnected(300):
-        probe.write(b"show\n")
-        probe.waitForBytesWritten(300)
-        probe.disconnectFromServer()
-        return None
+def socket_name(dev):
+    """The single-instance socket of dev's window: each device has its own engine, mix and
+    window, so one window per device may run."""
+    return f"{APP_ID}-{os.getuid()}-{dev.key}"
+
+
+def tell_running(dev, lines=("show",)):
+    """Send lines (commands.py) to dev's running window. False if none is running."""
+    sock = QLocalSocket()
+    sock.connectToServer(socket_name(dev))
+    if not sock.waitForConnected(300):
+        return False
+    sock.write("".join(line + "\n" for line in lines).encode())
+    sock.waitForBytesWritten(300)
+    sock.disconnectFromServer()
+    return True
+
+
+def listen(app, dev):
+    """The server that later starts for dev talk to (see tell_running)."""
+    name = socket_name(dev)
     QLocalServer.removeServer(name)            # left behind by a crashed instance
     server = QLocalServer(app)
     if not server.listen(name):
         print(f"openface-mixer: single-instance socket {name}: {server.errorString()}",
               file=sys.stderr)
     return server
+
+
+def serve(server, handle):
+    """Call handle(command, slot) for each command line (commands.parse) that a later start
+    sends to server; anything else is dropped. Reads as the lines come, never waiting."""
+    def accept():
+        while server.hasPendingConnections():
+            sock = server.nextPendingConnection()
+            buf = bytearray()
+
+            def read(sock=sock, buf=buf):
+                buf.extend(sock.readAll().data())
+                *lines, rest = bytes(buf).split(b"\n")
+                buf[:] = rest[:commands.MAX_LINE + 1]     # enough to know it is too long
+                for line in lines:
+                    cmd = commands.parse(line)
+                    if cmd is not None:
+                        handle(*cmd)
+            sock.readyRead.connect(read)
+            sock.disconnected.connect(sock.deleteLater)
+    server.newConnection.connect(accept)
+
+
+def run(app, dev, background, show):
+    """Run dev's window until the app quits; returns the exit code. background: closing only
+    hides the window (started with --background). A device switch or a new UI scale opens the
+    next window in its place, shown, and a background instance stays one: it was started to
+    keep running, now for the device it was switched to."""
+    current = {}
+
+    def claim(dev):
+        """This process becomes dev's window, or hands over to the one already running."""
+        if tell_running(dev):
+            return None
+        server = listen(app, dev)
+        serve(server, lambda cmd, slot: current["window"].command(cmd, slot))
+        return server
+
+    server = claim(dev)
+    if server is None:
+        return 0
+    geometry = None
+    while True:
+        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
+        save_device_choice(dev)
+        w = MainWindow(dev, background)
+        current["window"] = w
+        if geometry is not None:
+            w.setGeometry(geometry)
+        if show:
+            w.show()
+        code = app.exec()
+        if w.switch_to is None:
+            return code
+        show = True                  # the user switched devices or the scale in the window
+        dev = DEVICES[w.switch_to]
+        geometry = w.reopen_geometry
+        w.arc.disconnect_port()      # so the next window can open the ARC USB
+        w.remote.stop()              # and the next one can bind the remote's port
+        w.tray.remove()              # the next window brings its own icon
+        w.deleteLater()
+        if w.dev is not dev:         # the other device may already have a window: show that
+            server.close()
+            server.deleteLater()
+            server = claim(dev)
+            if server is None:
+                return 0
 
 
 def main():
@@ -1255,48 +2036,14 @@ def main():
             sys.exit(f"--device: one of {', '.join(DEVICES)}")
     else:
         dev = detect(load_device_choice())
-    background = "--background" in args
-    app.setQuitOnLastWindowClosed(not background)
-    current = {}
-
-    def show_window():
-        w = current.get("window")
-        if w is not None:
-            w.show()
-            w.raise_()
-            w.activateWindow()
-
-    def claim(dev):
-        """This process becomes dev's window, or hands over to the one already running."""
-        server = _single_instance(app, dev)
-        if server is None:
+    try:
+        lines = commands.from_args(args)
+    except ValueError as e:
+        sys.exit(f"openface-mixer: {e}")
+    if lines:
+        if tell_running(dev, lines):
             sys.exit(0)
-        server.newConnection.connect(lambda: (server.nextPendingConnection().deleteLater(),
-                                              show_window()))
-        return server
-
-    server = claim(dev)
-    geometry = None
-    while True:
-        apply_theme(app, load_ui_scale())   # the window is laid out at the saved UI scale
-        save_device_choice(dev)
-        w = MainWindow(dev, background)
-        current["window"] = w
-        if geometry is not None:
-            w.setGeometry(geometry)
-        if not background:
-            w.show()
-        code = app.exec()
-        if w.switch_to is None:
-            sys.exit(code)
-        background = False               # the user switched devices in the window: show the next
-        app.setQuitOnLastWindowClosed(True)
-        dev = DEVICES[w.switch_to]
-        geometry = w.reopen_geometry
-        w.arc.disconnect_port()      # so the next window can open the ARC USB
-        w.remote.stop()              # and the next one can bind the remote's port
-        w.deleteLater()
-        if w.dev is not dev:         # the other device may already have a window: show that
-            server.close()
-            server.deleteLater()
-            server = claim(dev)
+        if lines != ["show"]:       # a shortcut pressed with the mixer off opens no window
+            sys.exit(f"openface-mixer: the {dev.name} mixer is not running")
+    background = "--background" in args
+    sys.exit(run(app, dev, background, not background or "show" in lines))

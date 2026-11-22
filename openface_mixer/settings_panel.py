@@ -3,18 +3,65 @@ mixer status."""
 import html
 import threading
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import hdspe, updater
-from .config import UI_SCALES
-from .devices import DEVICES, group_title
-from .hardware import Hardware, set_card_profile
+from . import hdspe, sinks, theme, updater
+from .config import PEAK_HOLDS, UI_SCALES, load_meter_prefs, load_update_prefs, save_ui
+from .devices import DEVICES, connected, group_title
+from .hardware import (
+    FORCE_QUANTUM, FORCE_RATE, PW_QUANTA, PW_RATES, Hardware, pw_clock, set_card_profile,
+    set_pw_clock,
+)
+from .model import N_SLOTS, speed_mode
 from .theme import SANS, Section, caption_html, font, key_label, px
+
+# Every keyboard shortcut, by where it works: (where, ((keys, what they do), ...)). The list at
+# the bottom of the sidebar shows them, and README.md has the same list under "Keyboard
+# shortcuts" (tests/test_layout.py holds the two together). The Effects groups are for devices
+# with TotalMix FX.
+SHORTCUTS = (
+    ("Window", (
+        ("Ctrl+,", "Show or hide settings"),
+        ("Ctrl+1, Ctrl+2", "Mixer, Matrix"),
+        ("Tab, Shift+Tab", "Next, previous control"),
+        ("Esc", "Cancel Store or typing"),
+        ("Ctrl+Q", "Quit"),
+    )),
+    ("Row title", (
+        ("Space, Enter", "Fold or unfold the row"),
+    )),
+    ("Fader", (
+        ("Up, Down", "1 dB (Ctrl: 0.5 dB)"),
+        ("Page Up / Down", "6 dB"),
+        ("Home", "0 dB"),
+        ("End", "Off (-∞)"),
+        ("Enter", "Type a level"),
+    )),
+    ("Pan knob", (
+        ("Left, Right", "Pan"),
+        ("Home", "Centre"),
+    )),
+    ("Matrix", (
+        ("Arrow keys", "Move the selection"),
+        ("Enter", "Type a level"),
+        ("Delete", "Clear the cell"),
+    )),
+    ("Effects", (
+        ("Ctrl+E", "Reverb and Echo"),
+        ("Esc, Ctrl+W", "Close a panel"),
+    )),
+    ("Effects knob", (
+        ("Arrow keys", "Turn (Shift: fine)"),
+        ("Page Up / Down", "Ten steps"),
+        ("Home", "Default value"),
+        ("Enter", "Type a value"),
+    )),
+)
 
 UDEV_RULES = {"digiface": "70-rme-digiface.rules", "ff802": "70-rme-fireface.rules",
               "ff800": "70-rme-fireface.rules", "ff400": "70-rme-fireface.rules"}
@@ -26,47 +73,123 @@ def udev_rule_hint(dev):
                 "Make sure your user may use audio devices (the <tt>audio</tt> group, or a "
                 "local login session).")
     rule = UDEV_RULES[dev.key]
+    if updater.packaged():
+        return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. The "
+                "package installed the udev rule for it. Reconnect the interface, or restart "
+                "the computer, so the rule applies.")
     return (f"Openface Mixer needs write access to the {dev.name}'s {dev.bus} device. Install "
             f"the udev rule once:<br><tt>sudo install -m644 packaging/{rule} "
             "/etc/udev/rules.d/</tt><br>"
             "<tt>sudo udevadm control --reload &amp;&amp; sudo udevadm trigger</tt>")
 
 
-CYAN, AMBER, RED, OFF = "#2ad4ff", "#ffb020", "#ff2a4f", "#6f8a94"
+# a status light is cyan when on (active, locked, linked), red when something needs attention
+# and grey when off or not known yet
+CYAN, RED, OFF = theme.CYAN.name(), theme.RED.name(), theme.MUTED
 
 
-def light(color, text, on=True):
-    """A status value: a light, filled when things are fine or busy and an empty ring when
-    not, then the words (the state never depends on telling the colours apart)."""
-    return f"<span style='color:{color}'>{'●' if on else '○'}</span>&nbsp;{text}"
+def light(color, text=""):
+    """A status value: a dot in the state's colour, then the words (the state never depends
+    on telling the colours apart)."""
+    return f"<span style='color:{color}'>●</span>" + (text and f"&nbsp;{text}")
+
+
+def hw_color(state):
+    """The light of an engine hardware state (engine.HW_STATES), here and in the top bar."""
+    return {"active": CYAN, "starting": OFF}.get(state, RED)
 
 
 def hw_state(dev, state):
     """(short value for the Hardware mixer row, what to do about it or "")."""
+    text, note = hw_words(dev, state)
+    return light(hw_color(state), text), note
+
+
+def hw_words(dev, state):
+    """(the words of the Hardware mixer row, what to do about it or "")."""
     short = dev.name.replace("RME ", "")
     hint = dev.missing_hint() if state == "no-device" else ""
     return {
-        "starting": (light(AMBER, "Connecting…"), ""),
-        "no-device": (light(RED, "Not found", False), f"{short} not found on {dev.bus}."
+        "starting": ("Connecting…", ""),
+        "no-device": ("Not found", f"{short} not found on {dev.bus}."
                       + (hint and f"<br>{hint}")),
-        "no-access": (light(RED, "No permission", False),
+        "no-access": ("No permission",
                       f"No permission to open the {short}.<br>" + udev_rule_hint(dev)),
-        "busy": (light(RED, "In use", False),
+        "busy": ("In use",
                  f"The {short} driver refuses mixer changes while playback and recording are "
                  "open in two different programs. Let one program (PipeWire or JACK) use both."
                  if dev.bus == "PCIe" else
                  f"The {short} mixer interface is in use by another program."),
-        "active": (light(CYAN, "Active"), ""),
-        "no-nodes": (light(AMBER, "Active, routes full"),
+        "active": ("Active", ""),
+        "no-nodes": ("Active, routes full",
                      f"This mix needs more than {dev.max_routes} routes; some sends are "
                      "missing."),
-        "error": (light(RED, f"{dev.bus} error", False),
-                  f"{dev.bus} error talking to the {short}; retrying."),
-        "wrong-driver": (light(RED, "Wrong driver", False),
-                         f"This {short} needs the snd-hdspe driver; snd-hdspm can't run cards "
-                         "from 2022 on. Install snd-hdspe and blacklist snd-hdspm (see the "
-                         "README)."),
+        "error": (f"{dev.bus} error", f"{dev.bus} error talking to the {short}; retrying."),
+        "wrong-driver": ("Check driver",
+                         f"This {short} looks like a card from 2022 on. Those need the snd-hdspe "
+                         "driver, and this one runs on snd-hdspm, so the mixer is left alone. "
+                         "Install snd-hdspe and blacklist snd-hdspm (see the README), or choose "
+                         "Use anyway if the card works for you as it is."),
+        "no-reply": ("Connected, no reply from the DSP",
+                     f"The {short} is connected but has not answered, so changes may not "
+                     "reach it."),
     }.get(state, (state, ""))
+
+
+def read_failure(hw, short):
+    """(short text, tooltip) for the Sample rate row when the card's settings can't be shown
+    (hw: the Hardware after a read() that gave nothing usable)."""
+    if hw.card is None:
+        return f"{short} not found", ""
+    if hw.error == "missing":
+        return "amixer is not installed", "Install the alsa-utils package."
+    if hw.error == "timeout":
+        return "amixer did not answer", ""
+    return "Can't read settings", hw.error or "The card's ALSA controls are not the expected ones."
+
+
+def desktop_audio(dev, lst, status):
+    """The Desktop audio row of STATUS: (value, tooltip), from the engine's status
+    (Engine.status()) and the device's sinks and sources (st["sinks"])."""
+    mode = speed_mode(status.get("rate"))
+
+    def where(e):
+        kind = sinks.kind_of(e)
+        label = (dev.pair_label if e["stereo"] else dev.chan_label)(kind, e["ch"], mode)
+        return f"{'playback' if kind == 'play' else 'input'} {label}"
+
+    here = [e for e in lst if sinks.pcm_map(dev, e)[(1, 2, 4).index(mode)][0] >= 0]
+    tip = "<br>".join(html.escape(f"{sinks.description(e['name'])}: " + (
+        where(e) if e in here else "not at this sample rate")) for e in lst)
+    if not status.get("pipewire", True):
+        return light(OFF, "PipeWire not running"), (
+            "The hardware mixer works without PipeWire. The desktop outputs and inputs come "
+            "back when it starts.")
+    if not here:
+        return light(OFF, "None at this rate" if lst else "None"), tip or (
+            "Right-click a playback or input channel to add one.")
+    made = status.get("pw_nodes", len(here))
+    linked = status.get("pw_linked", made if status["sink_linked"] else 0)
+    if made and linked == made:
+        return (f"Linked to {where(here[0])}" if made == 1 else f"{made} linked"), tip
+    short = dev.name.replace("RME ", "")
+    return light(RED, f"Not linked to the {short}" if not linked else
+                 f"{linked} of {made} linked"), tip
+
+
+def write_failure(why, dev, tool="amixer"):
+    """The toast for a setting tool could not change (why: hardware.run()'s answer)."""
+    if why == "missing":
+        why = f"{tool} is not installed"
+    elif why == "timeout":
+        why = f"{tool} did not answer"
+    elif tool == "pw-metadata" and "connect" in why:
+        why = "PipeWire is not running"
+    elif dev.family == "hdspe" and "busy" in why:
+        why = "the driver is busy while playback and recording are open in two programs"
+    else:   # "amixer: Control hw:1 element write error: Device or resource busy": the reason
+        why = why.rsplit(": ", 1)[-1]
+    return f"Not changed: {why}"
 
 
 def ask(parent, title, text, action):
@@ -80,39 +203,33 @@ def ask(parent, title, text, action):
 
 
 class Led(QLabel):
-    """Lock state: a filled light when locked or in sync, an empty ring when not, so it reads
-    without telling the colours apart."""
-    COLORS = {"No Lock": "#6f8a94", "Lock": "#ffb020", "Sync": "#2ad4ff"}
+    """Lock state: lit when locked or in sync, grey when not; the word says which."""
 
     def set_state(self, s):
-        c = self.COLORS.get(s, "#6f8a94")
-        dot = "●" if s in ("Lock", "Sync") else "○"
-        self.setText(f"<span style='color:{c}'>{dot}</span> {s or '—'}")
+        self.setText(light(CYAN if s in ("Lock", "Sync") else OFF, s or "—"))
 
 
 class SyncLight(QLabel):
     """A small light beside a clock source combo: green while the interface actually runs
-    from the chosen source, dark while it does not (or the state is unknown). The tooltip
-    names the current source."""
-    ON, OFF = "#56e39f", "#6f8a94"
+    from the chosen source, grey while it does not (or the state is unknown). The tooltip
+    names the current source; item is the combo's entry for it where the two differ."""
+    ON = "#56e39f"
 
     def __init__(self, combo, parent=None):
         super().__init__(parent)
         self.combo = combo
-        self.current = None
+        self.current = self.item = None
         self.setFont(font(SANS, 9))
         combo.currentIndexChanged.connect(lambda _i: self.refresh())
         self.refresh()
 
-    def set_current(self, source):
-        self.current = source
+    def set_current(self, source, item=None):
+        self.current, self.item = source, item or source
         self.refresh()
 
     def refresh(self):
-        on = self.current not in (None, "—") and self.current == self.combo.currentText()
-        # filled and green while in use, an empty ring otherwise (shape, not only colour)
-        self.setText(f"<span style='color:{self.ON if on else self.OFF}'>{'●' if on else '○'}"
-                     "</span>")
+        on = self.current not in (None, "—") and self.item == self.combo.currentText()
+        self.setText(light(self.ON if on else OFF))
         self.setToolTip(("Running from this source" if on else
                          f"Running from: {self.current}") if self.current else
                         "Current source unknown")
@@ -151,6 +268,9 @@ class Sidebar(QFrame):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         lay.addWidget(scroll, 1)
+        # the shortcut list opens at the very bottom: scroll down to it once it is laid out
+        panel.keys_btn.clicked.connect(lambda: QTimer.singleShot(
+            0, lambda: scroll.ensureWidgetVisible(panel.keys_list, 0, px(8))))
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -173,14 +293,60 @@ class Sidebar(QFrame):
         self._anim.start()
 
 
+class WideList(QComboBox):
+    """A box whose open list is as wide as its longest entry, however narrow the box is. The
+    wheel scrolls the settings past it and never changes it (as ChannelBox)."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+    def showPopup(self):
+        # the entries' own width, plus the tick column and the list's padding and frame
+        self.view().setMinimumWidth(self.view().sizeHintForColumn(0) + px(40))
+        super().showPopup()
+
+
+class DeviceBox(WideList):
+    """The Device list. While it is open, the interfaces that are connected say so; they keep
+    their place, so nothing moves under the mouse."""
+
+    def showPopup(self):
+        found = connected()
+        for i in range(self.count()):
+            d = DEVICES[self.itemData(i)]
+            self.setItemText(i, f"{d.name} (connected)" if d.key in found else d.name)
+        super().showPopup()
+
+    def hidePopup(self):
+        super().hidePopup()
+        for i in range(self.count()):
+            self.setItemText(i, DEVICES[self.itemData(i)].name)
+
+
+class ChannelBox(QComboBox):
+    """What updates follow. The wheel scrolls the settings past it and never changes it, so
+    nobody lands on the testers' channel by scrolling."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
 class SettingsPanel(QWidget):
     device_selected = Signal(str)    # device key
     hw_changed = Signal()            # a device setting (Fireface) changed in st["hw"]
+    notice = Signal(str)             # a short message for the window to show
+    card_chosen = Signal()           # another card of the model (HDSPe): the engine restarts
     shown_changed = Signal()         # a SHOW option changed st["hidden"]
     names_changed = Signal(bool)     # custom channel names on / off (st["custom_names"])
+    meters_changed = Signal()        # a meter option changed (meter_prefs, saved in ui.json)
+    layout_stored = Signal(int)      # store the channel layout shown in this slot
+    layout_recalled = Signal(int)    # show the channels as this slot has them
     ui_scale_changed = Signal(float) # chosen scale; the window reopens laid out at it
     restart_requested = Signal()
+    update_waiting = Signal(bool)    # a check found an update (the gear button shows a dot)
     _update_result = Signal(str, object)  # (step, result or UpdateError), from a worker thread
+    UPDATE_PROMPT = "Check GitHub for a newer Openface Mixer."
+    STARTUP_CHECK_MS = 5000          # the quiet check, once the window has settled
 
     def __init__(self, hw, dev, st, ui_scale=1.0, parent=None):
         super().__init__(parent)
@@ -194,12 +360,17 @@ class SettingsPanel(QWidget):
 
         box = Section("DEVICE")
         bl = QVBoxLayout(box)
-        self.device = QComboBox()
+        self.device = DeviceBox()
         for d in DEVICES.values():
             self.device.addItem(d.name, d.key)
         self.device.setCurrentIndex(self.device.findData(dev.key))
         self.device.activated.connect(lambda i: self.device_selected.emit(self.device.itemData(i)))
         bl.addWidget(self.device)
+        self.card_combo = QComboBox()    # shown while there are several cards of an HDSPe model
+        self.card_combo.setToolTip("Which of these cards to mix")
+        self.card_combo.activated.connect(self._card_chosen)
+        self.card_combo.hide()
+        bl.addWidget(self.card_combo)
         lay.addWidget(box)
         self._card_name = None
         self._updating = False
@@ -212,13 +383,18 @@ class SettingsPanel(QWidget):
             self._build_card_profile(el)
         self.hw_label, self.routes_label, self.eng_label, self.sink_label = (
             self._status_row(el, key) for key in ("Hardware mixer", "Routes", "Engine",
-                                                  "Playback sink"))
+                                                  "Desktop audio"))
         self.status_note = QLabel()
         self.status_note.setObjectName("note")
         self.status_note.setWordWrap(True)
         self.status_note.setTextInteractionFlags(Qt.TextSelectableByMouse)   # commands to copy
         self.status_note.hide()
         el.addWidget(self.status_note, el.rowCount(), 0, 1, 2)
+        self.use_btn = QPushButton("Use anyway")      # for the HDSPe driver warning
+        self.use_btn.setToolTip("Let Openface Mixer drive this card on snd-hdspm from now on")
+        self.use_btn.clicked.connect(lambda: self._set_hw("use_anyway", True))
+        self.use_btn.hide()
+        el.addWidget(self.use_btn, el.rowCount(), 0, 1, 2)
         self.eng_btn = QPushButton("Restart engine")
         el.addWidget(self.eng_btn, el.rowCount(), 0, 1, 2)
         el.setColumnStretch(1, 1)
@@ -232,18 +408,20 @@ class SettingsPanel(QWidget):
             self._build_hdspe(lay)
         else:
             self._build_digiface(lay)
+        self._build_pw_clock(self.clock_grid)
         self._control_room_at = lay.count()   # add_control_room() slots its section here
 
         self._build_ui_scale(lay, ui_scale)
         self._build_mix(lay)
         self._build_updates(lay)
+        self._build_shortcuts(lay)
 
         eng.setToolTip(
             f"All mixing happens in the {dev.name}'s own DSP, like TotalMix: input monitoring "
             "has no added latency and the mix keeps running with the computer idle or the "
-            f"engine stopped.\n\nPlayback {dev.sink_channels} = the Openface Mixer Playback "
-            "sink. Other playback channels: send apps to the interface's own output channels "
-            "(Pro Audio profile) with qpwgraph/Helvum.")
+            "engine stopped.\n\nDesktop audio: the outputs and inputs apps play to and record "
+            "from. Right-click a playback channel to add a desktop output on it, or an input "
+            "channel to add a desktop input.")
         lay.addStretch()
 
     def add_control_room(self, section):
@@ -280,25 +458,118 @@ class SettingsPanel(QWidget):
         show = QGridLayout()
         show.setHorizontalSpacing(px(8))
         show.setVerticalSpacing(px(3))
+        self.show_boxes = {}
         for i, g in enumerate(self.dev.channel_groups()):
-            cb = QCheckBox(group_title(g))
+            cb = self.show_boxes[g] = QCheckBox(group_title(g))
             cb.setChecked(g not in self.st["hidden"])
             cb.toggled.connect(lambda on, grp=g: self._show_toggled(grp, on))
             show.addWidget(cb, i // 3, i % 3)
         dl.addLayout(show, 3, 0, 1, 2)
+        # TotalMix's layout presets: which channels and rows are shown, never the mix
+        dl.addWidget(key_label("Layouts"), 4, 0)
+        slots = QHBoxLayout()
+        slots.setSpacing(px(3))
+        self.layout_btns = []
+        for i in range(N_SLOTS):
+            b = QPushButton(str(i + 1))
+            b.setObjectName("slot")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, n=i: self._layout_clicked(n))
+            slots.addWidget(b)
+            self.layout_btns.append(b)
+        slots.addStretch()
+        dl.addLayout(slots, 5, 0, 1, 2)
+        self.layout_store = QPushButton("Store")
+        self.layout_store.setObjectName("store")
+        self.layout_store.setCheckable(True)
+        self.layout_store.setToolTip("Click, then click a number to save which channels and rows "
+                                     "are shown. An empty number saves with one click.")
+        dl.addWidget(self.layout_store, 4, 1, Qt.AlignRight)
+        self.refresh_layouts()
+        # meter options, for this computer (ui.json), as in TotalMix's preferences
+        self.meter_prefs = prefs = load_meter_prefs()
+        row = 6
+        self.rms_box = None         # a device that reports no RMS: peak only, nothing to choose
+        if self.dev.meter_rms:
+            self.rms_box = QCheckBox("Show RMS level")
+            self.rms_box.setChecked(prefs["meter_rms"])
+            self.rms_box.setToolTip("Light each meter up to the average (RMS) level and dim it "
+                                    "above, up to the peak.")
+            self.rms_box.toggled.connect(lambda on: self._set_meters(meter_rms=on))
+            dl.addWidget(self.rms_box, row, 0, 1, 2)
+            row += 1
+        self.hold_combo = self._meter_combo(
+            dl, row, "Peak hold", "How long the line above a meter stays at a peak", PEAK_HOLDS,
+            prefs["peak_hold"], lambda v: f"{v:g} s", "peak_hold")
+        self.over_combo = None      # a device that reports only a level: one sample clips
+        if self.dev.meter_overs:
+            self.over_combo = self._meter_combo(
+                dl, row + 1, "Clip after", "Full-scale samples in a row that light a meter's "
+                "clip light", range(1, 11), prefs["over_samples"],
+                lambda v: "1 sample" if v == 1 else f"{v} samples", "over_samples")
         lay.addWidget(disp)
 
+    def _meter_combo(self, grid, row, label, tip, values, current, text, key):
+        grid.addWidget(key_label(label), row, 0)
+        combo = QComboBox()
+        for v in values if current in values else sorted((*values, current)):
+            combo.addItem(text(v), v)
+        combo.setCurrentIndex(combo.findData(current))
+        combo.setToolTip(tip)
+        combo.activated.connect(lambda i: self._set_meters(**{key: combo.itemData(i)}))
+        grid.addWidget(combo, row, 1)
+        return combo
+
+    def _set_meters(self, **change):
+        self.meter_prefs.update(change)
+        try:
+            save_ui(**change)
+        except OSError:
+            pass                    # applies all the same, until the window closes
+        self.meters_changed.emit()
+
+    def _layout_clicked(self, i):
+        if self.layout_store.isChecked() or not self.st["layouts"][i]:
+            self.layout_store.setChecked(False)
+            self.layout_stored.emit(i)
+        else:
+            self.layout_recalled.emit(i)
+
+    def refresh_layouts(self):
+        for i, b in enumerate(self.layout_btns):
+            slot = self.st["layouts"][i]
+            b.setProperty("filled", slot is not None)
+            b.setToolTip(f"{i + 1}: {slot['name']}\nClick to show the channels as stored" if slot
+                         else f"{i + 1}: empty, click to store the channels shown now")
+            b.style().unpolish(b)
+            b.style().polish(b)
+
+    def show_view(self):
+        """Show the SHOW options and custom names as st has them (after a layout recall)."""
+        for box, on in [(self.names_box, self.st["custom_names"])] + [
+                (cb, g not in self.st["hidden"]) for g, cb in self.show_boxes.items()]:
+            box.blockSignals(True)
+            box.setChecked(on)
+            box.blockSignals(False)
+
     def _build_mix(self, lay):
-        """Export / import a mix as a file, or start over (the buttons are wired by the main
-        window)."""
+        """Export / import a mix as a file, save / load the workspace, or start over (the
+        buttons are wired by the main window)."""
         box = Section("MIX")
         ml = QVBoxLayout(box)
         self.export_btn = QPushButton("Export mix…")
         self.export_btn.setToolTip("Save the routing, levels and groups to a file")
         self.import_btn = QPushButton("Import mix…")
+        # TotalMix's workspace: everything for this interface in one file, to back up or move
+        self.save_ws_btn = QPushButton("Save workspace…")
+        self.save_ws_btn.setToolTip("Save the mix, names, colours, presets, layouts and settings "
+                                    "for this interface to one file")
+        self.load_ws_btn = QPushButton("Load workspace…")
+        self.load_ws_btn.setToolTip("Replace all of them with a saved workspace")
         self.reset_btn = QPushButton("Reset mix to default…")
         self.reset_btn.setToolTip("Playback n → output n, no input monitoring, no groups")
-        for b in (self.export_btn, self.import_btn, self.reset_btn):
+        for b in (self.export_btn, self.import_btn, self.save_ws_btn, self.load_ws_btn,
+                  self.reset_btn):
             ml.addWidget(b)
         lay.addWidget(box)
 
@@ -320,35 +591,107 @@ class SettingsPanel(QWidget):
 
     def _build_updates(self, lay):
         box = Section("UPDATES")
-        ul = QVBoxLayout(box)
+        ul = QGridLayout(box)
         self._updates_box = box
-        self.update_label = QLabel("Check GitHub for a newer Openface Mixer.")
+        self._source = updater.install_source()
+        self._pending = None, []     # (release or None, its changes) the last check found
+        self.version_label = QLabel(updater.version_text(self._source))
+        self.version_label.setObjectName("head")
+        self.version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # for a bug report
+        ul.addWidget(self.version_label, 0, 0, 1, 2)
+        self.update_label = QLabel(self.UPDATE_PROMPT)
         self.update_label.setWordWrap(True)
-        ul.addWidget(self.update_label)
+        ul.addWidget(self.update_label, 1, 0, 1, 2)
+        at_start, latest = load_update_prefs()
+        channel_key = key_label("Update to")
+        ul.addWidget(channel_key, 2, 0)
+        self.channel = ChannelBox()
+        self.channel.addItem("Releases", "releases")
+        self.channel.addItem("Latest changes", "latest")
+        self.channel.setCurrentIndex(int(latest))
+        self.channel.setToolTip("Releases are versions that have been tried. Latest changes "
+                                "brings every change as soon as it is made, for testers.")
+        self.channel.activated.connect(self._channel_chosen)
+        ul.addWidget(self.channel, 2, 1)
+        self.auto_check = QCheckBox("Check when the app starts")
+        self.auto_check.setChecked(at_start)
+        self.auto_check.toggled.connect(lambda on: save_ui(update_check=on))
+        ul.addWidget(self.auto_check, 3, 0, 1, 2)
         self.update_btn = QPushButton("Check for updates")
         self.update_btn.clicked.connect(self._update_clicked)
-        ul.addWidget(self.update_btn)
+        ul.addWidget(self.update_btn, 4, 0, 1, 2)
+        ul.setColumnStretch(1, 1)
         lay.addWidget(box)
-        self._source = updater.install_source()
-        self._pending = []
         self._update_result.connect(self._update_finished)
         if self._source is None:
             self.update_label.setText(updater.manual_hint())
-            self.update_btn.setVisible(False)
+            for w in (channel_key, self.channel, self.auto_check, self.update_btn):
+                w.setVisible(False)
+        else:
+            QTimer(self, singleShot=True, interval=self.STARTUP_CHECK_MS,
+                   timeout=self._startup_check).start()
+
+    def _startup_check(self):
+        """Look for an update once, saying nothing unless there is one."""
+        if self.auto_check.isChecked() and self.update_btn.isEnabled() and not self._pending[1]:
+            self._run_update_step("quiet")
+
+    def _channel_chosen(self, i):
+        save_ui(update_channel=self.channel.itemData(i))
+        self._show_pending(None, [], quiet=True)
+        self._run_update_step("check")      # what this channel has
+
+    def _build_shortcuts(self, lay):
+        """The keyboard shortcuts in one place. The list is long, so it is closed until asked
+        for."""
+        box = Section("KEYBOARD SHORTCUTS")
+        bl = QVBoxLayout(box)
+        self.keys_btn = QPushButton("Show")
+        self.keys_btn.setAccessibleName("Show keyboard shortcuts")
+        self.keys_btn.clicked.connect(self._toggle_shortcuts)
+        bl.addWidget(self.keys_btn)
+        rows = ""
+        for where, keys in SHORTCUTS:
+            if where.startswith("Effects") and self.dev.fx is None:
+                continue
+            rows += (f"<tr><td colspan='2' style='padding-top:{px(6)}px;"
+                     f"color:{theme.DIM.name()}'>{where}</td></tr>")
+            for key, what in keys:
+                rows += (f"<tr><td style='padding-right:{px(8)}px;white-space:nowrap'>"
+                         f"{html.escape(key)}</td>"
+                         f"<td style='color:{theme.MUTED}'>{html.escape(what)}</td></tr>")
+        self.keys_list = QLabel(f"<table cellspacing='0' cellpadding='{px(1)}'>{rows}</table>")
+        self.keys_list.setWordWrap(True)
+        bl.addWidget(self.keys_list)
+        self.keys_list.hide()
+        lay.addWidget(box)
+
+    def _toggle_shortcuts(self):
+        show = self.keys_list.isHidden()
+        self.keys_list.setVisible(show)
+        self.keys_btn.setText("Hide" if show else "Show")
+        self.keys_btn.setAccessibleName(f"{self.keys_btn.text()} keyboard shortcuts")
 
     def _update_clicked(self):
+        release, changes = self._pending
+        what = f"version {release}" if release else f"{len(changes)} update(s)"
+        if not changes:
+            self._run_update_step("check")
+        elif ask(self, "Update Openface Mixer",
+                 f"Install {what} and restart? Your mixes are backed up first, and the engines "
+                 "restart with the new version.", "Update and restart"):
+            self._run_update_step("update")
+
+    def _run_update_step(self, step):
+        """Check ("quiet": the one at startup, which keeps a failure to itself) or update, on
+        a thread; _update_finished gets the result."""
         src, installed = self._source
-        if self._pending:
-            if not ask(self, "Update Openface Mixer",
-                       f"Install {len(self._pending)} update(s) and restart? Your mixes are backed "
-                       "up first, and the engines restart with the new version.",
-                       "Update and restart"):
-                return
-            step, job, text = "update", lambda: updater.update(src), "Updating…"
-        else:
-            step, job, text = "check", lambda: updater.check(src, installed), "Checking…"
+        releases = self.channel.currentData() != "latest"
+        job = ((lambda: updater.update(src, releases)) if step == "update" else
+               (lambda: updater.check(src, installed, releases, step == "quiet")))
         self.update_btn.setEnabled(False)
-        self.update_label.setText(text)
+        self.channel.setEnabled(False)
+        self.update_label.setText("Updating…" if step == "update" else "Checking…")
 
         def run():
             try:
@@ -363,7 +706,11 @@ class SettingsPanel(QWidget):
 
     def _update_finished(self, step, result):
         self.update_btn.setEnabled(True)
+        self.channel.setEnabled(True)
         if isinstance(result, updater.UpdateError):
+            if step == "quiet":
+                self.update_label.setText(self.UPDATE_PROMPT)
+                return
             self.update_label.setText(str(result).splitlines()[0])
             if step == "update":
                 QMessageBox.warning(self, "Update Openface Mixer", str(result))
@@ -371,14 +718,23 @@ class SettingsPanel(QWidget):
         if step == "update":
             self.restart_requested.emit()
             return
-        self._pending = result
-        if result:
-            latest = "<br>".join(f"• {html.escape(s)}" for s in result[:5])
-            more = f"<br>…and {len(result) - 5} more" if len(result) > 5 else ""
-            self.update_label.setText(f"{len(result)} update(s) on GitHub:<br>{latest}{more}")
-            self.update_btn.setText("Update and restart…")
+        self.version_label.setText(updater.version_text(self._source))  # a new tag may name it
+        self._show_pending(*result, quiet=step == "quiet")
+
+    def _show_pending(self, release, changes, quiet):
+        """What a check found: the update's changes, or nothing (said only when asked)."""
+        self._pending = release, changes
+        if changes:
+            head = (f"Version {release} is available:" if release else
+                    f"{len(changes)} update(s) on GitHub:")
+            latest = "<br>".join(f"• {html.escape(s)}" for s in changes[:5])
+            more = f"<br>…and {len(changes) - 5} more" if len(changes) > 5 else ""
+            self.update_label.setText(f"{head}<br>{latest}{more}")
         else:
-            self.update_label.setText("Openface Mixer is up to date.")
+            self.update_label.setText(self.UPDATE_PROMPT if quiet else
+                                      "Openface Mixer is up to date.")
+        self.update_btn.setText("Update and restart…" if changes else "Check for updates")
+        self.update_waiting.emit(bool(changes))
 
     # ------------------------------------------------------------------ Digiface USB
     def _build_digiface(self, lay):
@@ -394,6 +750,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         ports = Section("OPTICAL PORTS")
@@ -414,6 +771,65 @@ class SettingsPanel(QWidget):
             self.port_widgets.append((fmt, led, rate, out))
         pl.setColumnStretch(4, 1)
         lay.addWidget(ports)
+
+    def _build_pw_clock(self, grid):
+        """PipeWire's sample rate and buffer, at the end of the CLOCK box: clock.force-rate and
+        clock.force-quantum in its settings metadata, so for every program and device. Auto
+        is 0, PipeWire's own choice. The boxes show what PipeWire has, read when the window is
+        shown (read_pw_clock). PipeWire forgets a forced value when it restarts and the app
+        does not set it again: it is not the app's alone, and the app may not even run."""
+        tip = ("PipeWire's setting, for every program and every device, until PipeWire restarts. "
+               "Auto lets PipeWire choose.")
+        rate_tip = (" The card runs at its Internal rate while nothing plays, and at this rate "
+                    "while PipeWire plays." if self.dev.family == "hdspe" else
+                    " The interface follows it.") + (
+            " With an external clock, choose the rate the clock runs at.")
+        self.pw_rate, self.pw_quantum = QComboBox(), QComboBox()
+        self._pw_values = {}
+        r = grid.rowCount()
+        for i, (label, combo, key, text) in enumerate((
+                ("PipeWire rate", self.pw_rate, FORCE_RATE, tip + rate_tip),
+                ("Buffer", self.pw_quantum, FORCE_QUANTUM,
+                 "Frames per cycle: fewer means less latency and more work. " + tip))):
+            grid.addWidget(key_label(label), r + i, 0)
+            grid.addWidget(combo, r + i, 1)
+            combo.setToolTip(text)
+            combo.setEnabled(False)          # until PipeWire's values are read
+            combo.activated.connect(lambda _i, c=combo, k=key: self._set_pw_clock(k, c))
+        hint = QLabel("PipeWire's rate and buffer apply to every program and device.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        grid.addWidget(hint, r + 2, 0, 1, -1)
+
+    def read_pw_clock(self):
+        """Show PipeWire's rate and buffer. pw-metadata answers at once, or within run()'s
+        2 s limit, like the pactl the window polls."""
+        self._show_pw_clock(pw_clock())
+
+    def _show_pw_clock(self, values):
+        """values: hardware.pw_clock(), or None if PipeWire's settings can't be read."""
+        self._pw_values = values or {}
+        lo = self._pw_values.get("clock.min-quantum", PW_QUANTA[0])
+        hi = self._pw_values.get("clock.max-quantum", PW_QUANTA[-1])
+        for combo, key, choices, text in (
+                (self.pw_rate, FORCE_RATE, PW_RATES, lambda v: f"{v / 1000:g} kHz"),
+                (self.pw_quantum, FORCE_QUANTUM, [q for q in PW_QUANTA if lo <= q <= hi], str)):
+            if combo.view().isVisible():    # leave a list that is open alone
+                continue
+            value = self._pw_values.get(key, 0)
+            combo.clear()
+            combo.addItem("Auto", 0)
+            for v in sorted(set(choices) | ({value} if value else set())):
+                combo.addItem(text(v), v)
+            combo.setCurrentIndex(combo.findData(value) if values is not None else -1)
+            combo.setEnabled(values is not None)
+
+    def _set_pw_clock(self, key, combo):
+        value = combo.currentData()
+        if value == self._pw_values.get(key, 0):
+            return
+        self._report(set_pw_clock(key, value), "pw-metadata")
+        self.read_pw_clock()        # show what PipeWire has now
 
     @staticmethod
     def _status_row(grid, key):
@@ -441,13 +857,12 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------------ Fireface 802, UCX II
     def _build_latter(self, lay):
         """TotalMix's Settings dialog for the 802 and UCX II: clock, sync inputs and
-        AES/S/PDIF/optical options. The device can't report these settings, so they come from
-        st["hw"]."""
+        AES/S/PDIF/optical options, from st["hw"]. Over FireWire the clock is the unit's own
+        until a setting is changed here; the options can't be read from the unit."""
         hw, proto = self.st["hw"], self.dev.proto
         self.ff_clock = QComboBox()
         for key, label, _ in proto.CLOCK_SOURCES:
             self.ff_clock.addItem(label, key)
-        self.ff_clock.setCurrentIndex(max(0, self.ff_clock.findData(hw["clock"])))
         self.ff_clock.activated.connect(
             lambda i: self._set_hw("clock", self.ff_clock.itemData(i)))
         # over USB the DSP reports its clock setting and rate, not the inputs' lock state
@@ -470,6 +885,7 @@ class SettingsPanel(QWidget):
         single.toggled.connect(lambda on: self._set_hw("word_single", on))
         ol.addWidget(single, len(rows), 0, 1, 2)
         lay.addWidget(opts)
+        self.refresh_fw_settings()
 
     def _build_fw_clock(self, lay, clock_combo, status_inputs, clock_label="Clock source"):
         """The CLOCK and INPUT STATUS boxes of a FireWire Fireface (and the RayDAT). Returns the
@@ -484,6 +900,7 @@ class SettingsPanel(QWidget):
         self.rate = QLabel("—")
         cl.addWidget(self.rate, 1, 1)
         cl.setColumnStretch(1, 1)
+        self.clock_grid = cl
         lay.addWidget(clock)
 
         sync = Section("INPUT STATUS")
@@ -502,24 +919,30 @@ class SettingsPanel(QWidget):
             lay.addWidget(sync)
         return cl
 
-    def _show_fw_status(self, st):
-        """st: the device's decode_status() dict, or None while it is not connected."""
+    def _show_fw_status(self, st, why=None):
+        """st: the device's decode_status() dict, or None while it is not connected (why:
+        another reason it can't be shown, as read_failure())."""
         if st is None:
+            text, tip = why or (f"{self.dev.name.replace('RME ', '')} not connected", "")
             self.cur_src.set_current(None)
-            self.rate.setText(f"<span style='color:#ff2a4f'>{self.dev.name.replace('RME ', '')} "
-                              "not connected</span>")
+            self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+            self.rate.setToolTip(tip)
             for led, rate in self.sync_widgets:
                 led.set_state(None)
                 rate.setText("—")
             return
         self.cur_src.set_current(st["source"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        self.rate.setToolTip("")
         for (led, rate), (_, state, r) in zip(self.sync_widgets, st["inputs"]):
             led.set_state(state)
             rate.setText(f"{r / 1000:g}k" if r else "—")
 
     def _set_hw(self, key, value):
-        self.st["hw"][key] = value
+        hw = self.st["hw"]
+        hw[key] = value
+        if "edited" in hw:     # FireWire: from now on the configuration is the user's
+            hw["edited"] = True
         self.hw_changed.emit()
 
     def update_latter_status(self, word):
@@ -532,7 +955,8 @@ class SettingsPanel(QWidget):
     # ------------------------------------------------------------------ Fireface 800, 400
     def _build_former(self, lay):
         """TotalMix's Settings dialog for the 800 and 400: clock, sync inputs, levels and S/PDIF
-        options. The clock and S/PDIF options start from what the device reports."""
+        options. The clock and S/PDIF options are the unit's own until a setting is changed
+        here."""
         proto = self.dev.proto
         self.ff800_combos = {}
         self._build_fw_clock(lay, self._ff800_combo("clock", [(label, key) for key, label, _ in
@@ -568,7 +992,7 @@ class SettingsPanel(QWidget):
             self.ff800_combos[key] = box
             r += 1
         lay.addWidget(opts)
-        self.refresh_ff800_settings()
+        self.refresh_fw_settings()
 
     def _ff800_combo(self, key, items):
         combo = QComboBox()
@@ -578,13 +1002,20 @@ class SettingsPanel(QWidget):
         self.ff800_combos[key] = combo
         return combo
 
-    def refresh_ff800_settings(self):
-        """Show st["hw"] (after it was filled in from the device's status)."""
+    def refresh_fw_settings(self):
+        """Show st["hw"] (after it was filled in from the unit's status). The clock stays empty
+        while the unit runs from a source we don't know."""
         hw = self.st["hw"]
+        if self.dev.family == "latter":
+            self.ff_clock.setCurrentIndex(self.ff_clock.findData(hw["clock"]) if hw["clock"]
+                                          else -1)
+            return
         for key, w in self.ff800_combos.items():
             w.blockSignals(True)
             if isinstance(w, QCheckBox):
                 w.setChecked(hw[key])
+            elif key == "clock" and not hw[key]:
+                w.setCurrentIndex(-1)
             else:
                 w.setCurrentIndex(max(0, w.findData(hw[key])))
             w.blockSignals(False)
@@ -641,13 +1072,31 @@ class SettingsPanel(QWidget):
         if name:
             self._write(name, value)
 
+    def _card_chosen(self, i):
+        self.hw.exact = self.st["hw"]["card"] = self.card_combo.itemText(i)
+        self.hw_changed.emit()
+        self.card_chosen.emit()
+
+    def _show_cards(self):
+        cards = Hardware.find_cards(self.dev.alsa_card)
+        names = [name for _n, name in cards]
+        if [self.card_combo.itemText(i) for i in range(self.card_combo.count())] != names:
+            self.card_combo.clear()
+            self.card_combo.addItems(names)
+        self.card_combo.setVisible(len(names) > 1)
+        if not self.card_combo.view().isVisible():
+            self.card_combo.setCurrentIndex(next((i for i, (n, _name) in enumerate(cards)
+                                                  if n == self.hw.card), -1))
+
     def update_hdspe(self, ctrls):
-        """ctrls: the card's ALSA controls (Hardware.read()), or None if it is not found."""
+        """ctrls: the card's ALSA controls (Hardware.read()), or None if they can't be read."""
+        self._show_cards()
         st = hdspe.decode_status(ctrls, self.dev.model)
         usable = True
         if st:
             drv = Hardware.card_driver(self.hw.card) or st["driver"]
-            usable = hdspe.driver_usable(drv, Hardware.pci_vendor(self.hw.card))
+            usable = (self.st["hw"]["use_anyway"]
+                      or hdspe.driver_usable(drv, Hardware.pci_vendor(self.hw.card)))
         self._rd_ctrls = ctrls if st else None
         self._updating = True
         try:
@@ -679,19 +1128,19 @@ class SettingsPanel(QWidget):
         self.rd_opts.setVisible(st is not None)
         if st is None:
             self.rd_info.setText("")
-            self._show_fw_status(None)
+            self._show_fw_status(None, read_failure(self.hw, "Card"))
             return
         if not usable:
-            self.rd_info.setText(
-                "<span style='color:#ff2a4f'>Settings off: snd-hdspm can't run this card."
-                "</span>")
+            self.rd_info.setText(f"<span style='color:{RED}'>Settings are off: see the driver "
+                                 "note under Status.</span>")
         else:
             info = "snd-hdspe driver" if st["driver"] == hdspe.HDSPE else "snd-hdspm driver"
             if st["firmware"]:
                 info += f", firmware {st['firmware']}"
             self.rd_info.setText(info)
-        self.cur_src.set_current(st["source"])
+        self.cur_src.set_current(st["source"], st["mode"])
         self.rate.setText(f"{st['rate'] / 1000:g} kHz" if st["rate"] else "—")
+        self.rate.setToolTip("")
         shown = {label: (state, rate) for label, state, rate in st["inputs"]}
         for (led, rate), (label, *_unused) in zip(self.sync_widgets, self.dev.model.status_inputs):
             state, r = shown.get(label, (None, None))
@@ -703,24 +1152,31 @@ class SettingsPanel(QWidget):
 
     def _write(self, name, value):
         if not self._updating:
-            self.hw.write(name, value)
+            self._report(self.hw.write(name, value))
+
+    def _report(self, why, tool="amixer"):
+        if why:
+            self.notice.emit(write_failure(why, self.dev, tool))
 
     def _enable_pro(self):
         if not self._card_name:
             return
         if ask(self, "Switch profile",
-               "Switch the Digiface to the 'Pro Audio' profile?\n\n"
-               "This lets apps record all 32 hardware inputs. The output device will be renamed "
-               "to '…pro-output-0' (your existing combine-stream config already matches it). "
-               "Audio may briefly drop out.", "Switch profile"):
-            set_card_profile(self._card_name, "pro-audio")
+               "Switch the Digiface to the Pro Audio profile?\n\n"
+               "Apps can then record all of its hardware inputs. Its output device gets a new "
+               "name ending in pro-output-0, so apps that play to it directly may need it "
+               "chosen again. Audio may drop out for a moment.", "Switch profile"):
+            self._report(set_card_profile(self._card_name, "pro-audio"), "pactl")
 
     def update_hw(self, ctrls):
         self._updating = True
         try:
             if ctrls is None:
-                self.rate.setText("<span style='color:#ff2a4f'>Digiface not found</span>")
+                text, tip = read_failure(self.hw, "Digiface")
+                self.rate.setText(f"<span style='color:#ff2a4f'>{text}</span>")
+                self.rate.setToolTip(tip)
                 return
+            self.rate.setToolTip("")
             src = ctrls.get("Sync Source")
             if src:
                 if self.sync_src.count() != len(src["items"]):
@@ -756,15 +1212,18 @@ class SettingsPanel(QWidget):
         if status is None:
             self.hw_label.setText("—")
             self.routes_label.setText("—")
-            self.eng_label.setText(light(RED, "Stopped", False))
+            self.eng_label.setText(light(RED, "Stopped"))
             self.sink_label.setText("—")
+            self.sink_label.setToolTip("")
             self.show_status_note(html.escape(engine_error) if engine_error else
                                   "The hardware keeps its last mix. Start the engine to "
                                   "change it.")
+            self.use_btn.hide()
             self.eng_btn.setText("Start engine")
             return
         value, note = hw_state(self.dev, status["hw"])
         self.hw_label.setText(value)
+        self.use_btn.setVisible(status["hw"] == "wrong-driver")
         if status["hw"] in ("active", "no-nodes"):
             limit = f" of {self.dev.max_routes}" if self.dev.max_routes else ""
             self.routes_label.setText(f"{status['hw_nodes']}{limit}")
@@ -773,21 +1232,22 @@ class SettingsPanel(QWidget):
         else:
             self.routes_label.setText("—")
         self.eng_label.setText(light(CYAN, "Running") if status["processing"] else
-                               light(AMBER, "Not responding"))
-        self.sink_label.setText(
-            f"Linked to playback {self.dev.sink_channels}" if status["sink_linked"] else
-            light(AMBER, f"Not linked to the {self.dev.name.replace('RME ', '')}", False))
+                               light(RED, "Not responding"))
+        value, tip = desktop_audio(
+            self.dev, self.st.get("sinks", sinks.default_list(self.dev)), status)
+        self.sink_label.setText(value)
+        self.sink_label.setToolTip(tip)
         self.show_status_note(note)
         self.eng_btn.setText("Restart engine")
 
     def update_profile(self, name, profile, has_in):
         self._card_name = name
         if not name:
-            self.profile.setText(light(OFF, "Not in PipeWire", False))
+            self.profile.setText(light(OFF, "Not in PipeWire"))
             self.recording.setText("—")
             self.pro_btn.setVisible(False)
             return
         self.profile.setText(html.escape(profile or "—"))
         self.recording.setText(light(CYAN, "All inputs") if has_in else
-                               light(AMBER, "No inputs (monitoring still works)", False))
+                               light(OFF, "No inputs (monitoring still works)"))
         self.pro_btn.setVisible(not has_in)

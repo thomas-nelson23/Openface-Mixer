@@ -2,27 +2,47 @@
 UCX II's Room EQ, and the Reverb / Echo unit. Laid out like TotalMix's own panels, with knobs that
 show their value underneath and a response curve on top.
 
-The panels edit st["hw"]["fx"] in place (see fx.py) and emit changed(); they stay open beside the
-mixer like TotalMix's, one per strip and kind.
+The panels edit st["hw"]["fx"] in place (see fx.py) and emit changed(). They open inside the
+mixer row, right of their strip (widgets.Row.dock), one per strip and kind; Reverb / Echo opens
+at the end of the outputs row. Only the Room EQ, which is too tall for a row, is a window of
+its own.
 """
 import math
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
-    QWidget,
+    QBoxLayout, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import fx
 from .model import parse_db
-from .theme import CYAN, DIM, MONO, SANS, TEXT, font, px
+from .theme import CYAN, DIM, HAIR, MONO, SANS, TEXT, font, px
 from .wheel import Wheel
-from .widgets import LevelEdit
+from .widgets import LevelEdit, label_style
 
-PANEL_STYLE = ("QWidget#fxpanel{background:#040e16}"
-               "QFrame#fxbox{background:rgba(255,255,255,0.02);"
-               "border:1px solid rgba(255,255,255,0.08);border-radius:6px}")
+BOX_STYLE = ("QFrame#fxbox{background:rgba(255,255,255,0.02);"
+             "border:1px solid rgba(255,255,255,0.08);border-radius:6px}")
+PANEL_STYLE = "QWidget#fxpanel{background:#040e16}" + BOX_STYLE      # a window of its own
+
+
+def docked_style():
+    """In a row the panel is framed like the strips, and its sections' switches are square like
+    the strips' buttons: quiet when off, cyan when on."""
+    return (
+        "QWidget#fxpanel{background:qlineargradient(y1:0,y2:1,stop:0 rgba(4,12,18,0.62),"
+        f"stop:0.7 rgba(4,12,18,0.93));border:1px solid {HAIR};border-radius:{px(6)}px}}"
+        "QWidget#fxpanel:focus{border-color:rgba(42,212,255,0.6)}" + BOX_STYLE +
+        "QFrame#fxbox QPushButton{background:#0a1821;color:#8aa3ab;"
+        f"border:1px solid rgba(255,255,255,0.09);border-radius:{px(3)}px;"
+        f"padding:{px(2)}px {px(9)}px;font-size:{px(10)}px;font-weight:600}}"
+        "QFrame#fxbox QPushButton:hover{border-color:rgba(255,255,255,0.3);color:white}"
+        "QFrame#fxbox QPushButton:checked{background:#2ad4ff;color:#021012;border-color:#2ad4ff}"
+        "QFrame#fxbox QPushButton:focus{border-color:rgba(42,212,255,0.8)}"
+        f"QFrame#fxbox QComboBox{{font-size:{px(11)}px;padding:{px(2)}px {px(6)}px}}"
+        f"QToolButton#fxclose{{border:none;color:{DIM.name()};font-size:{px(14)}px}}"
+        "QToolButton#fxclose:hover,QToolButton#fxclose:focus{color:white}")
 
 
 def fmt_hz(v):
@@ -236,7 +256,8 @@ class CurveView(QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 18), 1))
             p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
             p.setPen(QColor(DIM))
-            p.drawText(QPointF(x + px(2), self.height() - px(3)), fmt_hz(f))
+            p.drawText(QPointF(x + px(2), self.height() - px(3)),
+                       f"{f // 1000}k" if f >= 1000 else str(f))
         for db in (-12, -6, 0, 6, 12):
             y = self._y(db)
             p.setPen(QPen(QColor(255, 255, 255, 40 if db == 0 else 18), 1))
@@ -260,13 +281,15 @@ class DynCurve(QWidget):
     def __init__(self, ch_fn, parent=None):
         super().__init__(parent)
         self.ch_fn = ch_fn
-        self.setFixedSize(px(120), px(120))
+        self.setFixedWidth(px(120))          # drawn as a square in the middle
+        self.setMinimumHeight(px(84))
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#01070b"))
-        w, h = self.width(), self.height()
+        w = h = min(self.width(), self.height())
+        p.translate((self.width() - w) / 2, (self.height() - h) / 2)
+        p.fillRect(QRectF(0, 0, w, h), QColor("#01070b"))
 
         def pt(x, y):
             return QPointF((x - self.LO) / -self.LO * w, h - (y - self.LO) / -self.LO * h)
@@ -284,7 +307,7 @@ class DynCurve(QWidget):
         for i, (x, y) in enumerate(zip(xs, ys)):
             q = pt(x, max(self.LO, min(12.0, y)))
             path.moveTo(q) if i == 0 else path.lineTo(q)
-        p.setClipRect(self.rect())
+        p.setClipRect(QRectF(0, 0, w, h))
         p.setPen(QPen(CYAN if ch["dyn"] else QColor(DIM), px(2)))
         p.drawPath(path)
 
@@ -324,28 +347,87 @@ def caption(text):
 
 
 class FxPanel(QWidget):
-    """A tool window beside the mixer, one per strip and kind."""
+    """An effect's controls, one panel per strip and kind. It goes into a mixer row
+    (widgets.Row.dock) under a header with the strip's name tag, what it is and a close button.
+    floating: a tool window beside the mixer instead, for the Room EQ.
+
+    A row can be low (a small window, three rows of strips), so a panel that is higher than
+    TALL pixels at 100% has its layout for a tall space and one that is lower gets set_low()."""
     changed = Signal()
     closed = Signal()
+    TALL = 0
 
-    def __init__(self, title, parent=None):
-        super().__init__(parent, Qt.Tool)
+    def __init__(self, name, what, parent=None, floating=False):
+        super().__init__(parent, Qt.Tool if floating else Qt.Widget)
         self.setObjectName("fxpanel")
         self.setAttribute(Qt.WA_StyledBackground)
-        self.setStyleSheet(PANEL_STYLE)
-        self.setWindowTitle(title)
+        self.setWindowTitle(f"{name} — {what}" if name else what)
         self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(px(12), px(10), px(12), px(12))
-        self.lay.setSpacing(px(8))
         self.knobs = {}           # key -> ValueKnob, to refresh after a paste or an outside change
+        self.low = False
+        if floating:
+            self.setStyleSheet(PANEL_STYLE)
+            self.lay.setContentsMargins(px(12), px(10), px(12), px(12))
+            self.lay.setSpacing(px(8))
+            return
+        self.setStyleSheet(docked_style())
+        self.setFocusPolicy(Qt.ClickFocus)      # Esc and Ctrl+W close the panel that was clicked
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.setMinimumHeight(px(100))          # the strips set the row's height, not the panel
+        self.lay.setContentsMargins(px(5), px(4), px(5), px(5))
+        self.lay.setSpacing(px(4))
+        head = QHBoxLayout()
+        head.setSpacing(px(8))
+        head.setContentsMargins(0 if name else px(4), 0, 0, 0)
+        self.tag = QLabel(name)
+        self.tag.setFixedHeight(px(20))
+        self.tag.setFont(font(SANS, 10, QFont.DemiBold))
+        head.addWidget(self.tag)
+        head.addWidget(caption(what))
+        self.hint = QLabel()                    # takes the width that is left
+        self.hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.hint.setStyleSheet(f"color:{DIM.name()};font-size:{px(10)}px")
+        head.addWidget(self.hint, 1)
+        close = QToolButton()
+        close.setObjectName("fxclose")
+        close.setText("×")
+        close.setFixedSize(px(18), px(18))
+        close.setCursor(Qt.PointingHandCursor)
+        close.setToolTip("Close (Esc)")
+        close.setAccessibleName(f"Close {self.windowTitle()}")
+        close.clicked.connect(self.close)
+        head.addWidget(close)
+        self.lay.addLayout(head)
+        self.tag.setVisible(bool(name))         # (now that it has a parent)
+
+    def set_tag(self, name, color):
+        """Show the strip's name on the tag, over a bar in the strip's colour."""
+        self.tag.setText(name)
+        self.tag.setStyleSheet(label_style(color, False) + f"padding:0 {px(6)}px;")
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        return hint if self.isWindow() else QSize(hint.width(), self.minimumHeight())
+
+    def set_low(self, low):
+        """Lay the controls out for a low row (low) or a tall one."""
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        low = self.height() < px(self.TALL)
+        if low != self.low:
+            self.low = low
+            self.set_low(low)
 
     def closeEvent(self, e):
         self.closed.emit()
         super().closeEvent(e)
 
     def event(self, e):
-        # with the keyboard in the panel, Esc closes it instead of going to a window shortcut
-        if e.type() == QEvent.ShortcutOverride and e.key() == Qt.Key_Escape:
+        # with the keyboard in the panel, Esc and Ctrl+W close it instead of going to a window
+        # shortcut
+        if e.type() == QEvent.ShortcutOverride and (
+                e.key() == Qt.Key_Escape or e.matches(QKeySequence.Close)):
             e.accept()
             return True
         return super().event(e)
@@ -381,11 +463,11 @@ class FxPanel(QWidget):
 
 # ------------------------------------------------------------------ channel EQ and dynamics
 class StripPanel(FxPanel):
-    """Base for the EQ and Dynamics panels of a strip: edits channels (both sides of a stereo
-    strip) of fx[kind]."""
+    """Base for the EQ and Dynamics panels of a strip: edits the strip's effects in fx[kind]
+    (fx.effect_channels)."""
 
-    def __init__(self, title, fxs, model, kind, channels, parent=None):
-        super().__init__(title, parent)
+    def __init__(self, name, what, fxs, model, kind, channels, parent=None):
+        super().__init__(name, what, parent)
         self.fx, self.m, self.kind, self.channels = fxs, model, kind, channels
 
     @property
@@ -399,7 +481,7 @@ class StripPanel(FxPanel):
             v = int(round(v))
         else:
             v = round(float(v), 3)
-        for c in self.channels:
+        for c in fx.effect_channels(self.kind, self.channels):
             self.fx[self.kind][c][key] = v
         self.emit()
 
@@ -443,31 +525,41 @@ def db_fmt(v):
 
 class EqPanel(StripPanel):
     """Low Cut and the 3-band parametric EQ, with the response curve on top (TotalMix's EQ
-    panel)."""
+    panel). In a low row the curve is left of the controls."""
+    TALL = 252
 
-    def __init__(self, title, fxs, model, kind, channels, parent=None):
-        super().__init__(f"{title} — EQ", fxs, model, kind, channels, parent)
+    def __init__(self, name, fxs, model, kind, channels, parent=None):
+        super().__init__(name, "EQ", fxs, model, kind, channels, parent)
         self.switches, self.combos = {}, {}
-        self.lay.addWidget(CurveView(lambda: fx.eq_filters(self.ch, self.m)))
+        curve = CurveView(lambda: fx.eq_filters(self.ch, self.m))
+        curve.setMinimumSize(px(220), px(72))
+        curve.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.body = QBoxLayout(QBoxLayout.TopToBottom)
+        self.body.setSpacing(px(6))
+        self.body.addWidget(curve, 1)
 
         row = QHBoxLayout()
-        row.setSpacing(px(8))
+        row.setSpacing(px(6))
         lc_btn = on_button("Low Cut", self.ch["lc"], "High-pass filter before the EQ")
         lc_btn.toggled.connect(lambda on: (self.set("lc", on), self._enable()))
         self.switches["lc"] = lc_btn
         lc, lcl, head = box(lc_btn)
-        knobs = QHBoxLayout()
-        knobs.addWidget(self.param_knob(fx.LOWCUT, "freq", "Freq", log=True, fmt=fmt_hz,
-                                        unit="Hz", name="Low Cut frequency"))
+        self.lc_knobs = QBoxLayout(QBoxLayout.LeftToRight)   # low: the slope under the knob
+        self.lc_knobs.addWidget(self.param_knob(fx.LOWCUT, "freq", "Freq", log=True, fmt=fmt_hz,
+                                                unit="Hz", name="Low Cut frequency"),
+                                0, Qt.AlignHCenter)
         slope = self.combo("Low Cut slope", fx.SLOPES, self.ch["lc_slope"],
                            lambda i: self.set("lc_slope", i))
+        slope.setToolTip("Slope")
         self.combos["lc_slope"] = slope
+        self.slope_caption = caption("Slope")
         sl = QVBoxLayout()
-        sl.addWidget(caption("Slope"))
+        sl.addWidget(self.slope_caption)
         sl.addWidget(slope)
         sl.addStretch(1)
-        knobs.addLayout(sl)
-        lcl.addLayout(knobs)
+        self.lc_knobs.addLayout(sl)
+        lcl.addLayout(self.lc_knobs)
+        lcl.addStretch(1)
         self.lc_box = lc
         row.addWidget(lc)
 
@@ -500,10 +592,17 @@ class EqPanel(StripPanel):
             col.addLayout(knobs)
             bands.addLayout(col)
         eql.addLayout(bands)
+        eql.addStretch(1)
         self.eq_box = eq
-        row.addWidget(eq, 1)
-        self.lay.addLayout(row)
+        row.addWidget(eq)
+        self.body.addLayout(row)
+        self.lay.addLayout(self.body, 1)
         self._enable()
+
+    def set_low(self, low):
+        self.body.setDirection(QBoxLayout.LeftToRight if low else QBoxLayout.TopToBottom)
+        self.lc_knobs.setDirection(QBoxLayout.TopToBottom if low else QBoxLayout.LeftToRight)
+        self.slope_caption.setVisible(not low)
 
     def _enable(self):
         for w in self.lc_box.findChildren(ValueKnob) + self.lc_box.findChildren(QComboBox):
@@ -518,20 +617,30 @@ class EqPanel(StripPanel):
 
 
 class DynamicsPanel(StripPanel):
-    """Dynamics (compressor and expander) and Auto Level, as TotalMix's D panel."""
+    """Dynamics (compressor and expander) and Auto Level, as TotalMix's D panel. A tall row has
+    three rows of knobs, to stay narrow; a low row has two."""
+    TALL = 264
 
-    def __init__(self, title, fxs, model, kind, channels, parent=None):
-        super().__init__(f"{title} — Dynamics", fxs, model, kind, channels, parent)
+    def __init__(self, name, fxs, model, kind, channels, parent=None):
+        super().__init__(name, "Dynamics", fxs, model, kind, channels, parent)
         self.switches, self.combos = {}, {}
         row = QHBoxLayout()
-        row.setSpacing(px(8))
+        row.setSpacing(px(6))
 
         dyn_btn = on_button("Dynamics", self.ch["dyn"], "Compressor and expander")
         dyn_btn.toggled.connect(lambda on: (self.set("dyn", on), self._enable()))
         self.switches["dyn"] = dyn_btn
-        dyn, dl, head = box(dyn_btn)
-        body = QHBoxLayout()
-        body.addWidget(DynCurve(lambda: self.ch))
+        # the switch is over the curve, so the knobs beside them fit in a low row
+        dyn = QFrame()
+        dyn.setObjectName("fxbox")
+        body = QHBoxLayout(dyn)
+        body.setContentsMargins(px(8), px(6), px(8), px(8))
+        left = QVBoxLayout()
+        left.setSpacing(px(4))
+        left.addWidget(dyn_btn, 0, Qt.AlignLeft)
+        self.curve = DynCurve(lambda: self.ch)
+        left.addWidget(self.curve, 1)
+        body.addLayout(left)
         grid = QGridLayout()
         grid.setSpacing(0)
         ms = lambda v: f"{round(v)}"   # noqa: E731
@@ -541,37 +650,50 @@ class DynamicsPanel(StripPanel):
             (0, 2, "gain", "Gain", dict(fmt=db_fmt, unit="dB", name="Dynamics gain")),
             (1, 0, "ethr", "Exp Thr", dict(fmt=db_fmt, unit="dB", name="Expander threshold")),
             (1, 1, "eratio", "Ratio", dict(fmt=lambda v: f"1:{v:.1f}", name="Expander ratio")),
-            (1, 2, "attack", "Attack", dict(fmt=ms, unit="ms", name="Dynamics attack")),
-            (1, 3, "release", "Release", dict(fmt=ms, unit="ms", name="Dynamics release")),
+            (2, 0, "attack", "Attack", dict(fmt=ms, unit="ms", name="Dynamics attack")),
+            (2, 1, "release", "Release", dict(fmt=ms, unit="ms", name="Dynamics release")),
         )
         for r, c, key, label, kw in items:
             grid.addWidget(self.param_knob(fx.DYNAMICS, key, label, **kw), r, c)
+        self.grid = grid
         body.addLayout(grid)
-        dl.addLayout(body)
+        body.setAlignment(grid, Qt.AlignVCenter)
         self.dyn_box = dyn
-        row.addWidget(dyn, 1)
+        row.addWidget(dyn)
 
         al_btn = on_button("Auto Level", self.ch["al"], "Limiter that keeps the level under "
                            "the headroom")
         al_btn.toggled.connect(lambda on: (self.set("al", on), self._enable()))
         self.switches["al"] = al_btn
         al, all_, head = box(al_btn)
-        knobs = QGridLayout()
+        knobs = self.al_knobs = QBoxLayout(QBoxLayout.TopToBottom)
         knobs.setSpacing(0)
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "maxgain", "Max Gain", fmt=db_fmt,
-                                        unit="dB", name="Auto Level max gain"), 0, 0)
+                                        unit="dB", name="Auto Level max gain"))
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "headroom", "Headroom",
                                         fmt=lambda v: f"{v:.1f}", unit="dB",
-                                        name="Auto Level headroom"), 0, 1)
+                                        name="Auto Level headroom"))
         knobs.addWidget(self.param_knob(fx.AUTOLEVEL, "rise", "Rise Time",
                                         fmt=lambda v: f"{v:.1f}s", unit="s",
-                                        name="Auto Level rise time"), 1, 0)
+                                        name="Auto Level rise time"))
         all_.addLayout(knobs)
         all_.addStretch(1)
         self.al_box = al
         row.addWidget(al)
-        self.lay.addLayout(row)
+        self.lay.addLayout(row, 1)
         self._enable()
+
+    def set_low(self, low):
+        self.al_knobs.setDirection(QBoxLayout.LeftToRight if low else QBoxLayout.TopToBottom)
+        for key, cell in (("dyn_attack", (1, 2) if low else (2, 0)),
+                          ("dyn_release", (1, 3) if low else (2, 1))):
+            self.grid.removeWidget(self.knobs[key])
+            self.grid.addWidget(self.knobs[key], *cell)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # the curve is as wide as the row lets it be high
+        self.curve.setFixedWidth(max(px(96), min(px(200), self.height() - px(72))))
 
     def _enable(self):
         for w in self.dyn_box.findChildren(ValueKnob):
@@ -584,10 +706,11 @@ class DynamicsPanel(StripPanel):
 
 # ------------------------------------------------------------------ room EQ (UCX II)
 class RoomEqPanel(FxPanel):
-    """The UCX II's Room EQ on an output: delay, volume calibration and 9 bands."""
+    """The UCX II's Room EQ on an output: delay, volume calibration and 9 bands. Three rows of
+    knobs under a curve are too tall for a mixer row, so it is a window of its own."""
 
-    def __init__(self, title, fxs, model, channels, parent=None):
-        super().__init__(f"{title} — Room EQ", parent)
+    def __init__(self, name, fxs, model, channels, parent=None):
+        super().__init__(name, "Room EQ", parent, floating=True)
         self.fx, self.m, self.channels = fxs, model, channels
         self.lay.addWidget(CurveView(lambda: fx.room_filters(self.room, self.m)))
         top = QHBoxLayout()
@@ -661,14 +784,18 @@ class RoomEqPanel(FxPanel):
 # ------------------------------------------------------------------ reverb and echo
 class FxUnitPanel(FxPanel):
     """TotalMix's FX panel: Reverb and Echo, fed by the FX sends and heard through the FX
-    returns of the outputs."""
+    returns of the outputs. The knobs of each are in two rows, or in one in a low row."""
+    TALL = 240
 
     def __init__(self, fxs, model, parent=None):
-        super().__init__("Effects — Reverb / Echo", parent)
+        super().__init__("", "Reverb / Echo", parent)
         self.fx, self.m = fxs, model
         self.knobs = {}
+        self.hint.setText("fed by FX Send (⚙) · heard through each output's FX Return")
+        self.hint.setToolTip("Send to the effects with FX Send in each channel's settings (⚙), "
+                             "and set how much each output hears with its FX Return.")
         row = QHBoxLayout()
-        row.setSpacing(px(8))
+        row.setSpacing(px(6))
 
         rv = self.fx["reverb"]
         self.rv_on = on_button("Reverb", rv["on"])
@@ -680,26 +807,24 @@ class FxUnitPanel(FxPanel):
         grid = QGridLayout()
         grid.setSpacing(0)
         ms = lambda v: f"{round(v)}"     # noqa: E731
-        layout = (
-            (0, "predelay", "PreDelay", dict(fmt=ms, unit="ms")),
-            (0, "lowcut", "Low Cut", dict(fmt=fmt_hz, log=True, unit="Hz")),
-            (0, "roomscale", "Room Scale", dict(fmt=lambda v: f"{v:.2f}")),
-            (0, "highcut", "High Cut", dict(fmt=fmt_hz, log=True, unit="Hz")),
-            (0, "smooth", "Smooth", dict(fmt=ms, unit="%")),
-            (0, "width", "Width", dict(fmt=lambda v: f"{v:.2f}")),
-            (1, "attack", "Attack", dict(fmt=ms, unit="ms")),
-            (1, "hold", "Hold", dict(fmt=ms, unit="ms")),
-            (1, "release", "Release", dict(fmt=ms, unit="ms")),
-            (1, "time", "Time", dict(fmt=lambda v: f"{v:.1f}s", unit="s")),
-            (1, "damp", "High Damp", dict(fmt=fmt_hz, log=True, unit="Hz")),
-            (1, "volume", "Volume", dict(fmt=lambda v: fmt_level(v, fx.FX_MIN_DB), unit="dB")),
-        )
-        col = [0, 0]
-        for r, key, label, kw in layout:
-            k = self.unit_knob("reverb", fx.REVERB, key, label, **kw)
-            grid.addWidget(k, r, col[r])
-            col[r] += 1
+        for key, label, kw in (
+            ("predelay", "PreDelay", dict(fmt=ms, unit="ms")),
+            ("lowcut", "Low Cut", dict(fmt=fmt_hz, log=True, unit="Hz")),
+            ("roomscale", "Room Scale", dict(fmt=lambda v: f"{v:.2f}")),
+            ("highcut", "High Cut", dict(fmt=fmt_hz, log=True, unit="Hz")),
+            ("smooth", "Smooth", dict(fmt=ms, unit="%")),
+            ("width", "Width", dict(fmt=lambda v: f"{v:.2f}")),
+            ("attack", "Attack", dict(fmt=ms, unit="ms")),
+            ("hold", "Hold", dict(fmt=ms, unit="ms")),
+            ("release", "Release", dict(fmt=ms, unit="ms")),
+            ("time", "Time", dict(fmt=lambda v: f"{v:.1f}s", unit="s")),
+            ("damp", "High Damp", dict(fmt=fmt_hz, log=True, unit="Hz")),
+            ("volume", "Volume", dict(fmt=lambda v: fmt_level(v, fx.FX_MIN_DB), unit="dB")),
+        ):
+            self.unit_knob("reverb", fx.REVERB, key, label, **kw)
+        self.rv_grid = grid
         rl.addLayout(grid)
+        rl.addStretch(1)
         self.rv_box = box_r
         row.addWidget(box_r)
 
@@ -714,14 +839,13 @@ class FxUnitPanel(FxPanel):
         # the 802 takes the delay in 1/100 s, the UCX II in ms: show the digits that are sent
         digits = next(round(math.log10(scale)) for k, scale, *_ in self.m.params(fx.ECHO)
                       if k == "delay")
-        grid.addWidget(self.unit_knob("echo", fx.ECHO, "delay", "Delay",
-                                      fmt=lambda v: f"{v:.{digits}f}s", unit="s"), 0, 0)
-        grid.addWidget(self.unit_knob("echo", fx.ECHO, "feedback", "Feedback",
-                                      fmt=ms, unit="%"), 0, 1)
-        grid.addWidget(self.unit_knob("echo", fx.ECHO, "width", "Width",
-                                      fmt=lambda v: f"{v:.2f}"), 1, 0)
-        grid.addWidget(self.unit_knob("echo", fx.ECHO, "volume", "Volume",
-                                      fmt=lambda v: fmt_level(v, fx.FX_MIN_DB), unit="dB"), 1, 1)
+        self.unit_knob("echo", fx.ECHO, "delay", "Delay", fmt=lambda v: f"{v:.{digits}f}s",
+                       unit="s")
+        self.unit_knob("echo", fx.ECHO, "feedback", "Feedback", fmt=ms, unit="%")
+        self.unit_knob("echo", fx.ECHO, "width", "Width", fmt=lambda v: f"{v:.2f}")
+        self.unit_knob("echo", fx.ECHO, "volume", "Volume",
+                       fmt=lambda v: fmt_level(v, fx.FX_MIN_DB), unit="dB")
+        self.ec_grid = grid
         hc = QHBoxLayout()
         hc.addWidget(caption("High Cut"))
         hc.addWidget(self.combo("Echo high cut", fx.ECHO_HIGHCUTS, ec["highcut"],
@@ -731,13 +855,16 @@ class FxUnitPanel(FxPanel):
         el.addStretch(1)
         self.ec_box = box_e
         row.addWidget(box_e)
-        self.lay.addLayout(row)
-        note = QLabel("Send to the effects with FX Send in each channel's settings (⚙), and set "
-                      "how much each output hears with its FX Return.")
-        note.setWordWrap(True)
-        note.setStyleSheet(f"color:{DIM.name()}")
-        self.lay.addWidget(note)
+        self.lay.addLayout(row, 1)
+        self.set_low(False)
         self._enable()
+
+    def set_low(self, low):
+        for unit, grid, columns in (("reverb", self.rv_grid, 6), ("echo", self.ec_grid, 2)):
+            knobs = [w for (u, _key), w in self.knobs.items() if u == unit]
+            for i, w in enumerate(knobs):
+                grid.removeWidget(w)
+                grid.addWidget(w, 0 if low else i // columns, i if low else i % columns)
 
     def unit_knob(self, which, section, key, label, **kw):
         for k, scale, lo, hi, default in self.m.params(section):

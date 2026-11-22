@@ -16,24 +16,40 @@ import os
 import re
 from pathlib import Path
 
-from .control_room import control_room
+from .control_room import ENCODER_TARGETS, control_room, encoder_target
 
 CARDS = Path("/proc/asound/cards")
 CARD_NAME = re.compile(r"\bARC\b", re.I)
 
 # Actions, as TotalMix offers them for ARC keys. "snapshot:N" (1..8) recalls preset slot N.
-ACTIONS = ("dim", "mono", "speaker_b", "talkback", "ext_in", "phones", "main") + tuple(
+ACTIONS = ("dim", "mono", "speaker_b", "talkback", "ext_in", "phones", "phones2", "main") + tuple(
     f"snapshot:{n}" for n in range(1, 9))
 
 # TotalMix's default ARC USB layout (printed on the unit): rows 1-2 snapshots 1-8; row 3 Mono,
 # Volume Phones 1, Volume Phones 2, External Input; bottom Talkback, Speaker B, Dim.
-# The Digiface has one phones output, so both phones keys select it.
+# With one Phones pair in the control room, both phones keys select it.
 DEFAULT_KEYS = [f"snapshot:{n}" for n in range(1, 9)] + [
-    "mono", "phones", "phones", "ext_in", "talkback", "speaker_b", "dim"]
+    "mono", "phones", "phones2", "ext_in", "talkback", "speaker_b", "dim"]
+# what the settings call them
+ACTION_NAMES = {"dim": "Dim", "mono": "Mono", "speaker_b": "Speaker B", "talkback": "Talkback",
+                "ext_in": "External In", "phones": "Phones 1 volume",
+                "phones2": "Phones 2 volume", "main": "Main Out volume",
+                **{f"snapshot:{n}": f"Preset {n}" for n in range(1, 9)}}
+# the keys, by what is printed on them (their default action)
+KEY_NAMES = [f"Key {n}" for n in range(1, 9)] + [
+    "Mono", "Phones 1", "Phones 2", "Ext In", "Talkback", "Speaker B", "Dim"]
 FIRST_NOTE = 0x36
 N_KEYS = 15
 ENCODER_CC = 16
 TALKBACK_HOLD_S = 0.4     # held longer than this, Talkback is momentary; a tap latches it
+
+
+def assignment(keys):
+    """The action of every key from a saved assignment (ui.json's "arc_keys"): a key whose entry
+    is missing or not an action has its default one."""
+    keys = keys if isinstance(keys, list) else []
+    return [k if isinstance(k, str) and k in ACTIONS else default
+            for k, default in zip(keys + [None] * N_KEYS, DEFAULT_KEYS)]
 
 
 def find_port(cards_text=None):
@@ -69,10 +85,8 @@ def key_lit(st, action, active_slot):
     cr = control_room(st)
     if action.startswith("snapshot:"):
         return active_slot == int(action.split(":")[1]) - 1
-    if action == "phones":
-        return cr["encoder"] == "phones"
-    if action == "main":
-        return cr["encoder"] == "main"
+    if action in ENCODER_TARGETS:
+        return encoder_target(st, cr["encoder"]) == encoder_target(st, action)
     return bool(cr.get(action))
 
 
@@ -153,8 +167,8 @@ class ArcPort:
     def write(self, data):
         try:
             os.write(self.fd, bytes(data))
-        except BlockingIOError:
-            pass
+        except OSError:
+            pass    # its buffer is full, or it was just unplugged: read() notices that
 
     def close(self):
         if self.fd is not None:

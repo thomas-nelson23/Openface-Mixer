@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <linux/firewire-cdev.h>
@@ -29,7 +30,10 @@
 #define REG_METERS  0xffffff000000ull
 
 #define FW_DEVICES      "/sys/bus/firewire/devices"
-#define TIMEOUT_MS      200
+#define TIMEOUT_MS      2500   /* past firewire-core's 2 s split timeout: its answer comes first */
+#define TRIES           3      /* per request across bus resets, as the kernel's snd_fw_transaction */
+#define RETRY_MS        20
+#define LOG_EVERY_MS    60000  /* how often a failure that keeps repeating is logged */
 #define METER_CHUNKS    5
 #define METER_FULL      0x07fffff0
 #define METER_TAG_OUT   0x11111111u
@@ -42,15 +46,8 @@
 #define VOL_MAX         60
 #define UNSENT          0xffffffffu
 
-/* An open FireWire node. */
-struct fwdev {
-	int fd;
-	uint32_t generation;
-	uint64_t closure;
-};
-
 struct ff802 {
-	struct fwdev fw;
+	struct fwdev fw;   /* first: see out_node() */
 
 	uint32_t sent_gain[FF802_N_OUT][FF802_N_SRC];   /* encoded, or UNSENT */
 	uint32_t sent_vol[FF802_N_OUT];
@@ -144,58 +141,155 @@ uint32_t ff802_decode_meter_chunk(const uint8_t *chunk, struct ofm_shm *s)
 
 /* ---------- FireWire transactions ---------- */
 
+static int cdev_generation(struct fwdev *f)
+{
+	struct fw_cdev_event_bus_reset reset = { 0 };
+	struct fw_cdev_get_info info = {
+		.version = 4,
+		.bus_reset = (uintptr_t)&reset,
+	};
+	if (ioctl(f->fd, FW_CDEV_IOC_GET_INFO, &info) < 0)
+		return -errno;
+	f->generation = reset.generation;
+	return 0;
+}
+
+static int cdev_transact(struct fwdev *f, int tcode, uint64_t offset, void *data, size_t len,
+			 size_t *got)
+{
+	struct fw_cdev_send_request req = {
+		.tcode = (uint32_t)tcode,
+		.length = (uint32_t)len,
+		.offset = offset,
+		.closure = ++f->closure,
+		.data = (uintptr_t)data,
+		.generation = f->generation,
+	};
+	if (ioctl(f->fd, FW_CDEV_IOC_SEND_REQUEST, &req) < 0)
+		return -errno;
+
+	for (;;) {
+		struct pollfd p = { .fd = f->fd, .events = POLLIN };
+		int r = poll(&p, 1, TIMEOUT_MS);
+		if (r == 0)
+			return -ETIMEDOUT;
+		if (r < 0) {
+			if (errno == EINTR)
+				continue;
+			return -errno;
+		}
+		if (p.revents & (POLLHUP | POLLERR))
+			return -ENODEV;
+
+		uint64_t buf[(sizeof(struct fw_cdev_event_response) + 2048) / 8];
+		ssize_t n = read(f->fd, buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			return -errno;
+		}
+		union fw_cdev_event *e = (union fw_cdev_event *)buf;
+		if (e->common.type == FW_CDEV_EVENT_BUS_RESET) {
+			f->generation = e->bus_reset.generation;
+			continue;
+		}
+		if (e->common.type != FW_CDEV_EVENT_RESPONSE || e->response.closure != req.closure)
+			continue;
+		if (e->response.rcode == RCODE_COMPLETE &&
+		    (tcode == TCODE_READ_QUADLET_REQUEST || tcode == TCODE_READ_BLOCK_REQUEST)) {
+			*got = e->response.length < len ? e->response.length : len;
+			memcpy(data, e->response.data, *got);
+		}
+		return (int)e->response.rcode;
+	}
+}
+
+void fw_failure_text(int tcode, uint64_t offset, int result, char *buf, size_t len)
+{
+	static const char *const rcodes[] = {   /* as the kernel's fw_rcode_string() */
+		[RCODE_CONFLICT_ERROR] = "conflict error", [RCODE_DATA_ERROR] = "data error",
+		[RCODE_TYPE_ERROR] = "type error", [RCODE_ADDRESS_ERROR] = "address error",
+		[RCODE_SEND_ERROR] = "send error", [RCODE_CANCELLED] = "timeout",
+		[RCODE_BUSY] = "busy", [RCODE_GENERATION] = "bus reset", [RCODE_NO_ACK] = "no ack",
+	};
+	const char *kind = tcode == TCODE_WRITE_QUADLET_REQUEST ? "write" :
+			   tcode == TCODE_WRITE_BLOCK_REQUEST ? "block write" :
+			   tcode == TCODE_READ_QUADLET_REQUEST ? "read" : "block read";
+	const char *why = result == -EPROTO ? "short answer" :
+			  result < 0 ? strerror(-result) :
+			  result <= RCODE_NO_ACK && rcodes[result] ? rcodes[result] : "unknown";
+	int n = snprintf(buf, len, "FireWire %s at 0x%012llx failed: %s", kind,
+			 (unsigned long long)offset, why);
+	if (result > 0 && n > 0 && (size_t)n < len)
+		snprintf(buf + n, len - (size_t)n, " (rcode 0x%x)", (unsigned)result);
+}
+
+static int64_t clock_ms(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1000LL + t.tv_nsec / 1000000;
+}
+
+/* The engine retries a failing device every second and the meters are read 30 times a second:
+ * a failure that repeats is logged the first time and then once in LOG_EVERY_MS. */
+static void log_failure(int tcode, uint64_t offset, int result)
+{
+	static int last_tcode, last_result;
+	static uint64_t last_offset;
+	static int64_t logged_ms;
+	bool again = tcode == last_tcode && offset == last_offset && result == last_result;
+	int64_t now = clock_ms();
+	char text[160];
+
+	if (again && now - logged_ms < LOG_EVERY_MS)
+		return;
+	last_tcode = tcode;
+	last_offset = offset;
+	last_result = result;
+	logged_ms = now;
+	fw_failure_text(tcode, offset, result, text, sizeof(text));
+	fprintf(stderr, "openface-mixer: %s%s\n", text, again ? " (still failing)" : "");
+}
+
 static int fw_request(struct fwdev *f, int tcode, uint64_t offset, void *data, size_t len)
 {
-	for (int attempt = 0; attempt < 2; attempt++) {
-		struct fw_cdev_send_request req = {
-			.tcode = (uint32_t)tcode,
-			.length = (uint32_t)len,
-			.offset = offset,
-			.closure = ++f->closure,
-			.data = (uintptr_t)data,
-			.generation = f->generation,
-		};
-		if (ioctl(f->fd, FW_CDEV_IOC_SEND_REQUEST, &req) < 0)
-			return -errno;
+	bool is_read = tcode == TCODE_READ_QUADLET_REQUEST || tcode == TCODE_READ_BLOCK_REQUEST;
+	int r = 0;
 
-		for (;;) {
-			struct pollfd p = { .fd = f->fd, .events = POLLIN };
-			int r = poll(&p, 1, TIMEOUT_MS);
-			if (r == 0)
-				return -ETIMEDOUT;
-			if (r < 0) {
-				if (errno == EINTR)
-					continue;
-				return -errno;
-			}
-			if (p.revents & (POLLHUP | POLLERR))
-				return -ENODEV;
-
-			uint64_t buf[(sizeof(struct fw_cdev_event_response) + 2048) / 8];
-			ssize_t n = read(f->fd, buf, sizeof(buf));
-			if (n < 0) {
-				if (errno == EINTR || errno == EAGAIN)
-					continue;
-				return -errno;
-			}
-			union fw_cdev_event *e = (union fw_cdev_event *)buf;
-			if (e->common.type == FW_CDEV_EVENT_BUS_RESET) {
-				f->generation = e->bus_reset.generation;
-				continue;
-			}
-			if (e->common.type != FW_CDEV_EVENT_RESPONSE || e->response.closure != req.closure)
-				continue;
-			if (e->response.rcode == RCODE_GENERATION)
-				break;   /* a bus reset happened in between: retry with the new generation */
-			if (e->response.rcode != RCODE_COMPLETE)
-				return -EIO;
-			if (tcode == TCODE_READ_QUADLET_REQUEST || tcode == TCODE_READ_BLOCK_REQUEST)
-				memcpy(data, e->response.data,
-				       e->response.length < len ? e->response.length : len);
-			return 0;
+	for (int try = 0; try < TRIES; try++) {
+		size_t got = 0;
+		if (try) {
+			/* a bus reset happened in between: only the new generation is valid, and
+			 * firewire-core may need a moment to update the node */
+			usleep(RETRY_MS * 1000);
+			if ((r = fw_bus.generation(f)) < 0)
+				break;
 		}
+		r = fw_bus.transact(f, tcode, offset, data, len, &got);
+		if (r == RCODE_COMPLETE && is_read && got < len)
+			r = -EPROTO;   /* the rest would be decoded from leftover memory */
+		if (r != RCODE_GENERATION)
+			break;
 	}
-	return -EAGAIN;
+	if (r == RCODE_COMPLETE)
+		return 0;
+	log_failure(tcode, offset, r);
+	return r < 0 ? r : -EIO;
+}
+
+/* A sync sends for FW_SLICE_MS and leaves the rest to the next tick, so a full resend (about
+ * 3,700 writes on an 802) never holds up the heartbeat and the meters. */
+static void slice_start(struct fwdev *f)
+{
+	f->slice_end = fw_bus.now_ms() + FW_SLICE_MS;
+}
+
+static bool in_slice(struct fwdev *f)
+{
+	if (f->slice_end && fw_bus.now_ms() >= f->slice_end)
+		f->slice_end = 0;
+	return f->slice_end != 0;
 }
 
 static void put_le32(uint8_t *p, uint32_t v)
@@ -278,32 +372,45 @@ static int find_node(unsigned long unit_version, char *node, size_t len)
 	return found;
 }
 
-/* Opens the node of the unit with this version. Returns a DFU_STATE_* value. */
-static int fw_open(struct fwdev *f, unsigned long unit_version)
+/* Finds the unit with this version, notes its PipeWire node name and opens its node. */
+static int cdev_open(struct fwdev *f, unsigned long unit_version)
 {
-	char node[64], path[80];
+	char node[64], path[600], guid[24] = "";
 
-	if (f->fd >= 0)
-		return DFU_STATE_ACTIVE;
 	if (find_node(unit_version, node, sizeof(node)) < 0)
 		return DFU_STATE_NO_DEVICE;
+	/* udev names the ALSA card "firewire-<guid>" after the node's guid attribute, and PipeWire
+	 * its nodes after that; RME's vendor prefix alone would also match a second unit */
+	snprintf(path, sizeof(path), "%s/%s/guid", FW_DEVICES, node);
+	FILE *fp = fopen(path, "r");
+	if (fp != NULL) {
+		if (fgets(guid, sizeof(guid), fp) == NULL)
+			guid[0] = '\0';
+		fclose(fp);
+	}
+	guid[strcspn(guid, "\n")] = '\0';
+	f->out_node[0] = '\0';
+	if (guid[0])
+		snprintf(f->out_node, sizeof(f->out_node), "alsa_output.firewire-%s", guid);
+
 	snprintf(path, sizeof(path), "/dev/%s", node);
 	int fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0)
 		return errno == EACCES || errno == EPERM ? DFU_STATE_NO_ACCESS : DFU_STATE_ERROR;
-
-	struct fw_cdev_event_bus_reset reset = { 0 };
-	struct fw_cdev_get_info info = {
-		.version = 4,
-		.bus_reset = (uintptr_t)&reset,
-	};
-	if (ioctl(fd, FW_CDEV_IOC_GET_INFO, &info) < 0) {
+	f->fd = fd;
+	if (cdev_generation(f) < 0) {
 		close(fd);
+		f->fd = -1;
 		return DFU_STATE_ERROR;
 	}
-	f->fd = fd;
-	f->generation = reset.generation;
 	return DFU_STATE_ACTIVE;
+}
+
+struct fw_bus fw_bus = { cdev_open, cdev_transact, cdev_generation, clock_ms };
+
+static int fw_open(struct fwdev *f, unsigned long unit_version)
+{
+	return f->fd >= 0 ? DFU_STATE_ACTIVE : fw_bus.open(f, unit_version);
 }
 
 static void fw_close(struct fwdev *f)
@@ -311,6 +418,13 @@ static void fw_close(struct fwdev *f)
 	if (f->fd >= 0)
 		close(f->fd);
 	f->fd = -1;
+}
+
+/* The unit's PipeWire playback node (both backends' handles start with their fwdev). */
+static const char *out_node(void *h)
+{
+	const struct fwdev *f = h;
+	return f->out_node[0] ? f->out_node : NULL;
 }
 
 /* ---------- Fireface 802 backend ---------- */
@@ -381,7 +495,12 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 	struct ff802 *f = h;
 	int r, routes = 0;
 
-	if (s->dev_config && (full || s->dev_config != f->sent_config)) {
+	if (full)
+		forget_sent(f);
+	slice_start(&f->fw);
+
+	/* the configuration (clock source, options) only once the GUI has one to send */
+	if (s->dev_config && s->dev_config != f->sent_config) {
 		if ((r = write_quadlet(&f->fw, REG_CONFIG, s->dev_config)) < 0)
 			return r;
 		f->sent_config = s->dev_config;
@@ -389,7 +508,7 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 
 	for (int i = 0; i < OFM_N_DEV_CMD; i++) {
 		uint32_t c = s->dev_cmd[i];
-		if (c == 0 || (!full && c == f->sent_cmd[i]))
+		if (c == 0 || c == f->sent_cmd[i] || !in_slice(&f->fw))
 			continue;
 		if ((r = dsp_cmd(f, c)) < 0)
 			return r;
@@ -403,21 +522,21 @@ static int sync_mix(void *h, struct ofm_shm *s, bool full)
 			uint32_t g = muted ? 0 : ff802_encode_gain(s->gain[o][ff802_shm_source(k)]);
 			if (g)
 				routes++;
-			if (!full && g == f->sent_gain[o][k])
+			if (g == f->sent_gain[o][k] || !in_slice(&f->fw))
 				continue;
 			if ((r = dsp_cmd(f, ff802_mixer_cmd(o, k, (uint16_t)g))) < 0)
 				return r;
 			f->sent_gain[o][k] = g;
 		}
 		uint32_t v = (uint16_t)ff802_out_vol(s->out_gain[o]);
-		if (full || v != f->sent_vol[o]) {
+		if (v != f->sent_vol[o] && in_slice(&f->fw)) {
 			if ((r = dsp_cmd(f, ff802_vol_cmd(o, (int16_t)v))) < 0)
 				return r;
 			f->sent_vol[o] = v;
 		}
 	}
 	f->routes = routes;
-	return 0;
+	return 0;   /* what the slice had no time for goes out on the next ticks */
 }
 
 static int routes(void *h)
@@ -441,9 +560,9 @@ static int meters(void *h, struct ofm_shm *s)
 const struct ofm_backend ofm_backend_ff802 = {
 	.key = "ff802",
 	.name = "Fireface 802",
-	/* snd-fireface's PCM device; PipeWire names firewire cards after the node GUID */
-	.out_node_prefix = "alsa_output.firewire-0x000a35",
+	.out_node = out_node,
 	.meter_us = 30000,
+	.meter_idle_us = 1000000,
 	.create = create,
 	.destroy = destroy,
 	.open = open_dev,
@@ -474,13 +593,13 @@ const struct ff_former_model ff400_model = {
 };
 
 struct former {
+	struct fwdev fw;   /* first: see out_node() */
 	const struct ff_former_model *m;
-	struct fwdev fw;
 
+	/* what was sent, all ones (no register value) while unsent */
 	uint32_t sent_mix[FORMER_MAX_CH][FORMER_MAX_BLOCK];
 	uint32_t sent_vol[FORMER_MAX_CH];
 	uint32_t sent_config[FORMER_N_CONFIG + FORMER_N_AMP_IN];
-	bool sent_valid;
 	int routes;
 };
 
@@ -552,6 +671,13 @@ uint8_t former_amp_out(uint32_t vol)
 	return (uint8_t)((uint64_t)AMP_OUT_MUTE * (FORMER_GAIN_MAX - vol) / FORMER_GAIN_MAX);
 }
 
+static void former_forget(struct former *f)
+{
+	memset(f->sent_mix, 0xff, sizeof(f->sent_mix));
+	memset(f->sent_vol, 0xff, sizeof(f->sent_vol));
+	memset(f->sent_config, 0xff, sizeof(f->sent_config));
+}
+
 static void *former_create(const struct ff_former_model *m)
 {
 	struct former *f = calloc(1, sizeof(*f));
@@ -559,6 +685,7 @@ static void *former_create(const struct ff_former_model *m)
 		return NULL;
 	f->m = m;
 	f->fw.fd = -1;
+	former_forget(f);
 	return f;
 }
 
@@ -576,7 +703,7 @@ static void former_close(void *h)
 {
 	struct former *f = h;
 	fw_close(&f->fw);
-	f->sent_valid = false;
+	former_forget(f);
 	f->routes = 0;
 }
 
@@ -594,8 +721,6 @@ static bool former_is_open(void *h)
 static int former_open(void *h)
 {
 	struct former *f = h;
-	if (f->fw.fd < 0)
-		f->sent_valid = false;
 	return fw_open(&f->fw, f->m->unit_version);
 }
 
@@ -619,11 +744,13 @@ static int former_sync(void *h, struct ofm_shm *s, bool full)
 	const struct ff_former_model *m = f->m;
 	int r, routes = 0;
 
-	full = full || !f->sent_valid;
+	if (full)
+		former_forget(f);
+	slice_start(&f->fw);
 
-	/* configuration: write-only, so it is sent only once the GUI has filled it in */
+	/* configuration: write-only, so it is sent only once the GUI has one to send */
 	if (s->dev_config &&
-	    (full || memcmp(s->dev_cmd, f->sent_config, FORMER_N_CONFIG * sizeof(uint32_t)) != 0)) {
+	    memcmp(s->dev_cmd, f->sent_config, FORMER_N_CONFIG * sizeof(uint32_t)) != 0) {
 		if ((r = write_block(&f->fw, m->config, s->dev_cmd, FORMER_N_CONFIG)) < 0)
 			return r;
 		memcpy(f->sent_config, s->dev_cmd, FORMER_N_CONFIG * sizeof(uint32_t));
@@ -632,7 +759,7 @@ static int former_sync(void *h, struct ofm_shm *s, bool full)
 	for (int i = FORMER_N_CONFIG; m->amp && s->dev_config &&
 	     i < FORMER_N_CONFIG + FORMER_N_AMP_IN; i++) {
 		uint32_t c = s->dev_cmd[i];
-		if (!(c & FORMER_AMP_VALID) || (!full && c == f->sent_config[i]))
+		if (!(c & FORMER_AMP_VALID) || c == f->sent_config[i])
 			continue;
 		if ((r = write_quadlet(&f->fw, m->amp, c & ~FORMER_AMP_VALID)) < 0)
 			return r;
@@ -643,7 +770,7 @@ static int former_sync(void *h, struct ofm_shm *s, bool full)
 		uint32_t block[FORMER_MAX_BLOCK];
 		size_t len = sizeof(uint32_t) * 2 * (size_t)m->avail;
 		routes += former_mixer_block(m, s, o, block);
-		if (full || memcmp(block, f->sent_mix[o], len) != 0) {
+		if (memcmp(block, f->sent_mix[o], len) != 0 && in_slice(&f->fw)) {
 			r = write_block(&f->fw, FORMER_MIXER + len * (uint64_t)o, block, 2 * m->avail);
 			if (r < 0)
 				return r;
@@ -651,7 +778,7 @@ static int former_sync(void *h, struct ofm_shm *s, bool full)
 		}
 		/* the output volume goes down to silence, so mute is just volume 0 */
 		uint32_t v = former_encode_gain(s->out_gain[o]);
-		if (full || v != f->sent_vol[o]) {
+		if (v != f->sent_vol[o] && in_slice(&f->fw)) {
 			if ((r = write_block(&f->fw, m->output + 4 * (uint64_t)o, &v, 1)) < 0)
 				return r;
 			/* the 400 sets its analog output amplifiers to match */
@@ -661,9 +788,8 @@ static int former_sync(void *h, struct ofm_shm *s, bool full)
 			f->sent_vol[o] = v;
 		}
 	}
-	f->sent_valid = true;
 	f->routes = routes;
-	return 0;
+	return 0;   /* what the slice had no time for goes out on the next ticks */
 }
 
 static int former_routes(void *h)
@@ -686,8 +812,9 @@ static int former_meters(void *h, struct ofm_shm *s)
 	{							\
 		.key = k,					\
 		.name = n,					\
-		.out_node_prefix = "alsa_output.firewire-0x000a35",	\
+		.out_node = out_node,				\
 		.meter_us = 30000,				\
+		.meter_idle_us = 1000000,			\
 		.create = create_fn,				\
 		.destroy = former_destroy,			\
 		.open = former_open,				\

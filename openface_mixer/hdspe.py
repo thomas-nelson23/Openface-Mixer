@@ -21,19 +21,29 @@ import re
 
 HDSPM, HDSPE = "HDSPM", "HDSPe"       # ALSA driver names of snd-hdspm and snd-hdspe
 VENDOR_RME = 0x1d18                   # PCI vendor of the 2022-and-later cards (older: Xilinx)
+PCI_VENDORS = (0x10ee, VENDOR_RME)    # Xilinx, RME
+PCI_DEVICE = 0x3fc6                   # every card of the family; the PCI revision tells them apart
+GAIN_MAX = 65535 / 32768              # the mixer's highest gain, +6 dB (engine/hdspe.h)
+HDSPM_RATES = (32000, 44100, 48000, 64000, 88200, 96000, 128000, 176400, 192000)   # Internal Clock
 
 
 class Model:
     key = ""
     card = ""                 # ALSA card short name, before the serial ("_1a2b3c") if any
-    sink_channels = ""        # what playback channels 1/2 are called
+    pci_revisions = ()        # as snd-hdspm's probe tells the cards apart
     phones_pairs = ()
     # (label, snd-hdspm sync check, frequency control) for the INPUT STATUS box; snd-hdspe
     # reports the same inputs, named after its Preferred AutoSync Reference items
     status_inputs = ()
+    extension = ()            # channels of optional boards: no strips yet, the engine mixes them
 
     def channels(self, kind, mode):
         raise NotImplementedError
+
+    def pcm_channels(self, kind, mode):
+        """The channels in the order of the drivers' PCM channels (their channel_map_*
+        tables, the same in snd-hdspm and snd-hdspe)."""
+        return self.channels(kind, mode)
 
     def chan_label(self, kind, c, mode):
         raise NotImplementedError
@@ -59,7 +69,7 @@ def _status(*labels, check="SyncCheck"):
 class RayDAT(Model):
     key = "raydat"
     card = "RME RayDAT"
-    sink_channels = "A1 1/2"          # the driver's PCM channels start with ADAT 1
+    pci_revisions = (211,)
     first_adat = 4
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT 1", "ADAT 2", "ADAT 3",
                             "ADAT 4", "TCO", "Sync In")
@@ -70,6 +80,10 @@ class RayDAT(Model):
 
     def channels(self, kind, mode):
         return list(range(self.n_channels(mode)))
+
+    def pcm_channels(self, kind, mode):
+        chans = self.channels(kind, mode)       # ADAT 1-4, then AES and S/PDIF
+        return chans[self.first_adat:] + chans[:self.first_adat]
 
     def chan_label(self, kind, c, mode):
         if c < 2:
@@ -84,16 +98,21 @@ class RayDAT(Model):
 class AIO(Model):
     key = "aio"
     card = "RME AIO"
-    sink_channels = "AN 1/2"
+    pci_revisions = (212,)            # the AIO Pro too
     phones_pairs = (3,)               # PH L/R, channels 6/7
     first_adat = 12
     status_inputs = _status("Word Clock", "AES", "S/PDIF", "ADAT", "TCO", "Sync In")
     NAMES = {0: "AN 1", 1: "AN 2", 6: "PH L", 7: "PH R", 8: "AES L", 9: "AES R",
              10: "SPDIF L", 11: "SPDIF R"}
+    extension = (2, 3, 4, 5)          # AI4S/AO4S
 
     def channels(self, kind, mode):
         fixed = [0, 1] + ([6, 7] if kind != "in" else []) + [8, 9, 10, 11]
         return fixed + list(range(self.first_adat, self.first_adat + 8 // mode))
+
+    def pcm_channels(self, kind, mode):
+        adat = list(range(self.first_adat, self.first_adat + 8 // mode))
+        return [0, 1, 8, 9, 10, 11] + adat + ([6, 7] if kind != "in" else [])   # phones last
 
     def chan_label(self, kind, c, mode):
         if c >= self.first_adat:
@@ -114,7 +133,7 @@ class AIOPro(AIO):
 class AES(Model):
     key = "aes"
     card = "RME AES32"
-    sink_channels = "AES 1/2"
+    pci_revisions = (240, 230, 231, 232, 233, 234)
     status_inputs = _status("Word Clock", *(f"AES {n}" for n in range(1, 9)), "TCO", "Sync In",
                             check="Sync Check")
 
@@ -201,6 +220,23 @@ def driver_usable(driver, pci_vendor):
     return not (driver == HDSPM and pci_vendor == VENDOR_RME)
 
 
+def limited(gains, out_gains, n_src):
+    """The (output, source) crosspoints the card can't play as set. It has no output fader: the
+    engine folds the output level into every send (gains[out * n_src + src] * out_gains[out]),
+    and the mixer stops at +6 dB."""
+    return {(o, k) for o, master in enumerate(out_gains) if master > 0
+            for k in range(n_src) if gains[o * n_src + k] * master > GAIN_MAX}
+
+
+def hdspm_rate(measured, set_item):
+    """The rate a card runs at under snd-hdspm, as the engine's hdspe_hdspm_rate: "System Sample
+    Rate" is its clock measured at single speed (47998, also at 96 and 192 kHz), and the
+    "Internal Clock" item is the rate that was set, which holds the speed."""
+    rate = next((r for r in HDSPM_RATES if abs(measured - r) < r / 50), measured)
+    speed = 4 if (set_item or 0) >= 6 else 2 if (set_item or 0) >= 3 else 1
+    return rate * speed if rate < 56000 else rate
+
+
 def profile(ctrls):
     """Which driver's controls these are: HDSPE, HDSPM, or None if neither."""
     if not ctrls:
@@ -264,9 +300,10 @@ def _hdspe_rate(ctrls):
 
 def decode_status(ctrls, model=MODELS["raydat"]):
     """The CLOCK and INPUT STATUS boxes from amixer's controls (hardware.parse_amixer_contents):
-    {"driver", "source", "rate", "inputs": [(label, state, rate text)], "running",
-    "firmware"}, inputs without the optional TCO module left out. None if the card's controls
-    are missing."""
+    {"driver", "source", "mode", "rate", "inputs": [(label, state, rate text)], "running",
+    "firmware"}, inputs without the optional TCO module left out. "mode" is the clock mode the
+    card really runs in: "AutoSync" only while it follows an input, None while it waits for
+    one on its own clock. None if the card's controls are missing."""
     drv = profile(ctrls)
     if drv is None:
         return None
@@ -284,14 +321,19 @@ def decode_status(ctrls, model=MODELS["raydat"]):
             f = item(ctrls, freq)
             inputs.append((label, state,
                            f if state in ("Lock", "Sync") and f != "No Lock" else None))
-        rate = ctrls.get("System Sample Rate", {}).get("value") or 0
+        rate = hdspm_rate(ctrls.get("System Sample Rate", {}).get("value") or 0,
+                          (control(ctrls, "internal")[1] or {}).get("value"))
         current = None
     if mode == "AutoSync":
         source = "AutoSync, prefers " + (_label(item(ctrls, control(ctrls, "pref")[0])) or "?")
         if current:
             source = f"AutoSync, on {current}"
+        # snd-hdspm doesn't name the input in use on these cards; AutoSync takes any valid one
+        if current == "Internal" or not (current or any(i[1] in ("Lock", "Sync")
+                                                          for i in inputs)):
+            mode = None
     else:
         source = mode or "—"
     running = (ctrls.get("Running") or {}).get("value")
-    return {"driver": drv, "source": source, "rate": rate, "inputs": inputs,
+    return {"driver": drv, "source": source, "mode": mode, "rate": rate, "inputs": inputs,
             "running": bool(running), "firmware": (ctrls.get("Firmware Build") or {}).get("value")}

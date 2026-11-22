@@ -9,6 +9,7 @@ decides what a received message does.
 """
 import os
 import socket
+import threading
 import time
 from pathlib import Path
 
@@ -17,9 +18,10 @@ from PySide6.QtNetwork import QHostAddress, QUdpSocket
 from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QLineEdit, QSpinBox
 
 from . import APP_ID, APP_NAME
-from . import osc_remote
+from . import osc_remote, tray
+from .config import launcher, load_ui, save_ui
 from .osc_remote import remote_settings  # noqa: F401  (MainWindow imports it from here)
-from .settings_panel import CYAN, OFF, RED, light
+from .settings_panel import CYAN, OFF, RED, WideList, light
 from .theme import Section, key_label
 
 CLIENT_TIMEOUT_S = 60
@@ -48,20 +50,22 @@ def set_autostart(on, device_key, device_name):
             "[Desktop Entry]\nType=Application\n"
             f"Name={APP_NAME} ({device_name}, background)\n"
             "Comment=Keeps the mixer and its network remote running without a window\n"
-            f"Exec=openface-mixer --background --device {device_key}\n"
+            f'Exec="{launcher()}" --background --device {device_key}\n'
             "Icon=audio-card\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
     else:
         f.unlink(missing_ok=True)
 
 
-def resolve_target(host, port):
-    """(address text, port) for the Send to host, or None if it is empty or unknown."""
+def resolve_target(host, port, lookup=True):
+    """(address text, port) for the Send to host, or None if it is empty or unknown. Without
+    lookup only an address is taken: a name can take as long as the name server does."""
     host = (host or "").strip()
     if not host or not 0 < port < 65536:
         return None
     try:
-        return socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4][0], port
-    except (OSError, IndexError):
+        return socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM,
+                                  flags=0 if lookup else socket.AI_NUMERICHOST)[0][4][0], port
+    except (OSError, IndexError, UnicodeError):     # UnicodeError: no host name ("a..b")
         return None
 
 
@@ -70,6 +74,7 @@ class RemoteLink(QObject):
     state requests through send_state() and publishes its changes with publish()."""
     received = Signal(str, list)
     status_changed = Signal(str)
+    _looked_up = Signal(str, int, object)  # a host name's lookup has finished on its thread
 
     def __init__(self, snapshot, parent=None):
         """snapshot: callable returning osc_remote.snapshot() for the current state."""
@@ -79,6 +84,8 @@ class RemoteLink(QObject):
         self.clients = {}                  # (address, port) -> time of last packet
         self.target = None                 # (address, port) everything is also sent to
         self.target_error = None           # the Send to host, if it could not be resolved
+        self._wanted = ("", 0)             # the Send to host and port as last set
+        self._looked_up.connect(self._lookup_done)
         self.sent = {}                     # what the clients were last told
         self.levels_on = True
         self._levels = {}                  # level address -> highest dB since the last send
@@ -140,9 +147,34 @@ class RemoteLink(QObject):
         return f"listening on UDP {port} · {n} controller{'s' if n != 1 else ''}"
 
     def set_target(self, host, port):
-        """Also send state and levels to host:port (empty host: only to the controllers)."""
+        """Also send state and levels to host:port (empty host: only to the controllers). An
+        address is used at once. A name is looked up on a thread of its own, so a slow name
+        server can't freeze the window; until the answer is in, a new name gets nothing and
+        an unchanged one keeps its address."""
+        host = (host or "").strip()
+        changed, self._wanted = (host, port) != self._wanted, (host, port)
+        target = resolve_target(host, port, lookup=False)
+        if target is None and host:
+            threading.Thread(target=self._lookup, args=(host, port), name="ofm-lookup",
+                             daemon=True).start()
+            if changed:
+                self._use_target(None, None)
+        else:
+            self._use_target(target, None)
+
+    def _lookup(self, host, port):
         target = resolve_target(host, port)
-        self.target_error = host.strip() if host.strip() and target is None else None
+        try:
+            self._looked_up.emit(host, port, target)
+        except RuntimeError:
+            pass                           # the window has gone meanwhile
+
+    def _lookup_done(self, host, port, target):
+        if (host, port) == self._wanted:   # not the answer to an older question
+            self._use_target(target, None if target else host)
+
+    def _use_target(self, target, error):
+        self.target_error = error
         if target != self.target:
             self.target = target
             self.sent = {}                 # the new target gets the whole state next
@@ -191,9 +223,14 @@ class RemoteLink(QObject):
         if diff:
             self._send(osc_remote.encode_bundles(osc_remote.messages(diff)), targets)
 
+    def wants_levels(self):
+        """True while peak levels go out to someone: the window keeps reading the meters for
+        that, shown or not."""
+        return self.sock is not None and self.levels_on and bool(self.clients or self.target)
+
     def add_peaks(self, kind, channels, peaks):
         """Linear peaks read from the engine; the highest per channel is kept until sent."""
-        if not self.levels_on or not (self.clients or self.target):
+        if not self.wants_levels():
             return
         seg = osc_remote.LEVEL_SEGS[kind]
         for c in channels:
@@ -217,9 +254,11 @@ class RemoteLink(QObject):
 
 
 class RemotePanel(Section):
-    """Sidebar section: switch the remote on, its port, levels, and start at login.
-    Emits changed() after editing st["remote"]."""
+    """Sidebar section: switch the remote on, its port, levels, start at login and the tray
+    icon. Emits changed() after editing st["remote"], tray_changed() after saving the Tray icon
+    setting."""
     changed = Signal()
+    tray_changed = Signal()
 
     def __init__(self, st, dev, parent=None):
         super().__init__("NETWORK REMOTE", parent)
@@ -236,7 +275,7 @@ class RemotePanel(Section):
         g.addWidget(self.enabled, 0, 0, 1, 2)
         g.addWidget(key_label("UDP port"), 1, 0)
         self.port = QSpinBox()
-        self.port.setRange(1024, 65535)
+        self.port.setRange(osc_remote.PORTS["port"][0], osc_remote.PORTS["port"][-1])
         self.port.setValue(r["port"])
         self.port.editingFinished.connect(self._edit)
         g.addWidget(self.port, 1, 1)
@@ -250,7 +289,7 @@ class RemotePanel(Section):
         g.addWidget(self.host, 2, 1)
         g.addWidget(key_label("Port out"), 3, 0)
         self.out_port = QSpinBox()
-        self.out_port.setRange(1, 65535)
+        self.out_port.setRange(osc_remote.PORTS["out_port"][0], osc_remote.PORTS["out_port"][-1])
         self.out_port.setValue(r["out_port"])
         self.out_port.editingFinished.connect(self._edit)
         g.addWidget(self.out_port, 3, 1)
@@ -265,11 +304,23 @@ class RemotePanel(Section):
         self.autostart = QCheckBox("Start at login, no window")
         self.autostart.setToolTip(f"Starts the {dev.name.replace('RME ', '')} mixer at login and "
                                   "keeps it, the ARC USB and the network remote running without "
-                                  "a window. Opening Openface Mixer shows the window; Ctrl+Q "
-                                  "quits it.")
+                                  "a window. The tray icon or opening Openface Mixer shows "
+                                  "the window; Quit in the tray menu or Ctrl+Q quits it.")
         self.autostart.setChecked(autostart_enabled(dev.key))
+        if self.autostart.isChecked():      # keep the entry's command path current
+            set_autostart(True, dev.key, dev.name)
         self.autostart.toggled.connect(lambda on: set_autostart(on, self.dev.key, self.dev.name))
         g.addWidget(self.autostart, 6, 0, 1, 2)
+        g.addWidget(key_label("Tray icon"), 7, 0)
+        self.tray_mode = WideList()
+        for value, text in tray.MODES:
+            self.tray_mode.addItem(text, value)
+        self.tray_mode.setCurrentIndex(self.tray_mode.findData(tray.mode(load_ui().get("tray"))))
+        self.tray_mode.setToolTip("When Openface Mixer has an icon in the system tray. While it "
+                                  "is there, closing the window only hides it. Needs a desktop "
+                                  "with a system tray.")
+        self.tray_mode.activated.connect(self._tray_mode_chosen)
+        g.addWidget(self.tray_mode, 7, 1)
         g.setColumnStretch(1, 1)
         self.set_status("off")
 
@@ -282,15 +333,19 @@ class RemotePanel(Section):
         r["levels"] = self.levels.isChecked()
         self.changed.emit()
 
+    def _tray_mode_chosen(self, i):
+        save_ui(tray=self.tray_mode.itemData(i))
+        self.tray_changed.emit()
+
     def set_status(self, s, target_error=None):
         if target_error:
-            self.status.setText(light(RED, "Unknown host", False))
+            self.status.setText(light(RED, "Unknown host"))
             self.status.setToolTip(f"{s}; Send to host “{target_error}” could not be resolved")
         elif s.startswith("error"):
-            self.status.setText(light(RED, "Error", False))
+            self.status.setText(light(RED, "Error"))
             self.status.setToolTip(s)
         elif s == "off":
-            self.status.setText(light(OFF, "Off", False))
+            self.status.setText(light(OFF, "Off"))
             self.status.setToolTip("")
         else:
             self.status.setText(light(CYAN, s.replace("listening on UDP ", "Listening · ", 1)))
