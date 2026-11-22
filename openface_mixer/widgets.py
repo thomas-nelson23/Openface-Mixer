@@ -92,14 +92,21 @@ class Meter(QWidget):
             self.update()
 
     def reset_peak(self):
+        """Clear the clip LEDs, the peak readout and the hold line, as a click in TotalMix does.
+        The next meter update shows whatever is playing now, so a channel only goes red again
+        if it clips again."""
         self.clip = [False] * len(self.clip)
+        self.holds = [(0.0, 0.0)] * len(self.holds)
         self.max_peak = 0.0
         self._shown_peak = None
         self.peak_changed.emit(NEG_INF)
         self.update()
 
     def mousePressEvent(self, e):
-        self.reset_peak()
+        if e.button() == Qt.LeftButton:
+            self.reset_peak()
+        else:
+            super().mousePressEvent(e)
 
     def _frac(self, lin):
         db = lin2db(lin)
@@ -673,7 +680,8 @@ class Strip(QFrame):
         self.value.setToolTip(LEVEL_TIP)
         self._limited = ""
         self.peak = lcd_label("-∞")
-        self.peak.setToolTip("Peak level (dBFS) — click the meter to reset")
+        self.peak.setToolTip("Peak level (dBFS) · click to reset peak / clip")
+        self.peak.setCursor(Qt.PointingHandCursor)
         readouts.addWidget(self.value)
         readouts.addWidget(self.peak)
         lay.addLayout(readouts)
@@ -785,6 +793,14 @@ class Strip(QFrame):
     def set_fader(self, db):
         self.fader.set_db(db)
         self.value.setText(fmt_db(db))
+
+    def mousePressEvent(self, e):
+        # the peak readout is a plain label, so its clicks land here: reset like the meter does
+        if (e.button() == Qt.LeftButton and self.peak.isVisible()
+                and self.peak.geometry().contains(e.position().toPoint())):
+            self.meter.reset_peak()
+        else:
+            super().mousePressEvent(e)
 
     def set_limited(self, why):
         """Mark the level readout, as a clipped peak, while the hardware can't play the level
